@@ -25,4 +25,7 @@ data class ScreenApp(
 ) {
     val displayLabel: String
         get() = customLabel?.takeIf { it.isNotBlank() } ?: defaultLabel
+
+    val isProfileRemoved: Boolean
+        get() = userSerialNumber != 0L && userHandle == null
 }

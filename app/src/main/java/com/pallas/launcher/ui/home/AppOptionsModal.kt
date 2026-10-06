@@ -105,7 +105,7 @@ fun AppOptionsModal(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AppIconImage(
-                    packageName = app.packageName,
+                    app = app,
                     size = 54.dp,
                     shapeRadius = 14.dp
                 )
@@ -168,7 +168,7 @@ fun AppOptionsModal(
                 }
             }
 
-            // Expressive Action Group
+            // Actions Group
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -176,35 +176,35 @@ fun AppOptionsModal(
                     .background(cardTonal)
             ) {
                 if (!isOnHomeScreen) {
-                    ExpressiveActionTile(
+                    AppOptionTile(
                         title = "Add to Screen",
                         onClick = { runAndDismiss(onAddToScreen) }
                     )
                     Divider(surfaceContainer)
                 }
 
-                ExpressiveActionTile(
+                AppOptionTile(
                     title = "Set Search Alias",
                     onClick = { runAndDismiss(onSetAlias) }
                 )
 
                 Divider(surfaceContainer)
 
-                ExpressiveActionTile(
+                AppOptionTile(
                     title = "Rename Display Label",
                     onClick = { runAndDismiss(onRenameApp) }
                 )
 
                 Divider(surfaceContainer)
 
-                ExpressiveActionTile(
+                AppOptionTile(
                     title = "Hide App",
                     onClick = { runAndDismiss(onHideApp) }
                 )
 
                 Divider(surfaceContainer)
 
-                ExpressiveActionTile(
+                AppOptionTile(
                     title = "App Info & Permissions",
                     onClick = { runAndDismiss(onOpenAppInfo) }
                 )
@@ -212,7 +212,7 @@ fun AppOptionsModal(
                 if (isOnHomeScreen) {
                     Divider(surfaceContainer)
 
-                    ExpressiveActionTile(
+                    AppOptionTile(
                         title = "Remove from this Screen",
                         titleColor = colorScheme.error,
                         onClick = { runAndDismiss(onRemoveFromScreen) }
@@ -221,7 +221,7 @@ fun AppOptionsModal(
 
                 Divider(surfaceContainer)
 
-                ExpressiveActionTile(
+                AppOptionTile(
                     title = "Uninstall",
                     titleColor = colorScheme.error,
                     onClick = { runAndDismiss(onUninstall) }
@@ -257,7 +257,7 @@ private fun Divider(color: Color) {
 }
 
 @Composable
-private fun ExpressiveActionTile(
+private fun AppOptionTile(
     title: String,
     onClick: () -> Unit,
     titleColor: Color? = null

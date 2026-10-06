@@ -3,7 +3,6 @@ package com.pallas.launcher
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -23,28 +22,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-
-        onBackPressedDispatcher.addCallback(this) {
-            if (viewModel.isAppDrawerOpen.value) {
-                viewModel.setAppDrawerOpen(false)
-            } else if (viewModel.isSearchActive.value) {
-                viewModel.setSearchActive(false)
-            } else if (viewModel.isSettingsOpen.value) {
-                viewModel.closeSettings()
-            } else if (viewModel.isScreenEditorOpen.value) {
-                viewModel.closeScreenEditor()
-            } else if (viewModel.isAppPickerOpen.value) {
-                viewModel.closeAppPicker()
-            } else if (viewModel.appToCustomize.value != null) {
-                viewModel.setAppToCustomize(null)
-            } else {
-                // If on secondary screen, go to home screen (screen 0)
-                if (viewModel.currentScreenIndex.value != 0) {
-                    viewModel.setScreenIndex(0)
-                }
-            }
-        }
 
         setContent {
             val settings by viewModel.settings.collectAsState()

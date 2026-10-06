@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
+import android.os.Process
+import android.os.UserHandle
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pallas.launcher.data.repository.AppRepository
@@ -13,35 +15,52 @@ import com.pallas.launcher.data.repository.AppUsageTracker
 import com.pallas.launcher.data.repository.ScreenRepository
 import com.pallas.launcher.data.repository.SettingsRepository
 import com.pallas.launcher.domain.model.AppItem
+import com.pallas.launcher.domain.model.AppsHorizontalAlignment
+import com.pallas.launcher.domain.model.AppsVerticalPosition
+import com.pallas.launcher.domain.model.ClockHorizontalAlignment
+import com.pallas.launcher.domain.model.ClockVerticalPosition
+import com.pallas.launcher.domain.model.EdgeScrubPosition
+import com.pallas.launcher.domain.model.EdgeScrubReleaseAction
 import com.pallas.launcher.domain.model.GestureAction
 import com.pallas.launcher.domain.model.HomeScreen
 import com.pallas.launcher.domain.model.LauncherSettings
 import com.pallas.launcher.domain.model.ScreenApp
+import com.pallas.launcher.domain.model.ThemeMode
 import com.pallas.launcher.domain.search.AppSearchResult
 import com.pallas.launcher.domain.search.SearchEngine
 import com.pallas.launcher.platform.BatteryManagerHelper
 import com.pallas.launcher.platform.SystemActionsManager
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+sealed interface LauncherOverlay {
+    data object None : LauncherOverlay
+    data object Drawer : LauncherOverlay
+    data object Search : LauncherOverlay
+    data object Settings : LauncherOverlay
+    data object AppPicker : LauncherOverlay
+    data class AppOptions(val app: ScreenApp) : LauncherOverlay
+}
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context = application.applicationContext
 
-    val settingsRepository = SettingsRepository(context)
+    private val settingsRepository = SettingsRepository(context)
     val appRepository = AppRepository(context, viewModelScope, settingsRepository)
-    val screenRepository = ScreenRepository(context)
+    private val screenRepository = ScreenRepository(context)
 
     val installedApps: StateFlow<List<AppItem>> = appRepository.installedApps
+    val isAppsLoaded: StateFlow<Boolean> = appRepository.isLoaded
     val screens: StateFlow<List<HomeScreen>> = screenRepository.screens
     val settings: StateFlow<LauncherSettings> = settingsRepository.settings
 
@@ -68,36 +87,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _searchResults = MutableStateFlow<List<AppSearchResult>>(emptyList())
     val searchResults: StateFlow<List<AppSearchResult>> = _searchResults.asStateFlow()
 
-    private val _isSearchActive = MutableStateFlow(false)
-    val isSearchActive: StateFlow<Boolean> = _isSearchActive.asStateFlow()
+    // Overlay state
+    private val _overlay = MutableStateFlow<LauncherOverlay>(LauncherOverlay.None)
+    val overlay: StateFlow<LauncherOverlay> = _overlay.asStateFlow()
 
-    // Screen editing & settings dialogs
-    private val _isSettingsOpen = MutableStateFlow(false)
-    val isSettingsOpen: StateFlow<Boolean> = _isSettingsOpen.asStateFlow()
+    // Convenience mappings for components observing individual overlay visibility
+    val isAppDrawerOpen: StateFlow<Boolean> = _overlay
+        .map { it is LauncherOverlay.Drawer }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    private val _isScreenEditorOpen = MutableStateFlow(false)
-    val isScreenEditorOpen: StateFlow<Boolean> = _isScreenEditorOpen.asStateFlow()
+    val isSearchActive: StateFlow<Boolean> = _overlay
+        .map { it is LauncherOverlay.Search }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    private val _isAppPickerOpen = MutableStateFlow(false)
-    val isAppPickerOpen: StateFlow<Boolean> = _isAppPickerOpen.asStateFlow()
+    val isSettingsOpen: StateFlow<Boolean> = _overlay
+        .map { it is LauncherOverlay.Settings }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    private val _appToCustomize = MutableStateFlow<ScreenApp?>(null)
-    val appToCustomize: StateFlow<ScreenApp?> = _appToCustomize.asStateFlow()
+    val isAppPickerOpen: StateFlow<Boolean> = _overlay
+        .map { it is LauncherOverlay.AppPicker }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    private val _isAppDrawerOpen = MutableStateFlow(false)
-    val isAppDrawerOpen: StateFlow<Boolean> = _isAppDrawerOpen.asStateFlow()
-
-    fun setAppDrawerOpen(open: Boolean) {
-        _isAppDrawerOpen.value = open
-    }
+    val appToCustomize: StateFlow<ScreenApp?> = _overlay
+        .map { (it as? LauncherOverlay.AppOptions)?.app }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val appUsageTracker = AppUsageTracker(context)
 
     private val searchEngine = SearchEngine(
         appUsageTracker = appUsageTracker
     )
-
-    private var timeUpdateJob: Job? = null
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
@@ -128,11 +147,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         context.registerReceiver(timeTickReceiver, timeFilter)
         updateTimeAndDate()
 
+        // Refresh time and date whenever settings change (e.g. 24-hour clock or show battery)
         viewModelScope.launch {
-            installedApps.collect { apps ->
-                if (apps.isNotEmpty()) {
-                    screenRepository.initDefaultScreenWithApps(apps)
-                }
+            settings.collect {
+                updateTimeAndDate()
             }
         }
 
@@ -193,12 +211,77 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setSearchActive(active: Boolean) {
-        _isSearchActive.value = active
-        if (!active) {
+    // Overlay controls
+    fun openDrawer() {
+        _overlay.value = LauncherOverlay.Drawer
+    }
+
+    fun closeDrawer() {
+        if (_overlay.value is LauncherOverlay.Drawer) {
+            _overlay.value = LauncherOverlay.None
+        }
+    }
+
+    fun setAppDrawerOpen(open: Boolean) {
+        if (open) openDrawer() else closeDrawer()
+    }
+
+    fun openSearch() {
+        _overlay.value = LauncherOverlay.Search
+    }
+
+    fun closeSearch() {
+        if (_overlay.value is LauncherOverlay.Search) {
+            _overlay.value = LauncherOverlay.None
             _searchQuery.value = ""
             _searchResults.value = emptyList()
         }
+    }
+
+    fun setSearchActive(active: Boolean) {
+        if (active) openSearch() else closeSearch()
+    }
+
+    fun openSettings() {
+        _overlay.value = LauncherOverlay.Settings
+    }
+
+    fun closeSettings() {
+        if (_overlay.value is LauncherOverlay.Settings) {
+            _overlay.value = LauncherOverlay.None
+        }
+    }
+
+    fun openAppPicker() {
+        _overlay.value = LauncherOverlay.AppPicker
+    }
+
+    fun closeAppPicker() {
+        if (_overlay.value is LauncherOverlay.AppPicker) {
+            _overlay.value = LauncherOverlay.None
+        }
+    }
+
+    fun showAppOptions(app: ScreenApp) {
+        _overlay.value = LauncherOverlay.AppOptions(app)
+    }
+
+    fun dismissAppOptions() {
+        if (_overlay.value is LauncherOverlay.AppOptions) {
+            _overlay.value = LauncherOverlay.None
+        }
+    }
+
+    fun setAppToCustomize(app: ScreenApp?) {
+        if (app != null) showAppOptions(app) else dismissAppOptions()
+    }
+
+    fun dismissOverlay() {
+        if (_overlay.value is LauncherOverlay.Search) {
+            _searchQuery.value = ""
+            _searchResults.value = emptyList()
+        }
+        _overlay.value = LauncherOverlay.None
     }
 
     fun onSearchQueryChanged(query: String) {
@@ -211,14 +294,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun launchSearchResult(result: AppSearchResult) {
-        setSearchActive(false)
+        dismissOverlay()
         appUsageTracker.recordAppLaunch(result.app.packageName)
         appRepository.launchApp(result.app.packageName, result.app.activityName, result.app.userHandle)
     }
 
     fun executeGesture(action: GestureAction) {
         when (action) {
-            is GestureAction.OpenSearch -> setSearchActive(true)
+            is GestureAction.OpenSearch -> openSearch()
             is GestureAction.OpenNotifications -> SystemActionsManager.expandStatusBar(context)
             is GestureAction.OpenQuickSettings -> SystemActionsManager.expandQuickSettings(context)
             is GestureAction.OpenCamera -> SystemActionsManager.openCamera(context)
@@ -236,28 +319,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         SystemActionsManager.openCalendar(context)
     }
 
-    fun openSettings() {
-        _isSettingsOpen.value = true
+    fun launchApp(packageName: String, activityName: String? = null, userHandle: UserHandle? = null) {
+        appRepository.launchApp(packageName, activityName, userHandle)
     }
 
-    fun closeSettings() {
-        _isSettingsOpen.value = false
-    }
-
-    fun openScreenEditor() {
-        _isScreenEditorOpen.value = true
-    }
-
-    fun closeScreenEditor() {
-        _isScreenEditorOpen.value = false
-    }
-
-    fun openAppPicker() {
-        _isAppPickerOpen.value = true
-    }
-
-    fun closeAppPicker() {
-        _isAppPickerOpen.value = false
+    fun openAppInfo(packageName: String, activityName: String? = null, userHandle: UserHandle? = null) {
+        appRepository.openAppInfo(packageName, activityName, userHandle)
     }
 
     fun getShortcutsForApp(packageName: String): List<android.content.pm.ShortcutInfo> {
@@ -280,24 +347,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun launchShortcut(packageName: String, shortcutId: String, userHandle: android.os.UserHandle? = null) {
-        val handle = userHandle ?: android.os.Process.myUserHandle()
+    fun launchShortcut(packageName: String, shortcutId: String, userHandle: UserHandle? = null) {
+        val handle = userHandle ?: Process.myUserHandle()
         SystemActionsManager.launchShortcut(context, packageName, shortcutId, handle)
     }
 
-    fun setAppToCustomize(app: ScreenApp?) {
-        _appToCustomize.value = app
-    }
-
     fun resetToHomeScreen() {
-        _isSearchActive.value = false
-        _isSettingsOpen.value = false
-        _isScreenEditorOpen.value = false
-        _isAppPickerOpen.value = false
-        _isAppDrawerOpen.value = false
-        _appToCustomize.value = null
+        dismissOverlay()
         _currentScreenIndex.value = 0
     }
+
+    // --- Screen repository actions (ViewModel façade) ---
+    fun addScreen(name: String, contextTag: String? = null) = screenRepository.addScreen(name, contextTag)
+    fun renameScreen(screenId: String, newName: String, newContextTag: String? = null) = screenRepository.renameScreen(screenId, newName, newContextTag)
+    fun moveScreen(fromIndex: Int, toIndex: Int) = screenRepository.moveScreen(fromIndex, toIndex)
+    fun removeScreen(screenId: String) = screenRepository.removeScreen(screenId)
+    fun addAppToScreen(screenId: String, appItem: AppItem, customLabel: String? = null) = screenRepository.addAppToScreen(screenId, appItem, customLabel)
+    fun removeAppFromScreen(screenId: String, uniqueKey: String) = screenRepository.removeAppFromScreen(screenId, uniqueKey)
+    fun updateAppLabelAcrossScreens(uniqueKey: String, newLabel: String) = screenRepository.updateAppLabelAcrossScreens(uniqueKey, newLabel)
+    fun updateAppLabel(screenId: String, uniqueKey: String, newLabel: String) = screenRepository.updateAppLabel(screenId, uniqueKey, newLabel)
+    fun reorderApps(screenId: String, reordered: List<ScreenApp>) = screenRepository.reorderApps(screenId, reordered)
+
+    // --- Settings repository actions (ViewModel façade) ---
+    fun updateThemeMode(theme: ThemeMode) = settingsRepository.updateThemeMode(theme)
+    fun updateWallpaperScrim(scrim: Boolean) = settingsRepository.updateWallpaperScrim(scrim)
+    fun updateHideStatusBar(hide: Boolean) = settingsRepository.updateHideStatusBar(hide)
+    fun updateClockPosition(vertical: ClockVerticalPosition, horizontal: ClockHorizontalAlignment) = settingsRepository.updateClockPosition(vertical, horizontal)
+    fun updateAppsPosition(vertical: AppsVerticalPosition, horizontal: AppsHorizontalAlignment) = settingsRepository.updateAppsPosition(vertical, horizontal)
+    fun update24HourClock(is24Hour: Boolean) = settingsRepository.update24HourClock(is24Hour)
+    fun updateShowDate(show: Boolean) = settingsRepository.updateShowDate(show)
+    fun updateShowBattery(show: Boolean) = settingsRepository.updateShowBattery(show)
+    fun updateGestureActions(
+        swipeLeft: GestureAction? = null,
+        swipeRight: GestureAction? = null,
+        swipeUp: GestureAction? = null,
+        swipeDown: GestureAction? = null
+    ) = settingsRepository.updateGestureActions(swipeLeft, swipeRight, swipeUp, swipeDown)
+    fun setAlias(alias: String, target: String) = settingsRepository.setAlias(alias, target)
+    fun removeAlias(alias: String) = settingsRepository.removeAlias(alias)
+    fun hideApp(packageName: String) = settingsRepository.hideApp(packageName)
+    fun unhideApp(packageName: String) = settingsRepository.unhideApp(packageName)
+    fun updateFontScale(scale: Float) = settingsRepository.updateFontScale(scale)
+    fun updateEdgeScrubPosition(position: EdgeScrubPosition) = settingsRepository.updateEdgeScrubPosition(position)
+    fun updateEdgeScrubReleaseAction(action: EdgeScrubReleaseAction) = settingsRepository.updateEdgeScrubReleaseAction(action)
 
     override fun onCleared() {
         try {
@@ -305,8 +397,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             context.unregisterReceiver(timeTickReceiver)
         } catch (_: Exception) {}
         appRepository.unregister()
-        timeUpdateJob?.cancel()
         super.onCleared()
     }
 }
-

@@ -31,11 +31,14 @@ class ScreenRepository(
                 HomeScreen(
                     id = "home_main",
                     name = "Home",
-                    contextTag = "General",
+                    contextTag = null,
                     apps = emptyList()
                 )
             )
         }
+
+        val myHandle = android.os.Process.myUserHandle()
+        val mySerial = try { userManager?.getSerialNumberForUser(myHandle) ?: 0L } catch (e: Exception) { 0L }
 
         val result = mutableListOf<HomeScreen>()
         try {
@@ -44,7 +47,8 @@ class ScreenRepository(
                 val screenObj = jsonArray.getJSONObject(i)
                 val id = screenObj.optString("id", UUID.randomUUID().toString())
                 val name = screenObj.optString("name", "Screen ${i + 1}")
-                val contextTag = if (screenObj.has("contextTag")) screenObj.getString("contextTag") else null
+                val rawTag = if (screenObj.has("contextTag")) screenObj.getString("contextTag") else null
+                val contextTag = rawTag?.trim()?.ifBlank { null }?.takeUnless { it.equals("General", ignoreCase = true) }
                 val appsArray = screenObj.optJSONArray("apps") ?: JSONArray()
                 val apps = mutableListOf<ScreenApp>()
                 for (j in 0 until appsArray.length()) {
@@ -55,7 +59,11 @@ class ScreenRepository(
                     val uniqueKey = appObj.optString("uniqueKey").ifBlank { "$pkg/$activity#$serial" }
                     val customLabel = if (appObj.has("customLabel")) appObj.getString("customLabel") else null
                     val defaultLabel = appObj.optString("defaultLabel", "")
-                    val handle = userManager?.getUserForSerialNumber(serial)
+                    val handle = if (serial == mySerial || (serial == 0L && mySerial == 0L)) {
+                        myHandle
+                    } else {
+                        userManager?.getUserForSerialNumber(serial)
+                    }
 
                     if (pkg.isNotBlank()) {
                         apps.add(
@@ -78,7 +86,7 @@ class ScreenRepository(
         }
 
         return if (result.isEmpty()) {
-            listOf(HomeScreen(id = "home_main", name = "Home", contextTag = "General", apps = emptyList()))
+            listOf(HomeScreen(id = "home_main", name = "Home", contextTag = null, apps = emptyList()))
         } else {
             result
         }
@@ -117,18 +125,13 @@ class ScreenRepository(
         }
     }
 
-    fun initDefaultScreenWithApps(installedApps: List<AppItem>) {
-        if (prefs.getBoolean("key_screens_seeded", false)) return
-        prefs.edit().putBoolean("key_screens_seeded", true).apply()
-    }
-
     fun addScreen(name: String, contextTag: String? = null) {
         val current = _screens.value.toMutableList()
         current.add(
             HomeScreen(
                 id = UUID.randomUUID().toString(),
-                name = name,
-                contextTag = contextTag,
+                name = name.trim(),
+                contextTag = contextTag?.trim()?.ifBlank { null },
                 apps = emptyList()
             )
         )
@@ -190,7 +193,7 @@ class ScreenRepository(
         val index = current.indexOfFirst { it.id == screenId }
         if (index != -1) {
             val screen = current[index]
-            current[index] = screen.copy(apps = screen.apps.filterNot { it.uniqueKey == uniqueKey || it.packageName == uniqueKey })
+            current[index] = screen.copy(apps = screen.apps.filterNot { it.uniqueKey == uniqueKey })
             saveScreens(current)
         }
     }
@@ -198,7 +201,7 @@ class ScreenRepository(
     fun updateAppLabelAcrossScreens(uniqueKey: String, newLabel: String) {
         val current = _screens.value.map { screen ->
             val updatedApps = screen.apps.map { app ->
-                if (app.uniqueKey == uniqueKey || app.packageName == uniqueKey) {
+                if (app.uniqueKey == uniqueKey) {
                     app.copy(customLabel = newLabel.ifBlank { null })
                 } else {
                     app
@@ -215,7 +218,7 @@ class ScreenRepository(
         if (index != -1) {
             val screen = current[index]
             val updatedApps = screen.apps.map { app ->
-                if (app.uniqueKey == uniqueKey || app.packageName == uniqueKey) {
+                if (app.uniqueKey == uniqueKey) {
                     app.copy(customLabel = newLabel.ifBlank { null })
                 } else {
                     app

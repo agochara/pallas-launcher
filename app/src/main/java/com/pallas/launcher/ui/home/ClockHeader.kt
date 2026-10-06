@@ -15,7 +15,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pallas.launcher.domain.model.ClockHorizontalAlignment
-import com.pallas.launcher.domain.model.TextAlignmentOption
 import com.pallas.launcher.ui.theme.LauncherTypography
 import com.pallas.launcher.ui.theme.LocalLauncherColors
 

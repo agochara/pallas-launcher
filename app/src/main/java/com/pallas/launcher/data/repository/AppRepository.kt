@@ -172,13 +172,6 @@ class AppRepository(
         try {
             val opts = android.app.ActivityOptions.makeCustomAnimation(context, android.R.anim.fade_in, android.R.anim.fade_out).toBundle()
             launcherApps.startMainActivity(targetComponent, targetUser, null, opts)
-        } catch (e: SecurityException) {
-            try {
-                val opts = android.app.ActivityOptions.makeCustomAnimation(context, android.R.anim.fade_in, android.R.anim.fade_out).toBundle()
-                launcherApps.startMainActivity(targetComponent, Process.myUserHandle(), null, opts)
-            } catch (ex: Exception) {
-                Toast.makeText(context, "Unable to launch app", Toast.LENGTH_SHORT).show()
-            }
         } catch (e: Exception) {
             Toast.makeText(context, "Unable to launch app", Toast.LENGTH_SHORT).show()
         }

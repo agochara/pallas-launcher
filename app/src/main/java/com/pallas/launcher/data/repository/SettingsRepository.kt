@@ -6,49 +6,34 @@ import com.pallas.launcher.domain.model.AppsHorizontalAlignment
 import com.pallas.launcher.domain.model.AppsVerticalPosition
 import com.pallas.launcher.domain.model.ClockHorizontalAlignment
 import com.pallas.launcher.domain.model.ClockVerticalPosition
+import com.pallas.launcher.domain.model.EdgeScrubPosition
+import com.pallas.launcher.domain.model.EdgeScrubReleaseAction
 import com.pallas.launcher.domain.model.GestureAction
 import com.pallas.launcher.domain.model.LauncherSettings
-import com.pallas.launcher.domain.model.TextAlignmentOption
 import com.pallas.launcher.domain.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 
-class SettingsRepository(
-    private val context: Context
-) {
-    private val prefs: SharedPreferences =
-        context.getSharedPreferences("pallas_settings", Context.MODE_PRIVATE)
+class SettingsRepository(context: Context) {
+
+    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _settings = MutableStateFlow(loadSettings())
     val settings: StateFlow<LauncherSettings> = _settings.asStateFlow()
 
-
-    private inline fun <reified T : Enum<T>> enumOrDefault(value: String?, default: T): T {
-        if (value == null) return default
-        return try {
-            java.lang.Enum.valueOf(T::class.java, value)
-        } catch (_: Exception) {
-            default
-        }
-    }
-
     private fun loadSettings(): LauncherSettings {
         val themeModeStr = prefs.getString(KEY_THEME_MODE, ThemeMode.DARK.name)
-        val themeMode = enumOrDefault(prefs.getString(KEY_THEME_MODE, null), ThemeMode.DARK)
+        val themeMode = try {
+            ThemeMode.valueOf(themeModeStr ?: ThemeMode.DARK.name)
+        } catch (_: Exception) {
+            ThemeMode.DARK
+        }
 
         val showScrim = prefs.getBoolean(KEY_WALLPAPER_SCRIM, false)
         val hideStatusBar = prefs.getBoolean(KEY_HIDE_STATUS_BAR, false)
 
-        val alignmentStr = prefs.getString(KEY_ALIGNMENT, TextAlignmentOption.RIGHT.name)
-        val alignment = try {
-            TextAlignmentOption.valueOf(alignmentStr ?: TextAlignmentOption.RIGHT.name)
-        } catch (_: Exception) {
-            TextAlignmentOption.RIGHT
-        }
-
-        val clockVertStr = prefs.getString(KEY_CLOCK_VERT, ClockVerticalPosition.TOP.name)
         val clockVert = enumOrDefault(prefs.getString(KEY_CLOCK_VERT, null), ClockVerticalPosition.TOP)
 
         val clockHorizStr = prefs.getString(KEY_CLOCK_HORIZ, ClockHorizontalAlignment.RIGHT.name)
@@ -58,7 +43,6 @@ class SettingsRepository(
             ClockHorizontalAlignment.RIGHT
         }
 
-        val appsVertStr = prefs.getString(KEY_APPS_VERT, AppsVerticalPosition.BOTTOM.name)
         val appsVert = enumOrDefault(prefs.getString(KEY_APPS_VERT, null), AppsVerticalPosition.BOTTOM)
 
         val appsHorizStr = prefs.getString(KEY_APPS_HORIZ, AppsHorizontalAlignment.RIGHT.name)
@@ -88,28 +72,15 @@ class SettingsRepository(
             }
         } catch (_: Exception) {}
 
-        val pinnedContactsSet = prefs.getStringSet(KEY_PINNED_CONTACTS, emptySet()) ?: emptySet()
-        val pinnedContactsJson = prefs.getString(KEY_PINNED_CONTACTS_MAP, "{}") ?: "{}"
-        val pinnedContactsMap = mutableMapOf<String, String>()
-        try {
-            val json = JSONObject(pinnedContactsJson)
-            val keys = json.keys()
-            while (keys.hasNext()) {
-                val key = keys.next()
-                pinnedContactsMap[key] = json.getString(key)
-            }
-        } catch (_: Exception) {}
-
         val fontScale = prefs.getFloat(KEY_FONT_SCALE, 1.0f)
         val hiddenApps = prefs.getStringSet(KEY_HIDDEN_APPS, emptySet()) ?: emptySet()
-        val edgeScrubPos = enumOrDefault(prefs.getString(KEY_EDGE_SCRUB_POS, null), com.pallas.launcher.domain.model.EdgeScrubPosition.RIGHT)
-        val edgeScrubRelease = enumOrDefault(prefs.getString(KEY_EDGE_SCRUB_RELEASE, null), com.pallas.launcher.domain.model.EdgeScrubReleaseAction.STAY_OPEN)
+        val edgeScrubPos = enumOrDefault(prefs.getString(KEY_EDGE_SCRUB_POS, null), EdgeScrubPosition.RIGHT)
+        val edgeScrubRelease = enumOrDefault(prefs.getString(KEY_EDGE_SCRUB_RELEASE, null), EdgeScrubReleaseAction.STAY_OPEN)
 
         return LauncherSettings(
             themeMode = themeMode,
             showWallpaperScrim = showScrim,
             hideStatusBar = hideStatusBar,
-            alignment = alignment,
             clockVerticalPosition = clockVert,
             clockHorizontalAlignment = clockHoriz,
             appsVerticalPosition = appsVert,
@@ -122,7 +93,6 @@ class SettingsRepository(
             swipeUpAction = GestureAction.fromString(swipeUpStr),
             swipeDownAction = GestureAction.fromString(swipeDownStr),
             customAliases = aliases,
-            pinnedContacts = pinnedContactsMap,
             appFontScale = fontScale,
             hiddenApps = hiddenApps,
             edgeScrubPosition = edgeScrubPos,
@@ -165,11 +135,6 @@ class SettingsRepository(
             appsVerticalPosition = vertical,
             appsHorizontalAlignment = horizontal
         )
-    }
-
-    fun updateAlignment(alignment: TextAlignmentOption) {
-        prefs.edit().putString(KEY_ALIGNMENT, alignment.name).apply()
-        _settings.value = _settings.value.copy(alignment = alignment)
     }
 
     fun update24HourClock(is24Hour: Boolean) {
@@ -237,54 +202,6 @@ class SettingsRepository(
         _settings.value = _settings.value.copy(customAliases = current)
     }
 
-    fun addPinnedContact(name: String, phoneNumber: String) {
-        val trimmedName = name.trim()
-        val trimmedNumber = phoneNumber.trim()
-        if (trimmedName.isBlank() || trimmedNumber.isBlank()) return
-
-        val currentMap = _settings.value.pinnedContacts.toMutableMap()
-        currentMap[trimmedName] = trimmedNumber
-
-
-        val json = JSONObject(currentMap as Map<*, *>)
-        prefs.edit()
-            .putString(KEY_PINNED_CONTACTS_MAP, json.toString())
-            .apply()
-
-        _settings.value = _settings.value.copy(
-            pinnedContacts = currentMap,
-        )
-    }
-
-    fun removePinnedContact(name: String) {
-        val trimmedName = name.trim()
-        val currentMap = _settings.value.pinnedContacts.toMutableMap()
-        val removedNumber = currentMap.remove(trimmedName)
-
-
-        val json = JSONObject(currentMap as Map<*, *>)
-        prefs.edit()
-            .putString(KEY_PINNED_CONTACTS_MAP, json.toString())
-            .apply()
-
-        _settings.value = _settings.value.copy(
-            pinnedContacts = currentMap,
-        )
-    }
-
-    fun togglePinnedContact(name: String, phoneNumber: String) {
-        val current = _settings.value.pinnedContacts.toMutableMap()
-        if (current.containsValue(phoneNumber)) {
-            val key = current.entries.find { it.value == phoneNumber }?.key
-            if (key != null) current.remove(key)
-        } else {
-            current[name] = phoneNumber
-        }
-        val json = JSONObject(current as Map<*, *>)
-        prefs.edit().putString(KEY_PINNED_CONTACTS_MAP, json.toString()).apply()
-        _settings.value = _settings.value.copy(pinnedContacts = current)
-    }
-
     fun hideApp(packageName: String) {
         val current = _settings.value.hiddenApps.toMutableSet()
         current.add(packageName)
@@ -304,17 +221,27 @@ class SettingsRepository(
         _settings.value = _settings.value.copy(appFontScale = scale)
     }
 
-    fun updateEdgeScrubPosition(position: com.pallas.launcher.domain.model.EdgeScrubPosition) {
+    fun updateEdgeScrubPosition(position: EdgeScrubPosition) {
         prefs.edit().putString(KEY_EDGE_SCRUB_POS, position.name).apply()
         _settings.value = _settings.value.copy(edgeScrubPosition = position)
     }
 
-    fun updateEdgeScrubReleaseAction(action: com.pallas.launcher.domain.model.EdgeScrubReleaseAction) {
+    fun updateEdgeScrubReleaseAction(action: EdgeScrubReleaseAction) {
         prefs.edit().putString(KEY_EDGE_SCRUB_RELEASE, action.name).apply()
         _settings.value = _settings.value.copy(edgeScrubReleaseAction = action)
     }
 
+    private inline fun <reified T : Enum<T>> enumOrDefault(value: String?, default: T): T {
+        if (value == null) return default
+        return try {
+            java.lang.Enum.valueOf(T::class.java, value)
+        } catch (_: Exception) {
+            default
+        }
+    }
+
     companion object {
+        private const val PREFS_NAME = "pallas_launcher_prefs"
         private const val KEY_THEME_MODE = "key_theme_mode"
         private const val KEY_WALLPAPER_SCRIM = "key_wallpaper_scrim"
         private const val KEY_HIDE_STATUS_BAR = "key_hide_status_bar"
@@ -322,7 +249,6 @@ class SettingsRepository(
         private const val KEY_CLOCK_HORIZ = "key_clock_horiz"
         private const val KEY_APPS_VERT = "key_apps_vert"
         private const val KEY_APPS_HORIZ = "key_apps_horiz"
-        private const val KEY_ALIGNMENT = "key_alignment"
         private const val KEY_24_HOUR = "key_24_hour"
         private const val KEY_SHOW_DATE = "key_show_date"
         private const val KEY_SHOW_BATTERY = "key_show_battery"
@@ -331,8 +257,6 @@ class SettingsRepository(
         private const val KEY_SWIPE_UP = "key_swipe_up"
         private const val KEY_SWIPE_DOWN = "key_swipe_down"
         private const val KEY_ALIASES = "key_aliases"
-        private const val KEY_PINNED_CONTACTS = "key_pinned_contacts"
-        private const val KEY_PINNED_CONTACTS_MAP = "key_pinned_contacts_map"
         private const val KEY_FONT_SCALE = "key_font_scale"
         private const val KEY_HIDDEN_APPS = "key_hidden_apps"
         private const val KEY_EDGE_SCRUB_POS = "key_edge_scrub_pos"

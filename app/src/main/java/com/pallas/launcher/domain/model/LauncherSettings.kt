@@ -1,11 +1,5 @@
 package com.pallas.launcher.domain.model
 
-enum class TextAlignmentOption {
-    LEFT,
-    CENTER,
-    RIGHT
-}
-
 enum class ThemeMode {
     DARK,
     LIGHT,
@@ -50,7 +44,6 @@ data class LauncherSettings(
     val themeMode: ThemeMode = ThemeMode.DARK,
     val showWallpaperScrim: Boolean = false,
     val hideStatusBar: Boolean = false,
-    val alignment: TextAlignmentOption = TextAlignmentOption.RIGHT, // Default/fallback
     val clockVerticalPosition: ClockVerticalPosition = ClockVerticalPosition.TOP,
     val clockHorizontalAlignment: ClockHorizontalAlignment = ClockHorizontalAlignment.RIGHT,
     val appsVerticalPosition: AppsVerticalPosition = AppsVerticalPosition.BOTTOM,
@@ -63,7 +56,6 @@ data class LauncherSettings(
     val swipeUpAction: GestureAction = GestureAction.OpenSearch,
     val swipeDownAction: GestureAction = GestureAction.OpenNotifications,
     val customAliases: Map<String, String> = emptyMap(), // alias -> package or uniqueKey
-    val pinnedContacts: Map<String, String> = emptyMap(), // name -> phone number
     val appFontScale: Float = 1.0f,
     val hiddenApps: Set<String> = emptySet(),
     val edgeScrubPosition: EdgeScrubPosition = EdgeScrubPosition.RIGHT,

@@ -1,12 +1,9 @@
 package com.pallas.launcher.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -16,7 +13,11 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.LocalContext
 import com.pallas.launcher.domain.model.ThemeMode
 
-data class LauncherColors(
+/**
+ * Scoped colors specifically for high-contrast home screen elements
+ * (Clock, date, battery, home app list) rendered over arbitrary user wallpapers.
+ */
+data class HomeLauncherColors(
     val isDark: Boolean,
     val textPrimary: Color,
     val textSecondary: Color,
@@ -28,7 +29,10 @@ data class LauncherColors(
     val shadow: Shadow
 )
 
-val DarkLauncherColors = LauncherColors(
+// Legacy alias kept for backward compatibility with existing home callers
+typealias LauncherColors = HomeLauncherColors
+
+val DarkLauncherColors = HomeLauncherColors(
     isDark = true,
     textPrimary = TextWhite,
     textSecondary = TextMuted,
@@ -44,7 +48,7 @@ val DarkLauncherColors = LauncherColors(
     )
 )
 
-val LightLauncherColors = LauncherColors(
+val LightLauncherColors = HomeLauncherColors(
     isDark = false,
     textPrimary = TextDarkPrimary,
     textSecondary = TextDarkSecondary,
@@ -62,44 +66,9 @@ val LightLauncherColors = LauncherColors(
 
 val LocalLauncherColors = staticCompositionLocalOf { DarkLauncherColors }
 
-private val DarkColorScheme = darkColorScheme(
-    primary = AccentGold,
-    onPrimary = Color(0xFF1E1E1E),
-    primaryContainer = Color(0xFF3E3524),
-    onPrimaryContainer = AccentGold,
-    secondary = TextMuted,
-    onSecondary = Color.Black,
-    tertiary = AccentGold,
-    background = Color(0xFF121212),
-    surface = Color(0xFF161616),
-    surfaceContainer = Color(0xFF1E1E1E),
-    surfaceContainerLow = Color(0xFF1A1A1A),
-    surfaceContainerHigh = Color(0xFF262626),
-    surfaceContainerHighest = Color(0xFF303030),
-    onBackground = TextWhite,
-    onSurface = TextWhite,
-    onSurfaceVariant = TextMuted
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = AccentGoldDark,
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFF3E7C4),
-    onPrimaryContainer = Color(0xFF4C3600),
-    secondary = TextDarkSecondary,
-    onSecondary = Color.White,
-    tertiary = AccentGoldDark,
-    background = Color(0xFFF2F2F7),
-    surface = Color(0xFFFBFBFD),
-    surfaceContainer = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFF7F7FA),
-    surfaceContainerHigh = Color(0xFFEBEBF0),
-    surfaceContainerHighest = Color(0xFFE2E2E8),
-    onBackground = TextDarkPrimary,
-    onSurface = TextDarkPrimary,
-    onSurfaceVariant = TextDarkDimmed
-)
-
+/**
+ * Root Launcher theme. Supplies dynamic M3 colors and scoped home wallpaper colors.
+ */
 @Composable
 fun PallasLauncherTheme(
     themeMode: ThemeMode = ThemeMode.DARK,
@@ -113,18 +82,40 @@ fun PallasLauncherTheme(
 
     val colors = if (isDark) DarkLauncherColors else LightLauncherColors
     val context = LocalContext.current
-    
-    val colorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    } else {
-        if (isDark) DarkColorScheme else LightColorScheme
-    }
+    val colorScheme = if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
 
     CompositionLocalProvider(LocalLauncherColors provides colors) {
         MaterialTheme(
             colorScheme = colorScheme,
+            shapes = ExpressiveShapes,
             typography = Typography,
             content = content
         )
     }
+}
+
+/**
+ * Material 3 Expressive theme for Settings, secondary dialogs, and picker sheets.
+ * Incorporates dynamic colors, full Typography, and ExpressiveShapes.
+ */
+@Composable
+fun MaterialExpressiveSettingsTheme(
+    themeMode: ThemeMode = ThemeMode.DARK,
+    content: @Composable () -> Unit
+) {
+    val isDark = when (themeMode) {
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+
+    val context = LocalContext.current
+    val colorScheme = if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+
+    MaterialTheme(
+        colorScheme = colorScheme,
+        shapes = ExpressiveShapes,
+        typography = Typography,
+        content = content
+    )
 }
