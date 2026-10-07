@@ -9,8 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,6 +32,10 @@ fun AppListView(
     apps: List<ScreenApp>,
     alignment: AppsHorizontalAlignment,
     fontScale: Float,
+    paddingLeftDp: Int = 32,
+    paddingRightDp: Int = 32,
+    paddingTopDp: Int = 12,
+    paddingBottomDp: Int = 24,
     isLoaded: Boolean = true,
     onAppClick: (ScreenApp) -> Unit,
     onAppLongClick: (ScreenApp) -> Unit,
@@ -58,7 +61,12 @@ fun AppListView(
         Column(
             modifier = modifier
                 .fillMaxWidth()
-                .padding(horizontal = 32.dp, vertical = 24.dp),
+                .padding(
+                    start = paddingLeftDp.dp,
+                    end = paddingRightDp.dp,
+                    top = paddingTopDp.dp,
+                    bottom = paddingBottomDp.dp
+                ),
             horizontalAlignment = horizontalAlignment
         ) {
             Text(
@@ -78,17 +86,19 @@ fun AppListView(
         return
     }
 
-    LazyColumn(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 12.dp),
+            .padding(
+                start = paddingLeftDp.dp,
+                end = paddingRightDp.dp,
+                top = paddingTopDp.dp,
+                bottom = paddingBottomDp.dp
+            ),
         horizontalAlignment = horizontalAlignment,
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        items(
-            items = apps,
-            key = { it.uniqueKey }
-        ) { app ->
+        apps.forEach { app ->
             val interactionSource = remember { MutableInteractionSource() }
             val isPressed by interactionSource.collectIsPressedAsState()
             val scale by animateFloatAsState(targetValue = if (isPressed) 0.96f else 1.0f, label = "app_scale")
@@ -104,7 +114,6 @@ fun AppListView(
                 color = colors.textPrimary,
                 textAlign = textAlign,
                 modifier = Modifier
-                    .fillMaxWidth()
                     .graphicsLayer {
                         scaleX = scale
                         scaleY = scale

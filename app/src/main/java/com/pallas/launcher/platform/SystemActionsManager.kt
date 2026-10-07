@@ -83,6 +83,20 @@ object SystemActionsManager {
         }
     }
 
+    fun callPhoneNumber(context: Context, phoneNumber: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            context.checkSelfPermission(android.Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+        ) {
+            try {
+                val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:${Uri.encode(phoneNumber)}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                return
+            } catch (_: Exception) {}
+        }
+        dialPhoneNumber(context, phoneNumber)
+    }
+
     fun sendSms(context: Context, phoneNumber: String) {
         val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${Uri.encode(phoneNumber)}"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -151,9 +165,12 @@ object SystemActionsManager {
         }
     }
 
-    fun setTimer(context: Context, durationMinutes: Int) {
+    fun setTimer(context: Context, durationSeconds: Int, message: String? = null) {
         val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
-            putExtra(AlarmClock.EXTRA_LENGTH, durationMinutes * 60)
+            putExtra(AlarmClock.EXTRA_LENGTH, durationSeconds)
+            if (!message.isNullOrBlank()) {
+                putExtra(AlarmClock.EXTRA_MESSAGE, message)
+            }
             putExtra(AlarmClock.EXTRA_SKIP_UI, false)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -162,6 +179,10 @@ object SystemActionsManager {
         } catch (_: Exception) {
             Toast.makeText(context, "Timer app not available", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    fun setTimer(context: Context, durationMinutes: Int) {
+        setTimer(context, durationMinutes * 60, null)
     }
 
     fun setAlarm(context: Context, hour: Int, minute: Int) {

@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.os.UserHandle
 import com.pallas.launcher.data.repository.ScreenRepository
 import com.pallas.launcher.domain.model.AppItem
+import com.pallas.launcher.domain.model.NameLengthSortOrder
 import com.pallas.launcher.domain.model.ScreenApp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -182,5 +183,109 @@ class ScreenRepositoryTests {
 
         assertEquals("Custom Personal", personalUpdated?.customLabel)
         assertNull(workUpdated?.customLabel)
+    }
+
+    @Test
+    fun testSortAppsByNameLengthAscending() {
+        val prefs = createFakePrefs()
+        val context = createFakeContext(prefs)
+        val repository = ScreenRepository(context)
+
+        val app5 = ScreenApp("pkg.clock", "pkg.clock", "Main", null, "Clock", 0L) // 5 chars
+        val app6 = ScreenApp("pkg.camera", "pkg.camera", "Main", null, "Camera", 0L) // 6 chars
+        val app8 = ScreenApp("pkg.calendar", "pkg.calendar", "Main", null, "Calendar", 0L) // 8 chars
+        val app10 = ScreenApp("pkg.calculator", "pkg.calculator", "Main", null, "Calculator", 0L) // 10 chars
+
+        // Unsorted input list
+        val unsorted = listOf(app8, app5, app10, app6)
+        val sortedAscending = repository.sortAppsByNameLength(unsorted, NameLengthSortOrder.ASCENDING)
+
+        assertEquals(listOf("Clock", "Camera", "Calendar", "Calculator"), sortedAscending.map { it.displayLabel })
+    }
+
+    @Test
+    fun testSortAppsByNameLengthDescending() {
+        val prefs = createFakePrefs()
+        val context = createFakeContext(prefs)
+        val repository = ScreenRepository(context)
+
+        val app5 = ScreenApp("pkg.clock", "pkg.clock", "Main", null, "Clock", 0L) // 5 chars
+        val app6 = ScreenApp("pkg.camera", "pkg.camera", "Main", null, "Camera", 0L) // 6 chars
+        val app8 = ScreenApp("pkg.calendar", "pkg.calendar", "Main", null, "Calendar", 0L) // 8 chars
+        val app10 = ScreenApp("pkg.calculator", "pkg.calculator", "Main", null, "Calculator", 0L) // 10 chars
+
+        val unsorted = listOf(app5, app8, app6, app10)
+        val sortedDescending = repository.sortAppsByNameLength(unsorted, NameLengthSortOrder.DESCENDING)
+
+        assertEquals(listOf("Calculator", "Calendar", "Camera", "Clock"), sortedDescending.map { it.displayLabel })
+    }
+
+    @Test
+    fun testSortAppsByNameLengthWithCustomRenaming() {
+        val prefs = createFakePrefs()
+        val context = createFakeContext(prefs)
+        val repository = ScreenRepository(context)
+
+        // "Calculator" (10 chars) renamed to "Calc" (4 chars)
+        val renamedApp = ScreenApp("pkg.calc", "pkg.calc", "Main", "Calc", "Calculator", 0L)
+        val appClock = ScreenApp("pkg.clock", "pkg.clock", "Main", null, "Clock", 0L) // 5 chars
+        val appCamera = ScreenApp("pkg.camera", "pkg.camera", "Main", null, "Camera", 0L) // 6 chars
+
+        val list = listOf(appClock, appCamera, renamedApp)
+        val sorted = repository.sortAppsByNameLength(list, NameLengthSortOrder.ASCENDING)
+
+        // "Calc" (4) should be first, then "Clock" (5), then "Camera" (6)
+        assertEquals(listOf("Calc", "Clock", "Camera"), sorted.map { it.displayLabel })
+    }
+
+    @Test
+    fun testAddAppsToScreenMassAdditionWithSorting() {
+        val prefs = createFakePrefs()
+        val context = createFakeContext(prefs)
+        val repository = ScreenRepository(context)
+
+        val screenId = repository.screens.value.first().id
+
+        val appItems = listOf(
+            AppItem("pkg.calculator", "Main", "Calculator", null, 0L), // 10
+            AppItem("pkg.map", "Main", "Maps", null, 0L), // 4
+            AppItem("pkg.camera", "Main", "Camera", null, 0L) // 6
+        )
+
+        // Mass-add with Ascending sort order
+        repository.addAppsToScreen(screenId, appItems, sortOrder = NameLengthSortOrder.ASCENDING)
+
+        val screenApps = repository.screens.value.first().apps
+        assertEquals(3, screenApps.size)
+        assertEquals(listOf("Maps", "Camera", "Calculator"), screenApps.map { it.displayLabel })
+
+        // Now add another app with 5 letters ("Clock") with Ascending sort order
+        val clockItem = AppItem("pkg.clock", "Main", "Clock", null, 0L)
+        repository.addAppToScreen(screenId, clockItem, sortOrder = NameLengthSortOrder.ASCENDING)
+
+        val updatedApps = repository.screens.value.first().apps
+        assertEquals(4, updatedApps.size)
+        // Visual width order: Clock (narrower) < Maps < Camera < Calculator
+        assertEquals(listOf("Clock", "Maps", "Camera", "Calculator"), updatedApps.map { it.displayLabel })
+    }
+
+    @Test
+    fun testSortAppsByVisualSpaceTaken() {
+        val prefs = createFakePrefs()
+        val context = createFakeContext(prefs)
+        val repository = ScreenRepository(context)
+
+        // "WWW" has 3 chars but occupies much larger visual space than "iiiiii" (6 chars)
+        val wideApp = ScreenApp("pkg.wide", "pkg.wide", "Main", null, "WWW", 0L)
+        val narrowApp = ScreenApp("pkg.narrow", "pkg.narrow", "Main", null, "iiiiii", 0L)
+
+        val unsorted = listOf(wideApp, narrowApp)
+        val sortedAscending = repository.sortAppsByNameLength(unsorted, NameLengthSortOrder.ASCENDING)
+        // Narrower visual space first: "iiiiii" takes less visual width than "WWW"
+        assertEquals(listOf("iiiiii", "WWW"), sortedAscending.map { it.displayLabel })
+
+        val sortedDescending = repository.sortAppsByNameLength(unsorted, NameLengthSortOrder.DESCENDING)
+        // Wider visual space first: "WWW" takes more visual width than "iiiiii"
+        assertEquals(listOf("WWW", "iiiiii"), sortedDescending.map { it.displayLabel })
     }
 }

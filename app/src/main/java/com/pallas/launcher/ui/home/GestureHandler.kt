@@ -33,9 +33,9 @@ fun GestureContainer(
     content: @Composable BoxScope.() -> Unit
 ) {
     val density = LocalDensity.current
-    val shortSwipeMinPx = with(density) { 60.dp.toPx() }
-    val longSwipeMinPx = with(density) { 180.dp.toPx() }
-    val verticalThresholdPx = with(density) { 55.dp.toPx() }
+    val shortSwipeMinPx = with(density) { 40.dp.toPx() }
+    val longSwipeMinPx = with(density) { 140.dp.toPx() }
+    val verticalThresholdPx = with(density) { 40.dp.toPx() }
 
     val haptic = LocalHapticFeedback.current
     var totalDragX by remember { mutableFloatStateOf(0f) }

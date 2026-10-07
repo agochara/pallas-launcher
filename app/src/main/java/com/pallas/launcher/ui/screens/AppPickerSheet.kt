@@ -12,14 +12,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,29 +36,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.search.SearchRanking
-
 import com.pallas.launcher.ui.apps.AppIconImage
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.layout.width
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppPickerSheet(
     installedApps: List<AppItem>,
-    onAppSelected: (AppItem) -> Unit,
+    alreadyAddedKeys: Set<String> = emptySet(),
+    onAppsConfirmed: (List<AppItem>) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var filterQuery by remember { mutableStateOf("") }
+    var selectedKeys by remember { mutableStateOf(emptySet<String>()) }
     val colorScheme = MaterialTheme.colorScheme
 
     val filteredApps = remember(installedApps, filterQuery) {
         if (filterQuery.isBlank()) {
-            installedApps
+            installedApps.sortedBy { it.label.lowercase() }
         } else {
             installedApps
                 .mapNotNull { app ->
@@ -73,21 +79,45 @@ fun AppPickerSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f)
+                .fillMaxHeight(0.88f)
                 .padding(horizontal = 24.dp)
         ) {
-            Text(
-                text = "Select App",
-                style = MaterialTheme.typography.titleLarge,
-                color = colorScheme.onSurface,
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Add Apps to Screen",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colorScheme.onSurface
+                    )
+                    if (selectedKeys.isNotEmpty()) {
+                        Text(
+                            text = "${selectedKeys.size} selected",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
 
-            // Search filter
+                if (selectedKeys.isNotEmpty()) {
+                    TextButton(onClick = { selectedKeys = emptySet() }) {
+                        Text("Clear", color = colorScheme.error)
+                    }
+                }
+            }
+
+            // Search filter box
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(colorScheme.surfaceContainerHigh)
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
@@ -118,11 +148,28 @@ fun AppPickerSheet(
                     items = filteredApps,
                     key = { it.uniqueKey }
                 ) { app ->
+                    val isAlreadyAdded = alreadyAddedKeys.contains(app.uniqueKey)
+                    val isSelected = selectedKeys.contains(app.uniqueKey)
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable { onAppSelected(app) }
+                            .then(
+                                if (isAlreadyAdded) {
+                                    Modifier.background(colorScheme.surfaceContainerHigh.copy(alpha = 0.4f))
+                                } else if (isSelected) {
+                                    Modifier.background(colorScheme.primaryContainer.copy(alpha = 0.5f))
+                                } else {
+                                    Modifier.clickable {
+                                        selectedKeys = if (isSelected) {
+                                            selectedKeys - app.uniqueKey
+                                        } else {
+                                            selectedKeys + app.uniqueKey
+                                        }
+                                    }
+                                }
+                            )
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -136,17 +183,78 @@ fun AppPickerSheet(
                             Text(
                                 text = app.label,
                                 style = MaterialTheme.typography.titleMedium,
-                                color = colorScheme.onSurface
+                                color = if (isAlreadyAdded) colorScheme.onSurface.copy(alpha = 0.5f) else colorScheme.onSurface
                             )
                             Text(
-                                text = app.packageName,
+                                text = if (isAlreadyAdded) "Already on screen" else app.packageName,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = colorScheme.onSurfaceVariant
+                                color = if (isAlreadyAdded) colorScheme.primary.copy(alpha = 0.8f) else colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        if (!isAlreadyAdded) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    selectedKeys = if (checked) {
+                                        selectedKeys + app.uniqueKey
+                                    } else {
+                                        selectedKeys - app.uniqueKey
+                                    }
+                                }
                             )
                         }
                     }
                 }
             }
+
+            // Bottom action confirmation bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Cancel")
+                }
+
+                Button(
+                    onClick = {
+                        val chosen = installedApps.filter { selectedKeys.contains(it.uniqueKey) }
+                        onAppsConfirmed(chosen)
+                    },
+                    enabled = selectedKeys.isNotEmpty(),
+                    modifier = Modifier.weight(1.5f),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text(
+                        if (selectedKeys.isEmpty()) "Add Apps"
+                        else "Add (${selectedKeys.size})"
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+fun AppPickerSheet(
+    installedApps: List<AppItem>,
+    onAppSelected: (AppItem) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AppPickerSheet(
+        installedApps = installedApps,
+        alreadyAddedKeys = emptySet(),
+        onAppsConfirmed = { list -> list.firstOrNull()?.let(onAppSelected) },
+        onDismiss = onDismiss,
+        modifier = modifier
+    )
 }

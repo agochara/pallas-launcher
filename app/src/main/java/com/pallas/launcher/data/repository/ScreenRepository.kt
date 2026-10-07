@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.os.UserManager
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.model.HomeScreen
+import com.pallas.launcher.domain.model.NameLengthSortOrder
 import com.pallas.launcher.domain.model.ScreenApp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -166,26 +167,105 @@ class ScreenRepository(
         saveScreens(current)
     }
 
-    fun addAppToScreen(screenId: String, appItem: AppItem, customLabel: String? = null) {
+    private val textPaint: android.graphics.Paint by lazy {
+        android.graphics.Paint().apply {
+            textSize = 24f
+            isAntiAlias = true
+        }
+    }
+
+    fun measureVisualWidth(text: String): Float {
+        if (text.isEmpty()) return 0f
+        return try {
+            val measured = textPaint.measureText(text)
+            if (measured > 0f) {
+                measured
+            } else {
+                estimateVisualWidth(text)
+            }
+        } catch (_: Throwable) {
+            estimateVisualWidth(text)
+        }
+    }
+
+    private fun estimateVisualWidth(text: String): Float {
+        var width = 0f
+        for (ch in text) {
+            width += when (ch) {
+                'W', 'M', 'Q', '—', '…' -> 1.35f
+                'w', 'm' -> 1.15f
+                'i', 'l', 'j', '!', '|', ':', ';', '\'', '`', '.', ',' -> 0.35f
+                'f', 'r', 't', 'I', ' ', '-', '(', ')' -> 0.55f
+                in 'A'..'Z' -> 0.95f
+                in '0'..'9' -> 0.70f
+                else -> 0.70f
+            }
+        }
+        return width
+    }
+
+    fun sortAppsByNameLength(apps: List<ScreenApp>, order: NameLengthSortOrder): List<ScreenApp> {
+        return when (order) {
+            NameLengthSortOrder.OFF -> apps
+            NameLengthSortOrder.ASCENDING -> apps.sortedWith(
+                compareBy<ScreenApp> { measureVisualWidth(it.displayLabel) }
+                    .thenBy { it.displayLabel.lowercase() }
+            )
+            NameLengthSortOrder.DESCENDING -> apps.sortedWith(
+                compareByDescending<ScreenApp> { measureVisualWidth(it.displayLabel) }
+                    .thenBy { it.displayLabel.lowercase() }
+            )
+        }
+    }
+
+    fun addAppToScreen(
+        screenId: String,
+        appItem: AppItem,
+        customLabel: String? = null,
+        sortOrder: NameLengthSortOrder = NameLengthSortOrder.OFF
+    ) {
+        addAppsToScreen(screenId, listOf(appItem), sortOrder, customLabel)
+    }
+
+    fun addAppsToScreen(
+        screenId: String,
+        appItems: List<AppItem>,
+        sortOrder: NameLengthSortOrder = NameLengthSortOrder.OFF,
+        customLabel: String? = null
+    ) {
         val current = _screens.value.toMutableList()
         val index = current.indexOfFirst { it.id == screenId }
         if (index != -1) {
             val screen = current[index]
-            val exists = screen.apps.any { it.uniqueKey == appItem.uniqueKey }
-            if (!exists) {
-                val newApp = ScreenApp(
-                    uniqueKey = appItem.uniqueKey,
-                    packageName = appItem.packageName,
-                    activityName = appItem.activityName,
-                    customLabel = customLabel,
-                    defaultLabel = appItem.label,
-                    userSerialNumber = appItem.userSerialNumber,
-                    userHandle = appItem.userHandle
-                )
-                current[index] = screen.copy(apps = screen.apps + newApp)
+            val existingKeys = screen.apps.map { it.uniqueKey }.toSet()
+            val newApps = appItems
+                .filterNot { existingKeys.contains(it.uniqueKey) }
+                .map { appItem ->
+                    ScreenApp(
+                        uniqueKey = appItem.uniqueKey,
+                        packageName = appItem.packageName,
+                        activityName = appItem.activityName,
+                        customLabel = customLabel,
+                        defaultLabel = appItem.label,
+                        userSerialNumber = appItem.userSerialNumber,
+                        userHandle = appItem.userHandle
+                    )
+                }
+            if (newApps.isNotEmpty()) {
+                val combined = screen.apps + newApps
+                val finalApps = sortAppsByNameLength(combined, sortOrder)
+                current[index] = screen.copy(apps = finalApps)
                 saveScreens(current)
             }
         }
+    }
+
+    fun sortAllScreensByNameLength(sortOrder: NameLengthSortOrder) {
+        if (sortOrder == NameLengthSortOrder.OFF) return
+        val current = _screens.value.map { screen ->
+            screen.copy(apps = sortAppsByNameLength(screen.apps, sortOrder))
+        }
+        saveScreens(current)
     }
 
     fun removeAppFromScreen(screenId: String, uniqueKey: String) {
@@ -198,7 +278,11 @@ class ScreenRepository(
         }
     }
 
-    fun updateAppLabelAcrossScreens(uniqueKey: String, newLabel: String) {
+    fun updateAppLabelAcrossScreens(
+        uniqueKey: String,
+        newLabel: String,
+        sortOrder: NameLengthSortOrder = NameLengthSortOrder.OFF
+    ) {
         val current = _screens.value.map { screen ->
             val updatedApps = screen.apps.map { app ->
                 if (app.uniqueKey == uniqueKey) {
@@ -207,12 +291,18 @@ class ScreenRepository(
                     app
                 }
             }
-            screen.copy(apps = updatedApps)
+            val finalApps = sortAppsByNameLength(updatedApps, sortOrder)
+            screen.copy(apps = finalApps)
         }
         saveScreens(current)
     }
 
-    fun updateAppLabel(screenId: String, uniqueKey: String, newLabel: String) {
+    fun updateAppLabel(
+        screenId: String,
+        uniqueKey: String,
+        newLabel: String,
+        sortOrder: NameLengthSortOrder = NameLengthSortOrder.OFF
+    ) {
         val current = _screens.value.toMutableList()
         val index = current.indexOfFirst { it.id == screenId }
         if (index != -1) {
@@ -224,7 +314,8 @@ class ScreenRepository(
                     app
                 }
             }
-            current[index] = screen.copy(apps = updatedApps)
+            val finalApps = sortAppsByNameLength(updatedApps, sortOrder)
+            current[index] = screen.copy(apps = finalApps)
             saveScreens(current)
         }
     }

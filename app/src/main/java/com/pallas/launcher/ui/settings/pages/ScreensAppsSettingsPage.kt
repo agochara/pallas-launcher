@@ -54,11 +54,14 @@ import androidx.compose.ui.zIndex
 import com.pallas.launcher.domain.model.AppsHorizontalAlignment
 import com.pallas.launcher.domain.model.AppsVerticalPosition
 import com.pallas.launcher.domain.model.HomeScreen
+import com.pallas.launcher.domain.model.NameLengthSortOrder
 import com.pallas.launcher.domain.model.ScreenApp
 import com.pallas.launcher.ui.MainViewModel
 import com.pallas.launcher.ui.components.RenameAppDialog
+import com.pallas.launcher.ui.screens.AppPickerSheet
 import com.pallas.launcher.ui.settings.components.SettingsSectionHeader
 import com.pallas.launcher.ui.settings.components.SettingsSegmentedRow
+import com.pallas.launcher.ui.settings.components.SettingsSliderRow
 import com.pallas.launcher.ui.settings.components.SettingsTopBar
 
 @Composable
@@ -89,6 +92,7 @@ fun ScreensAppsSettingsPage(
 
     var screenToRename by remember { mutableStateOf<HomeScreen?>(null) }
     var appToRename by remember { mutableStateOf<ScreenApp?>(null) }
+    var showAppPickerSheet by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -119,6 +123,66 @@ fun ScreensAppsSettingsPage(
                     selected = settings.appsHorizontalAlignment,
                     onSelected = { viewModel.updateAppsPosition(settings.appsVerticalPosition, it) },
                     label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+            }
+
+            // Screens Spacing
+            item {
+                SettingsSectionHeader("Screens Spacing")
+                SettingsSliderRow(
+                    title = "Left Padding",
+                    persistedValue = settings.screensPaddingLeftDp.toFloat(),
+                    onValueChangeFinished = { viewModel.updateScreensPaddingLeft(it.toInt()) },
+                    valueRange = 0f..64f,
+                    steps = 15,
+                    valueFormat = { "${it.toInt()} dp" }
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+                SettingsSliderRow(
+                    title = "Right Padding",
+                    persistedValue = settings.screensPaddingRightDp.toFloat(),
+                    onValueChangeFinished = { viewModel.updateScreensPaddingRight(it.toInt()) },
+                    valueRange = 0f..64f,
+                    steps = 15,
+                    valueFormat = { "${it.toInt()} dp" }
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+                SettingsSliderRow(
+                    title = "Top Padding",
+                    persistedValue = settings.screensPaddingTopDp.toFloat(),
+                    onValueChangeFinished = { viewModel.updateScreensPaddingTop(it.toInt()) },
+                    valueRange = 0f..64f,
+                    steps = 15,
+                    valueFormat = { "${it.toInt()} dp" }
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+                SettingsSliderRow(
+                    title = "Bottom Padding",
+                    persistedValue = settings.screensPaddingBottomDp.toFloat(),
+                    onValueChangeFinished = { viewModel.updateScreensPaddingBottom(it.toInt()) },
+                    valueRange = 0f..64f,
+                    steps = 15,
+                    valueFormat = { "${it.toInt()} dp" }
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+            }
+
+            // App Arrangement
+            item {
+                SettingsSectionHeader("App Arrangement")
+                SettingsSegmentedRow(
+                    title = "Sort by Visual Space",
+                    options = NameLengthSortOrder.entries,
+                    selected = settings.nameLengthSortOrder,
+                    onSelected = { viewModel.updateNameLengthSortOrder(it) },
+                    label = {
+                        when (it) {
+                            NameLengthSortOrder.OFF -> "Off"
+                            NameLengthSortOrder.ASCENDING -> "Ascending"
+                            NameLengthSortOrder.DESCENDING -> "Descending"
+                        }
+                    }
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
             }
@@ -273,7 +337,7 @@ fun ScreensAppsSettingsPage(
                         fontWeight = FontWeight.SemiBold
                     )
                     IconButton(
-                        onClick = { viewModel.openAppPicker() },
+                        onClick = { showAppPickerSheet = true },
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
@@ -287,12 +351,12 @@ fun ScreensAppsSettingsPage(
 
                 val apps = activeScreen?.apps ?: emptyList()
                 if (apps.isEmpty()) {
-                    Text(
-                        text = "No apps on this screen. Tap '+' to add apps.",
-                        color = colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
+                    TextButton(
+                        onClick = { showAppPickerSheet = true },
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    ) {
+                        Text("+ Add apps to this screen", style = MaterialTheme.typography.bodyMedium)
+                    }
                 } else {
                     Column(
                         modifier = Modifier
@@ -429,12 +493,70 @@ fun ScreensAppsSettingsPage(
                 HorizontalDivider(modifier = Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
             }
 
-            // Hidden Apps
+            // Hidden from App List
+            item {
+                SettingsSectionHeader("Hidden from App List (${settings.hiddenFromAppList.size})")
+                if (settings.hiddenFromAppList.isEmpty()) {
+                    Text(
+                        text = "No apps are hidden from the app list. To hide an app from the drawer only, long press it and choose 'Hide from App List'.",
+                        color = colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        settings.hiddenFromAppList.forEach { pkg ->
+                            val appItem = installedApps.find { it.packageName == pkg }
+                            val appLabel = appItem?.label ?: pkg
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(colorScheme.surfaceContainerHigh)
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = appLabel,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (appLabel != pkg) {
+                                        Text(
+                                            text = pkg,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                TextButton(onClick = { viewModel.unhideFromAppList(pkg) }) {
+                                    Text("Unhide", color = colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+            }
+
+            // Hidden Apps (Global)
             item {
                 SettingsSectionHeader("Hidden Apps (${settings.hiddenApps.size})")
                 if (settings.hiddenApps.isEmpty()) {
                     Text(
-                        text = "No apps are hidden. To hide an app, long press it and choose 'Hide App'.",
+                        text = "No apps are hidden. To completely hide an app across launcher, search and screens, long press it and choose 'Hide App'.",
                         color = colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
@@ -593,6 +715,22 @@ fun ScreensAppsSettingsPage(
                 }
             },
             onDismiss = { appToRename = null }
+        )
+    }
+
+    // Mass-Add App Picker Bottom Sheet
+    if (showAppPickerSheet && activeScreen != null) {
+        val alreadyAddedKeys = remember(activeScreen.apps) {
+            activeScreen.apps.map { it.uniqueKey }.toSet()
+        }
+        AppPickerSheet(
+            installedApps = installedApps,
+            alreadyAddedKeys = alreadyAddedKeys,
+            onAppsConfirmed = { selectedApps ->
+                viewModel.addAppsToScreen(activeScreen.id, selectedApps)
+                showAppPickerSheet = false
+            },
+            onDismiss = { showAppPickerSheet = false }
         )
     }
 }

@@ -53,21 +53,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.pallas.launcher.domain.search.AppSearchResult
-import com.pallas.launcher.ui.theme.NunitoFontFamily
+import com.pallas.launcher.domain.search.LauncherSearchResult
+import com.pallas.launcher.ui.theme.GaramondFontFamily
 import com.pallas.launcher.ui.theme.launcherBackdropBrush
 import kotlinx.coroutines.delay
 
-/**
- * Apps-only search. Results are laid out bottom-up (reverseLayout) so the BEST match sits directly above the
- * search pill, i.e. closest to the thumb and to the keyboard. No shortcuts, no web results, no clutter.
- */
 @Composable
 fun LauncherSearchOverlay(
     query: String,
-    results: List<AppSearchResult>,
+    results: List<LauncherSearchResult>,
     onQueryChange: (String) -> Unit,
-    onResultClick: (AppSearchResult) -> Unit,
+    onResultClick: (LauncherSearchResult) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -143,7 +139,7 @@ fun LauncherSearchOverlay(
                         Text(
                             text = "No apps match \"$query\"",
                             style = TextStyle(
-                                fontFamily = NunitoFontFamily,
+                                fontFamily = GaramondFontFamily,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Normal
                             ),
@@ -194,7 +190,7 @@ fun LauncherSearchOverlay(
                         if (query.isEmpty()) {
                             Text(
                                 text = "Search apps",
-                                style = TextStyle(fontFamily = NunitoFontFamily, fontSize = 17.sp),
+                                style = TextStyle(fontFamily = GaramondFontFamily, fontSize = 17.sp),
                                 color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                             )
                         }
@@ -202,7 +198,7 @@ fun LauncherSearchOverlay(
                             value = query,
                             onValueChange = onQueryChange,
                             textStyle = TextStyle(
-                                fontFamily = NunitoFontFamily,
+                                fontFamily = GaramondFontFamily,
                                 fontSize = 17.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = colorScheme.onSurface

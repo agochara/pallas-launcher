@@ -82,9 +82,16 @@ fun AppearanceSettingsPage(
                 SettingsSectionHeader("Typography")
                 SettingsGroup {
                     SettingsSliderRow(
-                        title = "App label size",
-                        persistedValue = settings.appFontScale,
-                        onValueChangeFinished = { viewModel.updateFontScale(it) },
+                        title = "Labels in Screens",
+                        persistedValue = settings.screensFontScale,
+                        onValueChangeFinished = { viewModel.updateScreensFontScale(it) },
+                        valueRange = 0.8f..1.3f,
+                        steps = 4
+                    )
+                    SettingsSliderRow(
+                        title = "Labels in App List",
+                        persistedValue = settings.appListFontScale,
+                        onValueChangeFinished = { viewModel.updateAppListFontScale(it) },
                         valueRange = 0.8f..1.3f,
                         steps = 4
                     )

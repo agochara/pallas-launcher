@@ -66,15 +66,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // No need to reloadApps, the callback covers this
-        
-        val settings = viewModel.settings.value
         val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
         insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        if (settings.hideStatusBar) {
-            insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
-        } else {
-            insetsController.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
-        }
     }
 }

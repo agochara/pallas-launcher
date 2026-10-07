@@ -22,6 +22,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -77,6 +81,7 @@ fun PallasHomeScreen(
 ) {
     val screens by viewModel.screens.collectAsState()
     val currentScreenIndex by viewModel.currentScreenIndex.collectAsState()
+    val screenSwipeDirection by viewModel.screenSwipeDirection.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val currentTime by viewModel.currentTime.collectAsState()
     val currentDate by viewModel.currentDate.collectAsState()
@@ -142,6 +147,9 @@ fun PallasHomeScreen(
             )
         }
 
+        val statusBarTopPadding = if (settings.hideStatusBar) 0.dp else WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding()
+        val navBarBottomPadding = WindowInsets.navigationBarsIgnoringVisibility.asPaddingValues().calculateBottomPadding()
+
         // Screen identity indicator pill on swipe
         AnimatedVisibility(
             visible = showScreenNameIndicator && (screens.size > 1),
@@ -149,8 +157,7 @@ fun PallasHomeScreen(
             exit = fadeOut(tween(300)),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 8.dp)
+                .padding(top = statusBarTopPadding + 8.dp)
         ) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -183,8 +190,7 @@ fun PallasHomeScreen(
                 .graphicsLayer {
                     alpha = homeAlpha
                 }
-                .statusBarsPadding()
-                .navigationBarsPadding()
+                .padding(top = statusBarTopPadding, bottom = navBarBottomPadding)
         ) {
             val clockComposable: @Composable () -> Unit = {
                 ClockHeader(
@@ -194,7 +200,11 @@ fun PallasHomeScreen(
                     showDate = settings.showDate,
                     onClockClick = { viewModel.openClock() },
                     onDateClick = { viewModel.openCalendar() },
-                    fontScale = settings.appFontScale
+                    fontScale = settings.appFontScale,
+                    paddingLeftDp = settings.clockPaddingLeftDp,
+                    paddingRightDp = settings.clockPaddingRightDp,
+                    paddingTopDp = settings.clockPaddingTopDp,
+                    paddingBottomDp = settings.clockPaddingBottomDp
                 )
             }
 
@@ -204,7 +214,8 @@ fun PallasHomeScreen(
                     transitionSpec = {
                         val spec = tween<Float>(220, easing = FastOutSlowInEasing)
                         val slideSpec = tween<IntOffset>(220, easing = FastOutSlowInEasing)
-                        if (targetState > initialState) {
+                        val isForward = screenSwipeDirection > 0
+                        if (isForward) {
                             (slideInHorizontally(animationSpec = slideSpec) { width -> width / 2 } + fadeIn(animationSpec = spec)) togetherWith
                                     (slideOutHorizontally(animationSpec = slideSpec) { width -> -width / 2 } + fadeOut(animationSpec = spec))
                         } else {
@@ -226,7 +237,11 @@ fun PallasHomeScreen(
                     AppListView(
                         apps = visibleApps,
                         alignment = settings.appsHorizontalAlignment,
-                        fontScale = settings.appFontScale,
+                        fontScale = settings.screensFontScale,
+                        paddingLeftDp = settings.screensPaddingLeftDp,
+                        paddingRightDp = settings.screensPaddingRightDp,
+                        paddingTopDp = settings.screensPaddingTopDp,
+                        paddingBottomDp = settings.screensPaddingBottomDp,
                         isLoaded = isAppsLoaded,
                         onAppClick = { app ->
                             if (!app.isProfileRemoved) viewModel.launchApp(app.packageName, app.activityName, app.userHandle)
@@ -261,12 +276,16 @@ fun PallasHomeScreen(
 
     // Edge Scrub App Drawer - hidden while Search overlay is active to avoid rail bleed-through
     if (overlay !is LauncherOverlay.Search) {
+        val drawerApps = remember(installedApps, settings.hiddenFromAppList) {
+            installedApps.filterNot { settings.hiddenFromAppList.contains(it.packageName) }
+        }
         AlphabeticalAppDrawer(
-            installedApps = installedApps,
+            installedApps = drawerApps,
             favoriteApps = favoriteApps,
             edgeScrubPosition = settings.edgeScrubPosition,
             edgeScrubReleaseAction = settings.edgeScrubReleaseAction,
             isOpen = overlay is LauncherOverlay.Drawer,
+            fontScale = settings.appListFontScale,
             onOpenChange = { viewModel.setAppDrawerOpen(it) },
             onLaunchApp = { app ->
                 viewModel.closeDrawer()
@@ -305,11 +324,15 @@ fun PallasHomeScreen(
 
         // App Picker Bottom Sheet
         if (overlay is LauncherOverlay.AppPicker) {
+            val alreadyAddedKeys = remember(currentScreen?.apps) {
+                currentScreen?.apps?.map { it.uniqueKey }?.toSet() ?: emptySet()
+            }
             AppPickerSheet(
                 installedApps = installedApps,
-                onAppSelected = { app ->
+                alreadyAddedKeys = alreadyAddedKeys,
+                onAppsConfirmed = { apps ->
                     currentScreen?.let {
-                        viewModel.addAppToScreen(it.id, app)
+                        viewModel.addAppsToScreen(it.id, apps)
                     }
                     viewModel.closeAppPicker()
                 },
@@ -373,6 +396,10 @@ fun PallasHomeScreen(
                             )
                         viewModel.addAppToScreen(screen.id, item)
                     }
+                    viewModel.dismissAppOptions()
+                },
+                onHideFromAppList = {
+                    viewModel.hideFromAppList(app.packageName)
                     viewModel.dismissAppOptions()
                 },
                 onHideApp = {

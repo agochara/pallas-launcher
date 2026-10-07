@@ -24,9 +24,11 @@ import com.pallas.launcher.domain.model.EdgeScrubReleaseAction
 import com.pallas.launcher.domain.model.GestureAction
 import com.pallas.launcher.domain.model.HomeScreen
 import com.pallas.launcher.domain.model.LauncherSettings
+import com.pallas.launcher.domain.model.NameLengthSortOrder
 import com.pallas.launcher.domain.model.ScreenApp
 import com.pallas.launcher.domain.model.ThemeMode
 import com.pallas.launcher.domain.search.AppSearchResult
+import com.pallas.launcher.domain.search.LauncherSearchResult
 import com.pallas.launcher.domain.search.SearchEngine
 import com.pallas.launcher.platform.BatteryManagerHelper
 import com.pallas.launcher.platform.SystemActionsManager
@@ -76,22 +78,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         else index.coerceIn(0, screenList.size - 1)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
-    // Clock, date, battery
-    private val _currentTime = MutableStateFlow("")
-    val currentTime: StateFlow<String> = _currentTime.asStateFlow()
+    private val _screenSwipeDirection = MutableStateFlow(1) // 1 = forward (swipe left), -1 = backward (swipe right)
+    val screenSwipeDirection: StateFlow<Int> = _screenSwipeDirection.asStateFlow()
 
-    private val _currentDate = MutableStateFlow("")
-    val currentDate: StateFlow<String> = _currentDate.asStateFlow()
+    private fun formatCurrentTime(is24Hour: Boolean): String {
+        val pattern = if (is24Hour) "H:mm" else "h:mm"
+        return SimpleDateFormat(pattern, Locale.getDefault()).format(Date())
+    }
+
+    private fun formatCurrentDate(showBattery: Boolean, bat: Int): String {
+        val now = Date()
+        val bestPattern = android.text.format.DateFormat.getBestDateTimePattern(Locale.getDefault(), "EEEdMMM")
+        val dateStr = SimpleDateFormat(bestPattern, Locale.getDefault()).format(now)
+        return if (showBattery && bat >= 0) {
+            "$dateStr, $bat%"
+        } else {
+            dateStr
+        }
+    }
 
     private val _batteryLevel = MutableStateFlow(BatteryManagerHelper.getBatteryPercentage(context))
     val batteryLevel: StateFlow<Int> = _batteryLevel.asStateFlow()
+
+    // Clock, date, battery - initialized synchronously with live values to prevent layout flash/jumping on launch/unlock
+    private val _currentTime = MutableStateFlow(formatCurrentTime(settingsRepository.settings.value.is24HourClock))
+    val currentTime: StateFlow<String> = _currentTime.asStateFlow()
+
+    private val _currentDate = MutableStateFlow(formatCurrentDate(settingsRepository.settings.value.showBattery, _batteryLevel.value))
+    val currentDate: StateFlow<String> = _currentDate.asStateFlow()
 
     // Search state
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    private val _searchResults = MutableStateFlow<List<AppSearchResult>>(emptyList())
-    val searchResults: StateFlow<List<AppSearchResult>> = _searchResults.asStateFlow()
+    private val _searchResults = MutableStateFlow<List<LauncherSearchResult>>(emptyList())
+    val searchResults: StateFlow<List<LauncherSearchResult>> = _searchResults.asStateFlow()
 
     // Overlay state
     private val _overlay = MutableStateFlow<LauncherOverlay>(LauncherOverlay.None)
@@ -177,41 +198,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun updateTimeAndDate() {
-        val now = Date()
-        val is24Hour = settings.value.is24HourClock
-        val timePattern = if (is24Hour) "H:mm" else "h:mm"
-        _currentTime.value = SimpleDateFormat(timePattern, Locale.getDefault()).format(now)
-
-        val bestPattern = android.text.format.DateFormat.getBestDateTimePattern(Locale.getDefault(), "EEEdMMM")
-        val dateStr = SimpleDateFormat(bestPattern, Locale.getDefault()).format(now)
-
-        val bat = _batteryLevel.value
-        _currentDate.value = if (settings.value.showBattery && bat >= 0) {
-            "$dateStr, $bat%"
-        } else {
-            dateStr
-        }
+        _currentTime.value = formatCurrentTime(settings.value.is24HourClock)
+        _currentDate.value = formatCurrentDate(settings.value.showBattery, _batteryLevel.value)
     }
 
     fun onScreenSwiped(direction: Int) {
         val screenList = screens.value
-        if (screenList.isEmpty()) return
-        val current = _currentScreenIndex.value.coerceIn(0, (screenList.size - 1).coerceAtLeast(0))
-        _currentScreenIndex.value = current
+        if (screenList.size <= 1) return
+        val current = _currentScreenIndex.value.coerceIn(0, screenList.size - 1)
 
-        if (direction > 0) { // Swipe Left -> Go to Next Screen
-            if (current < screenList.size - 1) {
-                _currentScreenIndex.value = current + 1
-            }
+        val nextIndex = if (direction > 0) { // Swipe Left -> Go to Next Screen
+            (current + 1) % screenList.size
         } else if (direction < 0) { // Swipe Right -> Go to Prev Screen
-            if (current > 0) {
-                _currentScreenIndex.value = current - 1
-            }
+            (current - 1 + screenList.size) % screenList.size
+        } else {
+            current
         }
+        _screenSwipeDirection.value = if (direction >= 0) 1 else -1
+        _currentScreenIndex.value = nextIndex
     }
 
     fun setScreenIndex(index: Int) {
         if (index in screens.value.indices) {
+            _screenSwipeDirection.value = if (index >= _currentScreenIndex.value) 1 else -1
             _currentScreenIndex.value = index
         }
     }
@@ -298,12 +307,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _searchResults.value = emptyList()
             return
         }
-        _searchResults.value = searchEngine.search(query)
+        val contacts = settings.value.searchContacts
+        _searchResults.value = searchEngine.searchAll(query, contacts)
     }
 
-    fun launchSearchResult(result: AppSearchResult) {
+    fun launchSearchResult(result: LauncherSearchResult) {
         dismissOverlay()
-        launchApp(result.app.packageName, result.app.activityName, result.app.userHandle)
+        when (result) {
+            is LauncherSearchResult.App -> {
+                launchApp(result.app.packageName, result.app.activityName, result.app.userHandle)
+            }
+            is LauncherSearchResult.Command -> {
+                result.execute(context)
+            }
+            is LauncherSearchResult.ContactCall -> {
+                result.execute(context)
+            }
+        }
     }
 
     fun executeGesture(action: GestureAction) {
@@ -371,13 +391,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun renameScreen(screenId: String, newName: String, newContextTag: String? = null) = screenRepository.renameScreen(screenId, newName, newContextTag)
     fun moveScreen(fromIndex: Int, toIndex: Int) = screenRepository.moveScreen(fromIndex, toIndex)
     fun removeScreen(screenId: String) = screenRepository.removeScreen(screenId)
-    fun addAppToScreen(screenId: String, appItem: AppItem, customLabel: String? = null) = screenRepository.addAppToScreen(screenId, appItem, customLabel)
+    fun addAppToScreen(screenId: String, appItem: AppItem, customLabel: String? = null) {
+        val sortOrder = settings.value.nameLengthSortOrder
+        screenRepository.addAppToScreen(screenId, appItem, customLabel, sortOrder)
+    }
+    fun addAppsToScreen(screenId: String, appItems: List<AppItem>) {
+        val sortOrder = settings.value.nameLengthSortOrder
+        screenRepository.addAppsToScreen(screenId, appItems, sortOrder)
+    }
     fun removeAppFromScreen(screenId: String, uniqueKey: String) = screenRepository.removeAppFromScreen(screenId, uniqueKey)
-    fun updateAppLabelAcrossScreens(uniqueKey: String, newLabel: String) = screenRepository.updateAppLabelAcrossScreens(uniqueKey, newLabel)
-    fun updateAppLabel(screenId: String, uniqueKey: String, newLabel: String) = screenRepository.updateAppLabel(screenId, uniqueKey, newLabel)
+    fun updateAppLabelAcrossScreens(uniqueKey: String, newLabel: String) {
+        val sortOrder = settings.value.nameLengthSortOrder
+        screenRepository.updateAppLabelAcrossScreens(uniqueKey, newLabel, sortOrder)
+    }
+    fun updateAppLabel(screenId: String, uniqueKey: String, newLabel: String) {
+        val sortOrder = settings.value.nameLengthSortOrder
+        screenRepository.updateAppLabel(screenId, uniqueKey, newLabel, sortOrder)
+    }
     fun reorderApps(screenId: String, reordered: List<ScreenApp>) = screenRepository.reorderApps(screenId, reordered)
 
     // --- Settings repository actions (ViewModel façade) ---
+    fun updateNameLengthSortOrder(order: NameLengthSortOrder) {
+        settingsRepository.updateNameLengthSortOrder(order)
+        if (order != NameLengthSortOrder.OFF) {
+            screenRepository.sortAllScreensByNameLength(order)
+        }
+    }
     fun updateThemeMode(theme: ThemeMode) = settingsRepository.updateThemeMode(theme)
     fun updateWallpaperScrim(scrim: Boolean) = settingsRepository.updateWallpaperScrim(scrim)
     fun updateHideStatusBar(hide: Boolean) = settingsRepository.updateHideStatusBar(hide)
@@ -396,9 +435,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun removeAlias(alias: String) = settingsRepository.removeAlias(alias)
     fun hideApp(packageName: String) = settingsRepository.hideApp(packageName)
     fun unhideApp(packageName: String) = settingsRepository.unhideApp(packageName)
+    fun hideFromAppList(packageName: String) = settingsRepository.hideFromAppList(packageName)
+    fun unhideFromAppList(packageName: String) = settingsRepository.unhideFromAppList(packageName)
     fun updateFontScale(scale: Float) = settingsRepository.updateFontScale(scale)
+    fun updateScreensFontScale(scale: Float) = settingsRepository.updateScreensFontScale(scale)
+    fun updateAppListFontScale(scale: Float) = settingsRepository.updateAppListFontScale(scale)
+    fun updateClockPadding(paddingDp: Int) = settingsRepository.updateClockPadding(paddingDp)
+    fun updateClockPaddingLeft(dp: Int) = settingsRepository.updateClockPaddingLeft(dp)
+    fun updateClockPaddingRight(dp: Int) = settingsRepository.updateClockPaddingRight(dp)
+    fun updateClockPaddingTop(dp: Int) = settingsRepository.updateClockPaddingTop(dp)
+    fun updateClockPaddingBottom(dp: Int) = settingsRepository.updateClockPaddingBottom(dp)
+
+    fun updateScreensPadding(paddingDp: Int) = settingsRepository.updateScreensPadding(paddingDp)
+    fun updateScreensPaddingLeft(dp: Int) = settingsRepository.updateScreensPaddingLeft(dp)
+    fun updateScreensPaddingRight(dp: Int) = settingsRepository.updateScreensPaddingRight(dp)
+    fun updateScreensPaddingTop(dp: Int) = settingsRepository.updateScreensPaddingTop(dp)
+    fun updateScreensPaddingBottom(dp: Int) = settingsRepository.updateScreensPaddingBottom(dp)
     fun updateEdgeScrubPosition(position: EdgeScrubPosition) = settingsRepository.updateEdgeScrubPosition(position)
     fun updateEdgeScrubReleaseAction(action: EdgeScrubReleaseAction) = settingsRepository.updateEdgeScrubReleaseAction(action)
+    fun addSearchContact(nickname: String, name: String, phoneNumber: String) =
+        settingsRepository.addSearchContact(nickname, name, phoneNumber)
+    fun removeSearchContact(id: String) =
+        settingsRepository.removeSearchContact(id)
+    fun requestSetDefaultLauncher() =
+        SystemActionsManager.requestSetDefaultLauncher(context)
 
     override fun onCleared() {
         try {

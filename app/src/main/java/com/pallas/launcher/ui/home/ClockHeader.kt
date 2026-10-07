@@ -27,6 +27,10 @@ fun ClockHeader(
     onClockClick: () -> Unit,
     onDateClick: () -> Unit,
     fontScale: Float = 1.0f,
+    paddingLeftDp: Int = 24,
+    paddingRightDp: Int = 24,
+    paddingTopDp: Int = 24,
+    paddingBottomDp: Int = 12,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalLauncherColors.current
@@ -46,7 +50,12 @@ fun ClockHeader(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 28.dp, end = 28.dp, top = 26.dp, bottom = 12.dp),
+            .padding(
+                start = paddingLeftDp.dp,
+                end = paddingRightDp.dp,
+                top = paddingTopDp.dp,
+                bottom = paddingBottomDp.dp
+            ),
         horizontalAlignment = horizontalAlignment,
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {

@@ -53,6 +53,7 @@ fun AppOptionsModal(
     onRenameApp: () -> Unit,
     onRemoveFromScreen: () -> Unit,
     onAddToScreen: () -> Unit,
+    onHideFromAppList: () -> Unit,
     onHideApp: () -> Unit,
     onUninstall: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -193,6 +194,13 @@ fun AppOptionsModal(
                 AppOptionTile(
                     title = "Rename Display Label",
                     onClick = { runAndDismiss(onRenameApp) }
+                )
+
+                Divider(surfaceContainer)
+
+                AppOptionTile(
+                    title = "Hide from App List",
+                    onClick = { runAndDismiss(onHideFromAppList) }
                 )
 
                 Divider(surfaceContainer)

@@ -40,6 +40,12 @@ enum class EdgeScrubReleaseAction {
     LAUNCH_TOP
 }
 
+enum class NameLengthSortOrder {
+    OFF,
+    ASCENDING,
+    DESCENDING
+}
+
 data class LauncherSettings(
     val themeMode: ThemeMode = ThemeMode.DARK,
     val showWallpaperScrim: Boolean = false,
@@ -56,8 +62,23 @@ data class LauncherSettings(
     val swipeUpAction: GestureAction = GestureAction.OpenAppDrawer,
     val swipeDownAction: GestureAction = GestureAction.OpenNotifications,
     val customAliases: Map<String, String> = emptyMap(), // alias -> package or uniqueKey
+    val searchContacts: List<SearchContact> = emptyList(),
     val appFontScale: Float = 1.0f,
+    val screensFontScale: Float = 1.0f,
+    val appListFontScale: Float = 1.0f,
+    val clockPaddingDp: Int = 24,
+    val clockPaddingLeftDp: Int = 24,
+    val clockPaddingRightDp: Int = 24,
+    val clockPaddingTopDp: Int = 24,
+    val clockPaddingBottomDp: Int = 12,
+    val screensPaddingDp: Int = 32,
+    val screensPaddingLeftDp: Int = 32,
+    val screensPaddingRightDp: Int = 32,
+    val screensPaddingTopDp: Int = 12,
+    val screensPaddingBottomDp: Int = 24,
+    val nameLengthSortOrder: NameLengthSortOrder = NameLengthSortOrder.OFF,
     val hiddenApps: Set<String> = emptySet(),
+    val hiddenFromAppList: Set<String> = emptySet(),
     val edgeScrubPosition: EdgeScrubPosition = EdgeScrubPosition.RIGHT,
     val edgeScrubReleaseAction: EdgeScrubReleaseAction = EdgeScrubReleaseAction.STAY_OPEN
 )

@@ -67,20 +67,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.model.EdgeScrubPosition
 import com.pallas.launcher.domain.model.EdgeScrubReleaseAction
 import com.pallas.launcher.domain.search.SearchRanking
-import com.pallas.launcher.ui.theme.NunitoFontFamily
+import com.pallas.launcher.ui.theme.GaramondFontFamily
 import com.pallas.launcher.ui.theme.launcherBackdropBrush
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 
-/** Niagara rail: star (recent) on top, A-Z, dot (#) at the bottom. */
-private val RAIL_ITEMS: List<String> = listOf("★") + ('A'..'Z').map { it.toString() } + listOf("•")
 private val LETTER_ORDER: List<String> = ('A'..'Z').map { it.toString() } + "#"
 
 private const val RECENT_HEADER = "Recent"
@@ -119,6 +121,7 @@ fun AlphabeticalAppDrawer(
     onLaunchApp: (AppItem) -> Unit,
     onAppLongPress: (AppItem) -> Unit,
     onDismiss: () -> Unit,
+    fontScale: Float = 1.0f,
     modifier: Modifier = Modifier
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -155,15 +158,24 @@ fun AlphabeticalAppDrawer(
         }
     }
 
-    /** Index to scroll to for a rail item. Letters with no apps jump to the next letter that has some. */
+    val railItems: List<String> = remember(buckets, favoriteApps) {
+        buildList {
+            if (favoriteApps.isNotEmpty()) {
+                add("★")
+            }
+            LETTER_ORDER.forEach { letter ->
+                if (!buckets[letter].isNullOrEmpty()) {
+                    add(if (letter == "#") "•" else letter)
+                }
+            }
+        }
+    }
+
+    /** Index to scroll to for a rail item. Matches headerIndex directly. */
     fun scrollIndexFor(rail: String): Int {
         if (rail == "★") return headerIndex[RECENT_HEADER] ?: 0
         val bucket = railToBucket(rail)
-        val start = LETTER_ORDER.indexOf(bucket).coerceAtLeast(0)
-        for (i in start until LETTER_ORDER.size) {
-            headerIndex[LETTER_ORDER[i]]?.let { return it }
-        }
-        return fullRows.lastIndex.coerceAtLeast(0)
+        return headerIndex[bucket] ?: 0
     }
 
     fun appsFor(rail: String): List<AppItem> =
@@ -171,7 +183,7 @@ fun AlphabeticalAppDrawer(
 
     // ------------------------------------------------------------- state
     var isScrubbing by remember { mutableStateOf(false) }
-    var activeLetter by remember { mutableStateOf("A") }
+    var activeLetter by remember(railItems) { mutableStateOf(railItems.firstOrNull() ?: "") }
     var touchYPx by remember { mutableFloatStateOf(0f) }
     var railHeightPx by remember { mutableFloatStateOf(1f) }
     var pendingScrollTo by remember { mutableStateOf<String?>(null) }
@@ -225,6 +237,8 @@ fun AlphabeticalAppDrawer(
 
     val stripAlignment = if (isLeft) Alignment.BottomStart else Alignment.BottomEnd
     val dismissDragPx = with(density) { 96.dp.toPx() }
+    val statusBarTop = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding()
+    val navBarBottom = WindowInsets.navigationBarsIgnoringVisibility.asPaddingValues().calculateBottomPadding()
 
     Box(modifier = modifier.fillMaxSize()) {
 
@@ -238,8 +252,7 @@ fun AlphabeticalAppDrawer(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(launcherBackdropBrush())
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
+                    .padding(top = statusBarTop, bottom = navBarBottom)
                     // tap on the empty wallpaper area dismisses
                     .pointerInput(Unit) { detectTapGestures(onTap = { latestOnDismiss() }) }
                     // cumulative horizontal drag towards the rail's opposite side dismisses
@@ -269,6 +282,7 @@ fun AlphabeticalAppDrawer(
                         state = if (scrubbing) scrubListState else fullListState,
                         topInset = topInset,
                         isLeft = isLeft,
+                        fontScale = fontScale,
                         onLaunchApp = onLaunchApp,
                         onAppLongPress = onAppLongPress
                     )
@@ -277,12 +291,20 @@ fun AlphabeticalAppDrawer(
         }
 
         // ----------------------------------------------------------- rail
-        if (edgeScrubPosition != EdgeScrubPosition.OFF) {
+        // Rail edge touch strip remains active at all times when edge scrub is enabled,
+        // but alphabet letters are invisible on Home Screen (alpha 0f) and visible only in apps list (alpha 1f).
+        if (edgeScrubPosition != EdgeScrubPosition.OFF && railItems.isNotEmpty()) {
+            val railAlpha by animateFloatAsState(
+                targetValue = if (isOpen) 1f else 0f,
+                animationSpec = tween(180),
+                label = "rail_alpha"
+            )
+
             Box(
                 modifier = Modifier
                     .align(stripAlignment)
                     .fillMaxHeight(0.72f)
-                    .navigationBarsPadding()
+                    .padding(bottom = navBarBottom)
                     .width(110.dp),
                 contentAlignment = if (isLeft) Alignment.CenterStart else Alignment.CenterEnd
             ) {
@@ -315,8 +337,8 @@ fun AlphabeticalAppDrawer(
                         Text(
                             text = activeLetter,
                             style = TextStyle(
-                                fontFamily = NunitoFontFamily,
-                                fontSize = 22.sp,
+                                fontFamily = GaramondFontFamily,
+                                fontSize = 24.sp,
                                 fontWeight = FontWeight.Bold
                             ),
                             color = colorScheme.onPrimary
@@ -337,9 +359,10 @@ fun AlphabeticalAppDrawer(
                                 down.consume()
 
                                 fun slotFor(y: Float): String {
+                                    if (railItems.isEmpty()) return ""
                                     val h = size.height.toFloat().coerceAtLeast(1f)
-                                    val idx = ((y / h) * RAIL_ITEMS.size).toInt().coerceIn(0, RAIL_ITEMS.lastIndex)
-                                    return RAIL_ITEMS[idx]
+                                    val idx = ((y / h) * railItems.size).toInt().coerceIn(0, railItems.lastIndex)
+                                    return railItems[idx]
                                 }
 
                                 fun update(y: Float) {
@@ -381,17 +404,19 @@ fun AlphabeticalAppDrawer(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    val slotPx = railHeightPx / RAIL_ITEMS.size
+                    val slotPx = if (railItems.isNotEmpty()) railHeightPx / railItems.size else 0f
                     val slotDp = slotPx / density.density
-                    val letterSize = (slotDp * 0.62f).coerceIn(8f, 13f).sp
+                    val letterSize = (slotDp * 0.55f).coerceIn(8f, 13f).sp
                     val radiusPx = with(density) { 180.dp.toPx() }
                     val maxBulgePx = with(density) { 72.dp.toPx() }
 
                     Column(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { alpha = railAlpha },
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        RAIL_ITEMS.forEachIndexed { index, letter ->
+                        railItems.forEachIndexed { index, letter ->
                             // Every slot has identical height, so this matches the touch -> slot mapping exactly.
                             val letterY = (index + 0.5f) * slotPx
                             val dist = abs(letterY - animatedTouchY)
@@ -409,7 +434,7 @@ fun AlphabeticalAppDrawer(
                                 Text(
                                     text = letter,
                                     style = TextStyle(
-                                        fontFamily = NunitoFontFamily,
+                                        fontFamily = GaramondFontFamily,
                                         fontSize = letterSize,
                                         fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold
                                     ),
@@ -439,6 +464,7 @@ private fun DrawerList(
     state: LazyListState,
     topInset: Dp,
     isLeft: Boolean,
+    fontScale: Float,
     onLaunchApp: (AppItem) -> Unit,
     onAppLongPress: (AppItem) -> Unit
 ) {
@@ -459,7 +485,7 @@ private fun DrawerList(
                 is DrawerRow.Header -> Text(
                     text = row.label,
                     style = TextStyle(
-                        fontFamily = NunitoFontFamily,
+                        fontFamily = GaramondFontFamily,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 20.sp
                     ),
@@ -469,13 +495,14 @@ private fun DrawerList(
 
                 is DrawerRow.App -> AppRowItem(
                     app = row.app,
+                    fontScale = fontScale,
                     onClick = { onLaunchApp(row.app) },
                     onLongClick = { onAppLongPress(row.app) }
                 )
 
                 DrawerRow.Empty -> Text(
                     text = "No apps",
-                    style = TextStyle(fontFamily = NunitoFontFamily, fontSize = 15.sp),
+                    style = TextStyle(fontFamily = GaramondFontFamily, fontSize = 15.sp),
                     color = colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 12.dp, top = 8.dp)
                 )
@@ -488,6 +515,7 @@ private fun DrawerList(
 @Composable
 private fun AppRowItem(
     app: AppItem,
+    fontScale: Float,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -510,16 +538,16 @@ private fun AppRowItem(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(horizontal = 12.dp, vertical = 9.dp),
+            .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AppIconImage(app = app, size = 48.dp, shape = CircleShape)
-        Spacer(modifier = Modifier.width(22.dp))
+        AppIconImage(app = app, size = 32.dp, shape = CircleShape)
+        Spacer(modifier = Modifier.width(16.dp))
         Text(
             text = app.label,
             style = TextStyle(
-                fontFamily = NunitoFontFamily,
-                fontSize = 16.sp,
+                fontFamily = GaramondFontFamily,
+                fontSize = (16 * fontScale).sp,
                 fontWeight = FontWeight.Medium
             ),
             color = MaterialTheme.colorScheme.onSurface,
