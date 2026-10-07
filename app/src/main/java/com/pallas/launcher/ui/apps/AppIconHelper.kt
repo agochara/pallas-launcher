@@ -14,21 +14,39 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.model.ScreenApp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 object AppIconHelper {
-    private val iconCache = LruCache<String, ImageBitmap>(300)
+    private val iconCache = LruCache<String, ImageBitmap>(400)
 
+    fun cacheKey(
+        packageName: String,
+        activityName: String? = null,
+        userSerialNumber: Long = 0L,
+        uniqueKey: String? = null
+    ): String = uniqueKey
+        ?: if (activityName != null) "$packageName/$activityName#$userSerialNumber" else packageName
+
+    /** Cheap, main-thread-safe cache lookup. */
+    fun peek(key: String): ImageBitmap? = iconCache.get(key)
+
+    /** Call when packages are added/removed/updated so stale icons are not shown. */
+    fun clear() = iconCache.evictAll()
+
+    /** Blocking: call from a background dispatcher only. */
     fun getAppIcon(
         context: Context,
         packageName: String,
@@ -37,8 +55,8 @@ object AppIconHelper {
         userSerialNumber: Long = 0L,
         uniqueKey: String? = null
     ): ImageBitmap? {
-        val cacheKey = uniqueKey ?: if (activityName != null) "$packageName/$activityName#$userSerialNumber" else packageName
-        iconCache.get(cacheKey)?.let { return it }
+        val key = cacheKey(packageName, activityName, userSerialNumber, uniqueKey)
+        iconCache.get(key)?.let { return it }
 
         return try {
             val launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
@@ -57,8 +75,7 @@ object AppIconHelper {
             }
 
             val drawable = if (activityInfo != null) {
-                val densityDpi = context.resources.displayMetrics.densityDpi
-                activityInfo.getBadgedIcon(densityDpi)
+                activityInfo.getBadgedIcon(context.resources.displayMetrics.densityDpi)
             } else {
                 context.packageManager.getApplicationIcon(packageName)
             }
@@ -69,23 +86,47 @@ object AppIconHelper {
             val canvas = Canvas(bitmap)
             drawable.setBounds(0, 0, canvas.width, canvas.height)
             drawable.draw(canvas)
-            val imageBitmap = bitmap.asImageBitmap()
-            iconCache.put(cacheKey, imageBitmap)
-            imageBitmap
+            bitmap.asImageBitmap().also { iconCache.put(key, it) }
         } catch (_: Exception) {
             null
         }
     }
 
-    fun getAppIcon(context: Context, packageName: String): ImageBitmap? {
-        return getAppIcon(
-            context = context,
-            packageName = packageName,
-            activityName = null,
-            userHandle = null,
-            userSerialNumber = 0L,
-            uniqueKey = packageName
+    fun getAppIcon(context: Context, packageName: String): ImageBitmap? =
+        getAppIcon(context, packageName, null, null, 0L, packageName)
+}
+
+/** Loads the icon on Dispatchers.Default; returns the cached bitmap immediately when available. */
+@Composable
+private fun rememberAppIcon(
+    packageName: String,
+    activityName: String?,
+    userHandle: UserHandle?,
+    userSerialNumber: Long,
+    uniqueKey: String?
+): ImageBitmap? {
+    val context = LocalContext.current.applicationContext
+    val key = AppIconHelper.cacheKey(packageName, activityName, userSerialNumber, uniqueKey)
+    val state = produceState(initialValue = AppIconHelper.peek(key), key1 = key) {
+        if (value == null) {
+            value = withContext(Dispatchers.Default) {
+                AppIconHelper.getAppIcon(context, packageName, activityName, userHandle, userSerialNumber, uniqueKey)
+            }
+        }
+    }
+    return state.value
+}
+
+@Composable
+private fun IconOrPlaceholder(icon: ImageBitmap?, modifier: Modifier, size: Dp, shape: Shape) {
+    if (icon != null) {
+        Image(
+            bitmap = icon,
+            contentDescription = null,
+            modifier = modifier.size(size).clip(shape)
         )
+    } else {
+        Box(modifier = modifier.size(size).background(Color.Gray.copy(alpha = 0.2f), shape))
     }
 }
 
@@ -94,35 +135,10 @@ fun AppIconImage(
     app: AppItem,
     modifier: Modifier = Modifier,
     size: Dp = 44.dp,
-    shape: androidx.compose.ui.graphics.Shape = CircleShape
+    shape: Shape = CircleShape
 ) {
-    val context = LocalContext.current
-    val icon = remember(app.uniqueKey) {
-        AppIconHelper.getAppIcon(
-            context = context,
-            packageName = app.packageName,
-            activityName = app.activityName,
-            userHandle = app.userHandle,
-            userSerialNumber = app.userSerialNumber,
-            uniqueKey = app.uniqueKey
-        )
-    }
-
-    if (icon != null) {
-        Image(
-            bitmap = icon,
-            contentDescription = null,
-            modifier = modifier
-                .size(size)
-                .clip(shape)
-        )
-    } else {
-        Box(
-            modifier = modifier
-                .size(size)
-                .background(Color.Gray.copy(alpha = 0.2f), shape)
-        )
-    }
+    val icon = rememberAppIcon(app.packageName, app.activityName, app.userHandle, app.userSerialNumber, app.uniqueKey)
+    IconOrPlaceholder(icon, modifier, size, shape)
 }
 
 @Composable
@@ -132,34 +148,8 @@ fun AppIconImage(
     size: Dp = 44.dp,
     shapeRadius: Dp = 10.dp
 ) {
-    val context = LocalContext.current
-    val icon = remember(app.uniqueKey) {
-        AppIconHelper.getAppIcon(
-            context = context,
-            packageName = app.packageName,
-            activityName = app.activityName,
-            userHandle = app.userHandle,
-            userSerialNumber = app.userSerialNumber,
-            uniqueKey = app.uniqueKey
-        )
-    }
-
-    val shape = RoundedCornerShape(shapeRadius)
-    if (icon != null) {
-        Image(
-            bitmap = icon,
-            contentDescription = null,
-            modifier = modifier
-                .size(size)
-                .clip(shape)
-        )
-    } else {
-        Box(
-            modifier = modifier
-                .size(size)
-                .background(Color.Gray.copy(alpha = 0.2f), shape)
-        )
-    }
+    val icon = rememberAppIcon(app.packageName, app.activityName, app.userHandle, app.userSerialNumber, app.uniqueKey)
+    IconOrPlaceholder(icon, modifier, size, RoundedCornerShape(shapeRadius))
 }
 
 @Composable
@@ -167,28 +157,10 @@ fun AppIconImage(
     packageName: String,
     modifier: Modifier = Modifier,
     size: Dp = 44.dp,
-    shape: androidx.compose.ui.graphics.Shape = CircleShape
+    shape: Shape = CircleShape
 ) {
-    val context = LocalContext.current
-    val icon = remember(packageName) {
-        AppIconHelper.getAppIcon(context, packageName)
-    }
-
-    if (icon != null) {
-        Image(
-            bitmap = icon,
-            contentDescription = null,
-            modifier = modifier
-                .size(size)
-                .clip(shape)
-        )
-    } else {
-        Box(
-            modifier = modifier
-                .size(size)
-                .background(Color.Gray.copy(alpha = 0.2f), shape)
-        )
-    }
+    val icon = rememberAppIcon(packageName, null, null, 0L, packageName)
+    IconOrPlaceholder(icon, modifier, size, shape)
 }
 
 @Composable
@@ -198,10 +170,5 @@ fun AppIconImage(
     size: Dp = 44.dp,
     shapeRadius: Dp = 10.dp
 ) {
-    AppIconImage(
-        packageName = packageName,
-        modifier = modifier,
-        size = size,
-        shape = RoundedCornerShape(shapeRadius)
-    )
+    AppIconImage(packageName = packageName, modifier = modifier, size = size, shape = RoundedCornerShape(shapeRadius))
 }

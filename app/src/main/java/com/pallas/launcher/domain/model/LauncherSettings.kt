@@ -53,7 +53,7 @@ data class LauncherSettings(
     val showBattery: Boolean = true,
     val shortSwipeLeftAction: GestureAction = GestureAction.OpenCamera,
     val shortSwipeRightAction: GestureAction = GestureAction.OpenDialer,
-    val swipeUpAction: GestureAction = GestureAction.OpenSearch,
+    val swipeUpAction: GestureAction = GestureAction.OpenAppDrawer,
     val swipeDownAction: GestureAction = GestureAction.OpenNotifications,
     val customAliases: Map<String, String> = emptyMap(), // alias -> package or uniqueKey
     val appFontScale: Float = 1.0f,

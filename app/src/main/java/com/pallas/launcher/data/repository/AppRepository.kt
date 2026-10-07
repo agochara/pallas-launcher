@@ -12,6 +12,7 @@ import android.os.UserManager
 import android.provider.Settings
 import android.widget.Toast
 import com.pallas.launcher.domain.model.AppItem
+import com.pallas.launcher.ui.apps.AppIconHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -112,6 +113,7 @@ class AppRepository(
     fun reloadApps() {
         reloadJob?.cancel()
         reloadJob = scope.launch(Dispatchers.IO) {
+            AppIconHelper.clear()
             val apps = queryInstalledApps()
             _rawInstalledApps.value = apps
             _isLoaded.value = true

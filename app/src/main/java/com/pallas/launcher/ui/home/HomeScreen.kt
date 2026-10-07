@@ -11,6 +11,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -80,6 +81,7 @@ fun PallasHomeScreen(
     val currentTime by viewModel.currentTime.collectAsState()
     val currentDate by viewModel.currentDate.collectAsState()
     val installedApps by viewModel.installedApps.collectAsState()
+    val favoriteApps by viewModel.favoriteApps.collectAsState()
     val isAppsLoaded by viewModel.isAppsLoaded.collectAsState()
 
     val overlay by viewModel.overlay.collectAsState()
@@ -165,12 +167,22 @@ fun PallasHomeScreen(
             }
         }
 
+        val isDrawerOrSearchActive = overlay is LauncherOverlay.Drawer || overlay is LauncherOverlay.Search
+        val homeAlpha by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (isDrawerOrSearchActive) 0f else 1f,
+            animationSpec = tween(220),
+            label = "home_content_alpha"
+        )
+
         val isClockTop = settings.clockVerticalPosition == ClockVerticalPosition.TOP
         val appsPos = settings.appsVerticalPosition
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .graphicsLayer {
+                    alpha = homeAlpha
+                }
                 .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
@@ -217,10 +229,7 @@ fun PallasHomeScreen(
                         fontScale = settings.appFontScale,
                         isLoaded = isAppsLoaded,
                         onAppClick = { app ->
-                            if (!app.isProfileRemoved) {
-                                viewModel.appUsageTracker.recordAppLaunch(app.packageName)
-                                viewModel.appRepository.launchApp(app.packageName, app.activityName, app.userHandle)
-                            }
+                            if (!app.isProfileRemoved) viewModel.launchApp(app.packageName, app.activityName, app.userHandle)
                         },
                         onAppLongClick = { app ->
                             viewModel.setAppToCustomize(app)
@@ -231,63 +240,36 @@ fun PallasHomeScreen(
                     )
                 }
             }
-
-            if (isClockTop) {
-                clockComposable()
-                when (appsPos) {
-                    AppsVerticalPosition.TOP -> {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        appsComposable()
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                    AppsVerticalPosition.CENTER -> {
-                        Spacer(modifier = Modifier.weight(1f))
-                        appsComposable()
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                    AppsVerticalPosition.BOTTOM -> {
-                        Spacer(modifier = Modifier.weight(1f))
-                        appsComposable()
-                        Spacer(modifier = Modifier.height(24.dp))
-                    }
-                }
-            } else { // Clock at Bottom
-                when (appsPos) {
-                    AppsVerticalPosition.TOP -> {
-                        appsComposable()
-                        Spacer(modifier = Modifier.weight(1f))
-                        clockComposable()
-                        Spacer(modifier = Modifier.height(24.dp))
-                    }
-                    AppsVerticalPosition.CENTER -> {
-                        Spacer(modifier = Modifier.weight(1f))
-                        appsComposable()
-                        Spacer(modifier = Modifier.weight(1f))
-                        clockComposable()
-                        Spacer(modifier = Modifier.height(24.dp))
-                    }
-                    AppsVerticalPosition.BOTTOM -> {
-                        Spacer(modifier = Modifier.weight(1f))
-                        appsComposable()
-                        Spacer(modifier = Modifier.height(16.dp))
-                        clockComposable()
-                        Spacer(modifier = Modifier.height(24.dp))
-                    }
-                }
+            val appsAlignment = when (appsPos) {
+                AppsVerticalPosition.TOP -> Alignment.TopCenter
+                AppsVerticalPosition.CENTER -> Alignment.Center
+                AppsVerticalPosition.BOTTOM -> Alignment.BottomCenter
             }
+
+            if (isClockTop) clockComposable()
+            Box(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = appsAlignment
+            ) { appsComposable() }
+            if (!isClockTop) {
+                clockComposable()
+                Spacer(Modifier.height(24.dp))
+            }
+
         }
     }
 
-    // Edge Scrub App Drawer
+    // Edge Scrub App Drawer - hidden while Search overlay is active to avoid rail bleed-through
+    if (overlay !is LauncherOverlay.Search) {
         AlphabeticalAppDrawer(
             installedApps = installedApps,
+            favoriteApps = favoriteApps,
             edgeScrubPosition = settings.edgeScrubPosition,
             edgeScrubReleaseAction = settings.edgeScrubReleaseAction,
             isOpen = overlay is LauncherOverlay.Drawer,
             onOpenChange = { viewModel.setAppDrawerOpen(it) },
             onLaunchApp = { app ->
                 viewModel.closeDrawer()
-                viewModel.appUsageTracker.recordAppLaunch(app.packageName)
                 viewModel.launchApp(app.packageName, app.activityName, app.userHandle)
             },
             onAppLongPress = { app ->
@@ -304,6 +286,7 @@ fun PallasHomeScreen(
             },
             onDismiss = { viewModel.closeDrawer() }
         )
+    }
 
         // Global Search Overlay
         AnimatedVisibility(

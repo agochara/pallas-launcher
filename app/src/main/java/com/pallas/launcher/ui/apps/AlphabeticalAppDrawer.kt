@@ -1,32 +1,33 @@
 package com.pallas.launcher.ui.apps
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -34,9 +35,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Shadow
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -49,21 +49,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -71,20 +73,45 @@ import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.model.EdgeScrubPosition
 import com.pallas.launcher.domain.model.EdgeScrubReleaseAction
 import com.pallas.launcher.domain.search.SearchRanking
-import com.pallas.launcher.ui.theme.LauncherTypography
-import com.pallas.launcher.ui.theme.LocalLauncherColors
-import kotlinx.coroutines.launch
+import com.pallas.launcher.ui.theme.NunitoFontFamily
+import com.pallas.launcher.ui.theme.launcherBackdropBrush
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 
-// Alphabet rail items matching Image 1 and 2
-private val RAIL_ITEMS = listOf("★") + ('A'..'Z').map { it.toString() } + listOf("•")
+/** Niagara rail: star (recent) on top, A-Z, dot (#) at the bottom. */
+private val RAIL_ITEMS: List<String> = listOf("★") + ('A'..'Z').map { it.toString() } + listOf("•")
+private val LETTER_ORDER: List<String> = ('A'..'Z').map { it.toString() } + "#"
 
-@OptIn(ExperimentalFoundationApi::class)
+private const val RECENT_HEADER = "Recent"
+
+private sealed interface DrawerRow {
+    val key: String
+
+    data class Header(val label: String) : DrawerRow {
+        override val key: String get() = "h_$label"
+    }
+
+    data class App(val app: AppItem, val section: String) : DrawerRow {
+        override val key: String get() = "a_${section}_${app.uniqueKey}"
+    }
+
+    data object Empty : DrawerRow {
+        override val key: String get() = "empty"
+    }
+}
+
+private fun bucketOf(app: AppItem): String {
+    val c = SearchRanking.normalize(app.label.trim()).firstOrNull()?.uppercaseChar()
+    return if (c != null && c in 'A'..'Z') c.toString() else "#"
+}
+
+private fun railToBucket(rail: String): String = if (rail == "•") "#" else rail
+
 @Composable
 fun AlphabeticalAppDrawer(
     installedApps: List<AppItem>,
+    favoriteApps: List<AppItem> = emptyList(),
     edgeScrubPosition: EdgeScrubPosition,
     edgeScrubReleaseAction: EdgeScrubReleaseAction,
     isOpen: Boolean,
@@ -94,381 +121,364 @@ fun AlphabeticalAppDrawer(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (edgeScrubPosition == EdgeScrubPosition.OFF && !isOpen) {
-        return
-    }
-
-    val colors = LocalLauncherColors.current
+    val colorScheme = MaterialTheme.colorScheme
     val haptic = LocalHapticFeedback.current
-    val coroutineScope = rememberCoroutineScope()
-    val fullListState = rememberLazyListState()
     val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val topInset = (configuration.screenHeightDp.dp * 0.26f).coerceAtLeast(120.dp)
+    val isLeft = edgeScrubPosition == EdgeScrubPosition.LEFT
 
-    // Strict alphabetical order by normalized label
-    val sortedApps = remember(installedApps) {
-        installedApps.sortedWith(
-            compareBy<AppItem> { SearchRanking.normalize(it.label) }
-                .thenBy { it.label }
-        )
+    // ---------------------------------------------------------------- data
+    val buckets: Map<String, List<AppItem>> = remember(installedApps) {
+        installedApps
+            .sortedWith(compareBy<AppItem>({ SearchRanking.normalize(it.label) }, { it.label }))
+            .groupBy { bucketOf(it) }
     }
 
-    // Apps grouped by letter for the full idle list
-    val groupedApps = remember(sortedApps) {
-        val map = linkedMapOf<String, MutableList<AppItem>>()
-        for (app in sortedApps) {
-            val norm = SearchRanking.normalize(app.label.trim())
-            val first = norm.firstOrNull()?.uppercaseChar() ?: '#'
-            val letter = if (first in 'A'..'Z') first.toString() else "#"
-            map.getOrPut(letter) { mutableListOf() }.add(app)
+    val fullRows: List<DrawerRow> = remember(buckets, favoriteApps) {
+        buildList {
+            if (favoriteApps.isNotEmpty()) {
+                add(DrawerRow.Header(RECENT_HEADER))
+                favoriteApps.forEach { add(DrawerRow.App(it, "recent")) }
+            }
+            LETTER_ORDER.forEach { letter ->
+                val apps = buckets[letter] ?: return@forEach
+                add(DrawerRow.Header(letter))
+                apps.forEach { add(DrawerRow.App(it, letter)) }
+            }
         }
-        map
     }
 
-    // Map each letter to its index in LazyColumn
-    val letterToScrollIndex = remember(groupedApps) {
-        val map = mutableMapOf<String, Int>()
-        var currentIndex = 0
-        groupedApps.forEach { (letter, appsInLetter) ->
-            map[letter] = currentIndex
-            // 1 item for header + N items for apps
-            currentIndex += 1 + appsInLetter.size
+    val headerIndex: Map<String, Int> = remember(fullRows) {
+        buildMap {
+            fullRows.forEachIndexed { i, row -> if (row is DrawerRow.Header) put(row.label, i) }
         }
-        map
     }
 
+    /** Index to scroll to for a rail item. Letters with no apps jump to the next letter that has some. */
+    fun scrollIndexFor(rail: String): Int {
+        if (rail == "★") return headerIndex[RECENT_HEADER] ?: 0
+        val bucket = railToBucket(rail)
+        val start = LETTER_ORDER.indexOf(bucket).coerceAtLeast(0)
+        for (i in start until LETTER_ORDER.size) {
+            headerIndex[LETTER_ORDER[i]]?.let { return it }
+        }
+        return fullRows.lastIndex.coerceAtLeast(0)
+    }
+
+    fun appsFor(rail: String): List<AppItem> =
+        if (rail == "★") favoriteApps else buckets[railToBucket(rail)].orEmpty()
+
+    // ------------------------------------------------------------- state
     var isScrubbing by remember { mutableStateOf(false) }
     var activeLetter by remember { mutableStateOf("A") }
     var touchYPx by remember { mutableFloatStateOf(0f) }
     var railHeightPx by remember { mutableFloatStateOf(1f) }
+    var pendingScrollTo by remember { mutableStateOf<String?>(null) }
 
-    // Smooth wave animated states (no abrupt snapping)
+    val fullListState = rememberLazyListState()
+    val scrubListState = rememberLazyListState()
+
+    val scrubRows: List<DrawerRow> = remember(activeLetter, buckets, favoriteApps) {
+        val apps = appsFor(activeLetter)
+        buildList {
+            add(DrawerRow.Header(if (activeLetter == "★") RECENT_HEADER else railToBucket(activeLetter)))
+            if (apps.isEmpty()) add(DrawerRow.Empty) else apps.forEach { add(DrawerRow.App(it, "scrub")) }
+        }
+    }
+
+    // Reset to top whenever the drawer closes so it always re-opens at "Recent / A".
+    LaunchedEffect(isOpen) {
+        if (!isOpen) {
+            fullListState.scrollToItem(0)
+            pendingScrollTo = null
+        }
+    }
+
+    // Jump to the chosen letter only AFTER the full list is back on screen.
+    LaunchedEffect(pendingScrollTo, isScrubbing) {
+        val target = pendingScrollTo
+        if (target != null && !isScrubbing) {
+            fullListState.scrollToItem(scrollIndexFor(target))
+            pendingScrollTo = null
+        }
+    }
+
+    // ---- values read from inside the long-lived pointerInput block must NOT be captured by value.
+    val latestIsOpen by rememberUpdatedState(isOpen)
+    val latestOnOpenChange by rememberUpdatedState(onOpenChange)
+    val latestOnLaunch by rememberUpdatedState(onLaunchApp)
+    val latestOnDismiss by rememberUpdatedState(onDismiss)
+    val latestReleaseAction by rememberUpdatedState(edgeScrubReleaseAction)
+    val latestAppsFor by rememberUpdatedState<(String) -> List<AppItem>>(::appsFor)
+
     val animatedBulge by animateFloatAsState(
         targetValue = if (isScrubbing) 1f else 0f,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
         label = "rail_bulge"
     )
-
     val animatedTouchY by animateFloatAsState(
         targetValue = touchYPx,
         animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = 0.9f),
         label = "rail_touch_y"
     )
 
-    // Apps for currently active scrubbed letter
-    val currentLetterApps = remember(activeLetter, sortedApps) {
-        if (activeLetter == "★") {
-            sortedApps.take(8)
-        } else if (activeLetter == "•" || activeLetter == "#") {
-            sortedApps.filter { app ->
-                val norm = SearchRanking.normalize(app.label.trim())
-                val c = norm.firstOrNull()?.uppercaseChar() ?: '#'
-                c !in 'A'..'Z'
-            }
-        } else {
-            val targetChar = activeLetter.firstOrNull()?.uppercaseChar()
-            if (targetChar != null) {
-                sortedApps.filter { app ->
-                    val norm = SearchRanking.normalize(app.label.trim())
-                    val c = norm.firstOrNull()?.uppercaseChar() ?: '#'
-                    c == targetChar
-                }
-            } else {
-                emptyList()
-            }
-        }
-    }
+    val stripAlignment = if (isLeft) Alignment.BottomStart else Alignment.BottomEnd
+    val dismissDragPx = with(density) { 96.dp.toPx() }
 
-    val isLeft = edgeScrubPosition == EdgeScrubPosition.LEFT
-    val stripAlignment = if (isLeft) Alignment.CenterStart else Alignment.CenterEnd
+    Box(modifier = modifier.fillMaxSize()) {
 
-    Box(
-        modifier = modifier.fillMaxSize()
-    ) {
-        val scrimColor = if (colors.isDark) Color(0x99000000) else Color(0x55000000)
-
-        // App List Overlay (Faint overlay over wallpaper for high contrast & readability)
+        // ------------------------------------------------------- list overlay
         AnimatedVisibility(
             visible = isOpen,
-            enter = if (isLeft) slideInHorizontally { -it } + fadeIn() else slideInHorizontally { it } + fadeIn(),
-            exit = if (isLeft) slideOutHorizontally { -it } + fadeOut() else slideOutHorizontally { it } + fadeOut()
+            enter = fadeIn(tween(200)) + slideInVertically(tween(260, easing = FastOutSlowInEasing)) { it / 12 },
+            exit = fadeOut(tween(160)) + slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { it / 12 }
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(scrimColor)
+                    .background(launcherBackdropBrush())
                     .statusBarsPadding()
                     .navigationBarsPadding()
+                    // tap on the empty wallpaper area dismisses
+                    .pointerInput(Unit) { detectTapGestures(onTap = { latestOnDismiss() }) }
+                    // cumulative horizontal drag towards the rail's opposite side dismisses
                     .pointerInput(isLeft) {
-                        detectHorizontalDragGestures { _, dragAmount ->
-                            if (isLeft && dragAmount < -40f) {
-                                onDismiss()
-                            } else if (!isLeft && dragAmount > 40f) {
-                                onDismiss()
-                            }
-                        }
+                        var total = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { total = 0f },
+                            onDragEnd = {
+                                if ((isLeft && total < -dismissDragPx) || (!isLeft && total > dismissDragPx)) {
+                                    latestOnDismiss()
+                                }
+                                total = 0f
+                            },
+                            onDragCancel = { total = 0f },
+                            onHorizontalDrag = { _, amount -> total += amount }
+                        )
                     },
                 contentAlignment = Alignment.TopCenter
             ) {
-                val textShadow = Shadow(
-                    color = Color.Black.copy(alpha = 0.65f),
-                    offset = Offset(0f, 1.5f),
-                    blurRadius = 4f
-                )
-
-                if (isScrubbing) {
-                    // Actively scrolling through the list -> ONLY apps under activeLetter visible!
-                    Column(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .widthIn(max = 520.dp)
-                            .fillMaxWidth()
-                            .padding(
-                                start = if (isLeft) 44.dp else 24.dp,
-                                end = if (isLeft) 24.dp else 56.dp
-                            )
-                    ) {
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Large Section Letter Header (e.g. "I")
-                        Text(
-                            text = if (activeLetter == "★") "Favorites" else activeLetter,
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 28.sp,
-                                shadow = textShadow
-                            ),
-                            color = colors.textPrimary,
-                            modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 12.dp)
-                        )
-
-                        // Apps under active letter
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            items(
-                                items = currentLetterApps,
-                                key = { it.uniqueKey }
-                            ) { app ->
-                                AppRowItem(
-                                    app = app,
-                                    textShadow = textShadow,
-                                    onClick = { onLaunchApp(app) },
-                                    onLongClick = { onAppLongPress(app) }
-                                )
-                            }
-
-                            item {
-                                Spacer(modifier = Modifier.height(64.dp))
-                            }
-                        }
-                    }
-                } else {
-                    // Normal idle state -> full list separated by letter headers
-                    Column(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .widthIn(max = 520.dp)
-                            .fillMaxWidth()
-                            .padding(
-                                start = if (isLeft) 44.dp else 24.dp,
-                                end = if (isLeft) 24.dp else 56.dp
-                            )
-                    ) {
-                        LazyColumn(
-                            state = fullListState,
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            item {
-                                Spacer(modifier = Modifier.height(16.dp))
-                            }
-
-                            groupedApps.forEach { (letter, appsInLetter) ->
-                                item(key = "header_$letter") {
-                                    Text(
-                                        text = letter,
-                                        style = MaterialTheme.typography.titleLarge.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 22.sp,
-                                            shadow = textShadow
-                                        ),
-                                        color = colors.textPrimary,
-                                        modifier = Modifier.padding(start = 12.dp, top = 20.dp, bottom = 8.dp)
-                                    )
-                                }
-
-                                items(
-                                    items = appsInLetter,
-                                    key = { it.uniqueKey }
-                                ) { app ->
-                                    AppRowItem(
-                                        app = app,
-                                        textShadow = textShadow,
-                                        onClick = { onLaunchApp(app) },
-                                        onLongClick = { onAppLongPress(app) }
-                                    )
-                                }
-                            }
-
-                            item {
-                                Spacer(modifier = Modifier.height(96.dp))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Floating Letter Bubble at the peak of the curve (Image 2: rich green circle with white letter)
-        if (isScrubbing && animatedBulge > 0.05f) {
-            val bubbleRadiusPx = with(density) { 26.dp.toPx() }
-            val bubbleY = (animatedTouchY - bubbleRadiusPx).coerceIn(
-                with(density) { 32.dp.toPx() },
-                (railHeightPx - with(density) { 64.dp.toPx() }).coerceAtLeast(32f)
-            )
-
-            val bubbleBulgeOffset = with(density) { (72.dp.toPx() * animatedBulge) }
-            val bubbleAlignment = if (isLeft) Alignment.TopStart else Alignment.TopEnd
-            val bubblePaddingModifier = if (isLeft) {
-                Modifier.padding(start = 28.dp)
-            } else {
-                Modifier.padding(end = 28.dp)
-            }
-
-            Box(
-                modifier = Modifier
-                    .align(bubbleAlignment)
-                    .then(bubblePaddingModifier)
-                    .offset {
-                        IntOffset(
-                            x = if (isLeft) bubbleBulgeOffset.roundToInt() else -bubbleBulgeOffset.roundToInt(),
-                            y = bubbleY.roundToInt()
-                        )
-                    }
-                    .shadow(6.dp, CircleShape)
-                    .clip(CircleShape)
-                    .background(Color(0xFF2E7D32)) // Rich green as shown in Image 2
-                    .size(52.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = activeLetter,
-                    style = LauncherTypography.clock.copy(
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = Color.White
-                )
-            }
-        }
-
-        // Edge Alphabet Rail with Smooth Niagara-Style Curve Animation (Image 1 & 2)
-        Box(
-            modifier = Modifier
-                .align(stripAlignment)
-                .fillMaxHeight()
-                .width(42.dp)
-                .systemGestureExclusion()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .onGloballyPositioned { coordinates ->
-                    railHeightPx = coordinates.size.height.toFloat().coerceAtLeast(1f)
-                }
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown()
-                        down.consume()
-
-                        isScrubbing = true
-                        if (!isOpen) {
-                            onOpenChange(true)
-                        }
-
-                        fun updateTouch(y: Float) {
-                            touchYPx = y
-                            val fraction = (y / size.height).coerceIn(0f, 1f)
-                            val slotIdx = (fraction * (RAIL_ITEMS.size - 1)).roundToInt().coerceIn(0, RAIL_ITEMS.size - 1)
-                            val targetLetter = RAIL_ITEMS[slotIdx]
-
-                            if (targetLetter != activeLetter) {
-                                activeLetter = targetLetter
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            }
-                        }
-
-                        updateTouch(down.position.y)
-
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull() ?: break
-                            if (!change.pressed) {
-                                change.consume()
-                                break
-                            }
-                            change.consume()
-                            updateTouch(change.position.y)
-                        }
-
-                        isScrubbing = false
-                        val finalLetter = activeLetter
-
-                        // If configured to launch on release:
-                        if (edgeScrubReleaseAction == EdgeScrubReleaseAction.LAUNCH_TOP) {
-                            val topApp = currentLetterApps.firstOrNull()
-                            if (topApp != null) {
-                                onLaunchApp(topApp)
-                                onOpenChange(false)
-                            }
-                        } else {
-                            // Scroll full list to that letter upon release
-                            val targetIndex = letterToScrollIndex[finalLetter]
-                            if (targetIndex != null) {
-                                coroutineScope.launch {
-                                    fullListState.scrollToItem(targetIndex)
-                                }
-                            }
-                        }
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            // Letters column with smooth wave arc deformation
-            Column(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .padding(vertical = 12.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                val radiusPx = with(density) { 130.dp.toPx() }
-                val maxBulgePx = with(density) { 48.dp.toPx() }
-
-                RAIL_ITEMS.forEachIndexed { index, letter ->
-                    val letterFraction = index.toFloat() / (RAIL_ITEMS.size - 1)
-                    val letterY = letterFraction * railHeightPx
-                    val dist = abs(letterY - animatedTouchY)
-
-                    val factor = if (dist < radiusPx) {
-                        val norm = dist / radiusPx
-                        ((cos(norm * Math.PI.toFloat()) + 1f) / 2f) * animatedBulge
-                    } else 0f
-
-                    val xOffset = if (isLeft) (factor * maxBulgePx) else -(factor * maxBulgePx)
-                    val scale = 1f + (factor * 0.45f)
-                    val isCurrent = letter == activeLetter && isScrubbing
-
-                    Text(
-                        text = letter,
-                        fontSize = 11.sp,
-                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isCurrent) Color(0xFF2E7D32) else colors.textPrimary.copy(alpha = 0.85f),
-                        modifier = Modifier
-                            .graphicsLayer {
-                                translationX = xOffset
-                                scaleX = scale
-                                scaleY = scale
-                            }
+                Crossfade(
+                    targetState = isScrubbing,
+                    animationSpec = tween(120),
+                    label = "scrub_crossfade"
+                ) { scrubbing ->
+                    DrawerList(
+                        rows = if (scrubbing) scrubRows else fullRows,
+                        state = if (scrubbing) scrubListState else fullListState,
+                        topInset = topInset,
+                        isLeft = isLeft,
+                        onLaunchApp = onLaunchApp,
+                        onAppLongPress = onAppLongPress
                     )
                 }
+            }
+        }
+
+        // ----------------------------------------------------------- rail
+        if (edgeScrubPosition != EdgeScrubPosition.OFF) {
+            Box(
+                modifier = Modifier
+                    .align(stripAlignment)
+                    .fillMaxHeight(0.72f)
+                    .navigationBarsPadding()
+                    .width(110.dp),
+                contentAlignment = if (isLeft) Alignment.CenterStart else Alignment.CenterEnd
+            ) {
+                // Floating letter bubble
+                if (isScrubbing && animatedBulge > 0.05f) {
+                    val bubbleRadiusPx = with(density) { 26.dp.toPx() }
+                    val bubbleY = (animatedTouchY - bubbleRadiusPx)
+                        .coerceIn(0f, (railHeightPx - bubbleRadiusPx * 2).coerceAtLeast(0f))
+                    val bulgePx = with(density) { 72.dp.toPx() * animatedBulge }
+
+                    Box(
+                        modifier = Modifier
+                            .align(if (isLeft) Alignment.TopStart else Alignment.TopEnd)
+                            .padding(
+                                start = if (isLeft) 24.dp else 0.dp,
+                                end = if (!isLeft) 24.dp else 0.dp
+                            )
+                            .offset {
+                                IntOffset(
+                                    x = if (isLeft) bulgePx.roundToInt() else -bulgePx.roundToInt(),
+                                    y = bubbleY.roundToInt()
+                                )
+                            }
+                            .shadow(8.dp, CircleShape)
+                            .clip(CircleShape)
+                            .background(colorScheme.primary)
+                            .size(52.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = activeLetter,
+                            style = TextStyle(
+                                fontFamily = NunitoFontFamily,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = colorScheme.onPrimary
+                        )
+                    }
+                }
+
+                // Touch strip + letters
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(42.dp)
+                        .systemGestureExclusion()
+                        .onGloballyPositioned { railHeightPx = it.size.height.toFloat().coerceAtLeast(1f) }
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                down.consume()
+
+                                fun slotFor(y: Float): String {
+                                    val h = size.height.toFloat().coerceAtLeast(1f)
+                                    val idx = ((y / h) * RAIL_ITEMS.size).toInt().coerceIn(0, RAIL_ITEMS.lastIndex)
+                                    return RAIL_ITEMS[idx]
+                                }
+
+                                fun update(y: Float) {
+                                    touchYPx = y
+                                    val letter = slotFor(y)
+                                    if (letter != activeLetter) {
+                                        activeLetter = letter
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                }
+
+                                isScrubbing = true
+                                if (!latestIsOpen) latestOnOpenChange(true)
+                                update(down.position.y)
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull() ?: break
+                                    change.consume()
+                                    if (!change.pressed) break
+                                    update(change.position.y)
+                                }
+
+                                isScrubbing = false
+                                val letter = activeLetter
+
+                                if (latestReleaseAction == EdgeScrubReleaseAction.LAUNCH_TOP) {
+                                    val top = latestAppsFor(letter).firstOrNull()
+                                    if (top != null) {
+                                        latestOnLaunch(top)
+                                        latestOnOpenChange(false)
+                                    } else {
+                                        pendingScrollTo = letter
+                                    }
+                                } else {
+                                    pendingScrollTo = letter
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    val slotPx = railHeightPx / RAIL_ITEMS.size
+                    val slotDp = slotPx / density.density
+                    val letterSize = (slotDp * 0.62f).coerceIn(8f, 13f).sp
+                    val radiusPx = with(density) { 180.dp.toPx() }
+                    val maxBulgePx = with(density) { 72.dp.toPx() }
+
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        RAIL_ITEMS.forEachIndexed { index, letter ->
+                            // Every slot has identical height, so this matches the touch -> slot mapping exactly.
+                            val letterY = (index + 0.5f) * slotPx
+                            val dist = abs(letterY - animatedTouchY)
+                            val factor = if (dist < radiusPx) {
+                                ((cos((dist / radiusPx) * Math.PI.toFloat()) + 1f) / 2f) * animatedBulge
+                            } else 0f
+                            val isCurrent = isScrubbing && letter == activeLetter
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = letter,
+                                    style = TextStyle(
+                                        fontFamily = NunitoFontFamily,
+                                        fontSize = letterSize,
+                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold
+                                    ),
+                                    color = if (isCurrent) colorScheme.primary
+                                    else colorScheme.onSurface.copy(alpha = if (isScrubbing) 0.85f else 0.70f),
+                                    modifier = Modifier.graphicsLayer {
+                                        translationX = if (isLeft) factor * maxBulgePx else -(factor * maxBulgePx)
+                                        val s = 1f + factor * 0.45f
+                                        scaleX = s
+                                        scaleY = s
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+
+@Composable
+private fun DrawerList(
+    rows: List<DrawerRow>,
+    state: LazyListState,
+    topInset: Dp,
+    isLeft: Boolean,
+    onLaunchApp: (AppItem) -> Unit,
+    onAppLongPress: (AppItem) -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+
+    LazyColumn(
+        state = state,
+        contentPadding = PaddingValues(top = topInset, bottom = 110.dp),
+        modifier = Modifier
+            .fillMaxHeight()
+            .widthIn(max = 520.dp)
+            .fillMaxWidth()
+            // keep rows clear of the rail
+            .padding(start = if (isLeft) 64.dp else 24.dp, end = if (isLeft) 24.dp else 64.dp)
+    ) {
+        items(items = rows, key = { it.key }) { row ->
+            when (row) {
+                is DrawerRow.Header -> Text(
+                    text = row.label,
+                    style = TextStyle(
+                        fontFamily = NunitoFontFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 20.sp
+                    ),
+                    color = colorScheme.primary,
+                    modifier = Modifier.padding(start = 12.dp, top = 20.dp, bottom = 8.dp)
+                )
+
+                is DrawerRow.App -> AppRowItem(
+                    app = row.app,
+                    onClick = { onLaunchApp(row.app) },
+                    onLongClick = { onAppLongPress(row.app) }
+                )
+
+                DrawerRow.Empty -> Text(
+                    text = "No apps",
+                    style = TextStyle(fontFamily = NunitoFontFamily, fontSize = 15.sp),
+                    color = colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp, top = 8.dp)
+                )
             }
         }
     }
@@ -478,39 +488,41 @@ fun AlphabeticalAppDrawer(
 @Composable
 private fun AppRowItem(
     app: AppItem,
-    textShadow: Shadow = Shadow.None,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val colors = LocalLauncherColors.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, label = "row_press")
 
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                alpha = if (pressed) 0.75f else 1f
+            }
             .combinedClickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interaction,
                 indication = null,
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(horizontal = 12.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AppIconImage(
-            app = app,
-            size = 42.dp,
-            shape = CircleShape
-        )
-        Spacer(modifier = Modifier.width(16.dp))
+        AppIconImage(app = app, size = 48.dp, shape = CircleShape)
+        Spacer(modifier = Modifier.width(22.dp))
         Text(
             text = app.label,
-            style = LauncherTypography.appLabel.copy(
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Normal,
-                shadow = textShadow
+            style = TextStyle(
+                fontFamily = NunitoFontFamily,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
             ),
-            color = colors.textPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )

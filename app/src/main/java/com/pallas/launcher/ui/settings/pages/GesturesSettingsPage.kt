@@ -59,6 +59,7 @@ fun GesturesSettingsPage(
             is GestureAction.OpenSearch -> "Open Search"
             is GestureAction.OpenNotifications -> "Open Notifications"
             is GestureAction.OpenQuickSettings -> "Open Quick Settings"
+            is GestureAction.OpenAppDrawer -> "Open App List"
             is GestureAction.LaunchApp -> {
                 val app = installedApps.find { it.packageName == action.packageName }
                 if (app != null) "Launch ${app.label}" else "Launch App (${action.packageName})"
@@ -73,6 +74,7 @@ fun GesturesSettingsPage(
         GestureAction.OpenSearch to "Open Search",
         GestureAction.OpenNotifications to "Open Notifications",
         GestureAction.OpenQuickSettings to "Open Quick Settings",
+        GestureAction.OpenAppDrawer to "Open App List",
         GestureAction.None to "None"
     )
 
@@ -92,15 +94,14 @@ fun GesturesSettingsPage(
                 SettingsSectionHeader("Vertical Swipes")
                 SettingsSegmentedRow(
                     title = "Swipe Up",
-                    options = listOf(GestureAction.OpenSearch, GestureAction.None),
+                    options = listOf(GestureAction.OpenAppDrawer, GestureAction.OpenSearch, GestureAction.None),
                     selected = settings.swipeUpAction,
                     onSelected = { viewModel.updateGestureActions(swipeUp = it) },
-                    label = {
-                        when (it) {
-                            GestureAction.OpenSearch -> "Search"
-                            else -> "None"
-                        }
-                    }
+                    label = { when (it) {
+                        GestureAction.OpenAppDrawer -> "Apps"
+                        GestureAction.OpenSearch -> "Search"
+                        else -> "None"
+                    } }
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
 

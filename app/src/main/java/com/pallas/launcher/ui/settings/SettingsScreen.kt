@@ -10,6 +10,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -22,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import com.pallas.launcher.ui.MainViewModel
 import com.pallas.launcher.ui.settings.pages.AppearanceSettingsPage
 import com.pallas.launcher.ui.settings.pages.ClockDateSettingsPage
@@ -68,6 +70,7 @@ fun SettingsScreen(
             modifier = modifier
                 .fillMaxSize()
                 .background(colorScheme.surface)
+                .pointerInput(Unit) { detectTapGestures { } }
                 .statusBarsPadding()
                 .navigationBarsPadding()
         ) {

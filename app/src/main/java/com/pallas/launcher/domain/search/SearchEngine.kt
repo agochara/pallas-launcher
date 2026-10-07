@@ -8,11 +8,13 @@ class SearchEngine(
 ) {
     val searchIndex = AppSearchIndex(appUsageTracker)
 
-    fun updateIndex(apps: List<AppItem>, aliases: Map<String, String>) {
-        searchIndex.buildIndex(apps, aliases)
+    fun updateIndex(
+        apps: List<AppItem>,
+        aliases: Map<String, String>,
+        customLabels: Map<String, String> = emptyMap()
+    ) {
+        searchIndex.buildIndex(apps, aliases, customLabels)
     }
 
-    fun search(rawQuery: String): List<AppSearchResult> {
-        return searchIndex.search(rawQuery)
-    }
+    fun search(rawQuery: String): List<AppSearchResult> = searchIndex.search(rawQuery)
 }

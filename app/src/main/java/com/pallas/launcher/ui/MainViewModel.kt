@@ -55,6 +55,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context = application.applicationContext
 
+    val appUsageTracker = AppUsageTracker(context)
     private val settingsRepository = SettingsRepository(context)
     val appRepository = AppRepository(context, viewModelScope, settingsRepository)
     private val screenRepository = ScreenRepository(context)
@@ -63,6 +64,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isAppsLoaded: StateFlow<Boolean> = appRepository.isLoaded
     val screens: StateFlow<List<HomeScreen>> = screenRepository.screens
     val settings: StateFlow<LauncherSettings> = settingsRepository.settings
+
+    val favoriteApps: StateFlow<List<AppItem>> =
+        combine(installedApps, appUsageTracker.recentPackages) { apps, recents ->
+            recents.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } }.take(8)
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _currentScreenIndex = MutableStateFlow(0)
     val currentScreenIndex: StateFlow<Int> = combine(_currentScreenIndex, screenRepository.screens) { index, screenList ->
@@ -111,8 +117,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val appToCustomize: StateFlow<ScreenApp?> = _overlay
         .map { (it as? LauncherOverlay.AppOptions)?.app }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
-
-    val appUsageTracker = AppUsageTracker(context)
 
     private val searchEngine = SearchEngine(
         appUsageTracker = appUsageTracker
@@ -163,11 +167,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            combine(installedApps, settings) { apps, currentSettings ->
-                apps to currentSettings.customAliases
-            }.collect { (apps, aliases) ->
-                searchEngine.updateIndex(apps, aliases)
-            }
+            combine(installedApps, settings, screens) { apps, s, screenList ->
+                val custom = screenList.flatMap { it.apps }
+                    .filter { !it.customLabel.isNullOrBlank() }
+                    .associate { it.uniqueKey to it.customLabel!! }
+                Triple(apps, s.customAliases, custom)
+            }.collect { (apps, aliases, custom) -> searchEngine.updateIndex(apps, aliases, custom) }
         }
     }
 
@@ -221,6 +226,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _overlay.value = LauncherOverlay.None
         }
     }
+
+
+
 
     fun setAppDrawerOpen(open: Boolean) {
         if (open) openDrawer() else closeDrawer()
@@ -295,18 +303,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun launchSearchResult(result: AppSearchResult) {
         dismissOverlay()
-        appUsageTracker.recordAppLaunch(result.app.packageName)
-        appRepository.launchApp(result.app.packageName, result.app.activityName, result.app.userHandle)
+        launchApp(result.app.packageName, result.app.activityName, result.app.userHandle)
     }
 
     fun executeGesture(action: GestureAction) {
         when (action) {
             is GestureAction.OpenSearch -> openSearch()
+            is GestureAction.OpenAppDrawer -> openDrawer()
             is GestureAction.OpenNotifications -> SystemActionsManager.expandStatusBar(context)
             is GestureAction.OpenQuickSettings -> SystemActionsManager.expandQuickSettings(context)
             is GestureAction.OpenCamera -> SystemActionsManager.openCamera(context)
             is GestureAction.OpenDialer -> SystemActionsManager.openDialer(context)
-            is GestureAction.LaunchApp -> appRepository.launchApp(action.packageName, null)
+            is GestureAction.LaunchApp -> launchApp(action.packageName)
             is GestureAction.None -> Unit
         }
     }
@@ -320,6 +328,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun launchApp(packageName: String, activityName: String? = null, userHandle: UserHandle? = null) {
+        appUsageTracker.recordAppLaunch(packageName)
         appRepository.launchApp(packageName, activityName, userHandle)
     }
 

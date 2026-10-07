@@ -19,10 +19,12 @@ class AppSearchIndex(
     data class IndexedApp(
         val app: AppItem,
         val normalizedLabel: String,
-        val words: List<String>,
         val normalizedWords: List<String>,
+        /** start offset of each word inside [normalizedLabel] (same length as [normalizedWords]) */
+        val wordStarts: List<Int>,
         val initials: String,
-        val wordStartIndices: List<Int>
+        /** true when this entry was built from a user-renamed label (ranges don't map onto app.label) */
+        val isCustomLabel: Boolean
     )
 
     data class AliasEntry(
@@ -36,31 +38,22 @@ class AppSearchIndex(
     @Volatile
     private var aliasEntries: List<AliasEntry> = emptyList()
 
-    fun buildIndex(apps: List<AppItem>, aliases: Map<String, String>) {
-        val newIndexed = apps.map { app ->
-            val normLabel = SearchRanking.normalize(app.label)
-            val words = SearchRanking.extractWords(app.label)
-            val normWords = words.map { SearchRanking.normalize(it) }
-
-            val initialsBuilder = StringBuilder()
-            val startIndices = mutableListOf<Int>()
-            for (word in words) {
-                val normW = SearchRanking.normalize(word)
-                val idx = normLabel.indexOf(normW)
-                if (idx != -1) {
-                    initialsBuilder.append(normW.firstOrNull() ?: "")
-                    startIndices.add(idx)
-                }
+    /**
+     * @param customLabels uniqueKey -> user-chosen label (Rename Display Label). Both the original and the
+     *                     custom label are searchable.
+     */
+    fun buildIndex(
+        apps: List<AppItem>,
+        aliases: Map<String, String>,
+        customLabels: Map<String, String> = emptyMap()
+    ) {
+        val entries = ArrayList<IndexedApp>(apps.size + customLabels.size)
+        for (app in apps) {
+            entries += makeEntry(app, app.label, isCustom = false)
+            val custom = customLabels[app.uniqueKey]?.trim().orEmpty()
+            if (custom.isNotEmpty() && !custom.equals(app.label, ignoreCase = true)) {
+                entries += makeEntry(app, custom, isCustom = true)
             }
-
-            IndexedApp(
-                app = app,
-                normalizedLabel = normLabel,
-                words = words,
-                normalizedWords = normWords,
-                initials = initialsBuilder.toString(),
-                wordStartIndices = startIndices
-            )
         }
 
         val newAliases = mutableListOf<AliasEntry>()
@@ -68,108 +61,118 @@ class AppSearchIndex(
             val normAlias = SearchRanking.normalize(alias.trim())
             if (normAlias.isEmpty()) continue
 
-            // Resolve target app by exact uniqueKey, packageName, or activityName
-            val targetApp = apps.find {
-                it.uniqueKey == target ||
-                it.packageName.equals(target, ignoreCase = true) ||
-                it.activityName.equals(target, ignoreCase = true)
-            }
-            if (targetApp != null) {
-                newAliases.add(AliasEntry(normAlias, targetApp))
-            }
+            val normTarget = SearchRanking.normalize(target.trim())
+            // Aliases created from the long-press menu store a package name / uniqueKey,
+            // aliases typed in Settings store an app NAME - support both.
+            val targetApp = apps.firstOrNull { it.uniqueKey == target }
+                ?: apps.firstOrNull { it.packageName.equals(target, ignoreCase = true) }
+                ?: apps.firstOrNull { it.activityName.equals(target, ignoreCase = true) }
+                ?: apps.firstOrNull { SearchRanking.normalize(it.label) == normTarget }
+            if (targetApp != null) newAliases += AliasEntry(normAlias, targetApp)
         }
 
-        indexedApps = newIndexed
+        indexedApps = entries
         aliasEntries = newAliases
+    }
+
+    private fun makeEntry(app: AppItem, label: String, isCustom: Boolean): IndexedApp {
+        val normLabel = SearchRanking.normalize(label)
+        val words = SearchRanking.extractWords(label).map { SearchRanking.normalize(it) }.filter { it.isNotEmpty() }
+
+        val starts = ArrayList<Int>(words.size)
+        val keptWords = ArrayList<String>(words.size)
+        val initials = StringBuilder()
+        var cursor = 0
+        for (w in words) {
+            // search from the running cursor so repeated words ("Google Google") don't all map to the first one
+            val idx = normLabel.indexOf(w, cursor)
+            if (idx == -1) continue
+            starts += idx
+            keptWords += w
+            initials.append(w[0])
+            cursor = idx + w.length
+        }
+
+        return IndexedApp(
+            app = app,
+            normalizedLabel = normLabel,
+            normalizedWords = keptWords,
+            wordStarts = starts,
+            initials = initials.toString(),
+            isCustomLabel = isCustom
+        )
     }
 
     fun search(rawQuery: String): List<AppSearchResult> {
         val trimmed = rawQuery.trim()
         if (trimmed.isEmpty()) return emptyList()
-
         val q = SearchRanking.normalize(trimmed)
         if (q.isEmpty()) return emptyList()
+        val qLen = q.length
 
-        val candidates = mutableMapOf<String, AppSearchResult>()
+        val candidates = HashMap<String, AppSearchResult>()
 
-        // 1. Check User Aliases: Tier 0 (base 10000.0)
-        for (aliasEntry in aliasEntries) {
-            if (q == aliasEntry.normalizedAlias) {
-                val app = aliasEntry.targetApp
-                val frecency = appUsageTracker?.getUsageBonus(app.packageName) ?: 0.0
-                val score = MatchTier.ALIAS.baseScore + frecency
-                candidates[app.uniqueKey] = AppSearchResult(
-                    app = app,
-                    score = score,
-                    matchedRanges = listOf(0 until app.label.length)
-                )
+        fun offer(app: AppItem, score: Double, ranges: List<IntRange>) {
+            val existing = candidates[app.uniqueKey]
+            if (existing == null || score > existing.score) {
+                candidates[app.uniqueKey] = AppSearchResult(app = app, score = score, matchedRanges = ranges)
             }
         }
 
-        // 2. Search indexed apps
-        val qLen = q.length
+        // 1. aliases (exact)
+        for (entry in aliasEntries) {
+            if (q == entry.normalizedAlias) {
+                val frecency = appUsageTracker?.getUsageBonus(entry.targetApp.packageName) ?: 0.0
+                offer(entry.targetApp, MatchTier.ALIAS.baseScore + frecency, emptyList())
+            }
+        }
 
+        // 2. label matching
         for (item in indexedApps) {
             val label = item.normalizedLabel
-            val app = item.app
+            var tier = MatchTier.NONE
+            var sub = 0.0
+            var ranges: List<IntRange> = emptyList()
 
-            var matchTier = MatchTier.NONE
-            var matchedRanges = emptyList<IntRange>()
-
-            // Tier 1: Exact match
             if (q == label) {
-                matchTier = MatchTier.EXACT
-                matchedRanges = listOf(0 until app.label.length)
-            }
-            // Tier 2: Prefix tier (label prefix, word prefix, initials)
-            else if (label.startsWith(q)) {
-                matchTier = MatchTier.PREFIX
-                matchedRanges = listOf(0 until qLen)
-            } else if (item.initials.isNotEmpty() && item.initials.startsWith(q)) {
-                matchTier = MatchTier.PREFIX
-                matchedRanges = (0 until qLen).map { idx ->
-                    val pos = item.wordStartIndices.getOrElse(idx) { 0 }
-                    pos..pos
-                }
+                tier = MatchTier.EXACT
+                ranges = listOf(0 until qLen)
+            } else if (label.startsWith(q)) {
+                tier = MatchTier.PREFIX; sub = 60.0
+                ranges = listOf(0 until qLen)
             } else {
-                var wordPrefixIndex = -1
-                for (w in item.normalizedWords) {
-                    if (w.startsWith(q)) {
-                        wordPrefixIndex = label.indexOf(w)
-                        break
-                    }
-                }
-                if (wordPrefixIndex != -1) {
-                    matchTier = MatchTier.PREFIX
-                    matchedRanges = listOf(wordPrefixIndex until (wordPrefixIndex + qLen))
-                } else if (label.contains(q)) {
-                    // Tier 3: Substring
-                    val idx = label.indexOf(q)
-                    matchTier = MatchTier.SUBSTRING
-                    matchedRanges = listOf(idx until (idx + qLen))
+                val wordIdx = item.normalizedWords.indexOfFirst { it.startsWith(q) }
+                if (wordIdx != -1) {
+                    tier = MatchTier.PREFIX; sub = 30.0 - wordIdx * 5.0
+                    val s = item.wordStarts[wordIdx]
+                    ranges = listOf(s until (s + qLen))
+                } else if (qLen >= 2 && item.initials.startsWith(q)) {
+                    // "wa" -> WhatsApp-style initials ("Whats App"), "gm" -> "Google Maps"
+                    tier = MatchTier.PREFIX; sub = 0.0
+                    ranges = (0 until qLen).map { item.wordStarts[it].let { p -> p..p } }
                 } else {
-                    // Tier 4: Fuzzy (3+ chars, or 2 chars when first char matches label's first char)
-                    val fuzzyRanges = checkFuzzyMatch(q, label)
-                    if (fuzzyRanges != null) {
-                        matchTier = MatchTier.FUZZY
-                        matchedRanges = fuzzyRanges
+                    val idx = label.indexOf(q)
+                    if (idx != -1) {
+                        tier = MatchTier.SUBSTRING
+                        sub = -idx.toDouble()
+                        ranges = listOf(idx until (idx + qLen))
+                    } else {
+                        val fuzzy = fuzzyRanges(q, label, item.wordStarts)
+                        if (fuzzy != null) {
+                            tier = MatchTier.FUZZY
+                            ranges = fuzzy
+                        }
                     }
                 }
             }
 
-            if (matchTier != MatchTier.NONE) {
-                val frecency = appUsageTracker?.getUsageBonus(app.packageName) ?: 0.0
-                val score = matchTier.baseScore + frecency
+            if (tier == MatchTier.NONE) continue
 
-                val existing = candidates[app.uniqueKey]
-                if (existing == null || score > existing.score) {
-                    candidates[app.uniqueKey] = AppSearchResult(
-                        app = app,
-                        score = score,
-                        matchedRanges = matchedRanges
-                    )
-                }
-            }
+            val frecency = appUsageTracker?.getUsageBonus(item.app.packageName) ?: 0.0
+            // shorter labels first inside the same tier ("Camera" before "Camera Pro Studio")
+            val lengthPenalty = label.length * 0.5
+            val score = tier.baseScore + sub + frecency - lengthPenalty
+            offer(item.app, score, if (item.isCustomLabel) emptyList() else ranges)
         }
 
         return candidates.values
@@ -180,46 +183,42 @@ class AppSearchIndex(
             .take(8)
     }
 
-    private fun checkFuzzyMatch(q: String, target: String): List<IntRange>? {
-        val qLen = q.length
-        val tLen = target.length
-        if (tLen < qLen) return null
+    /**
+     * Subsequence match with guard rails so it doesn't return noise:
+     *  - at least 3 chars
+     *  - first matched char must start a word
+     *  - matched characters must be reasonably compact (span <= 2x query length)
+     */
+    private fun fuzzyRanges(q: String, target: String, wordStarts: List<Int>): List<IntRange>? {
+        if (q.length < 3 || target.length < q.length) return null
 
-        val isFuzzyAllowed = qLen >= 3 || (qLen == 2 && target.isNotEmpty() && target[0] == q[0])
-        if (!isFuzzyAllowed) return null
-
-        var qIdx = 0
-        var tIdx = 0
-        val matched = mutableListOf<Int>()
-
-        while (qIdx < qLen && tIdx < tLen) {
-            if (q[qIdx] == target[tIdx]) {
-                matched.add(tIdx)
-                qIdx++
+        var qi = 0
+        val matched = ArrayList<Int>(q.length)
+        for (ti in target.indices) {
+            if (qi < q.length && q[qi] == target[ti]) {
+                matched += ti
+                qi++
             }
-            tIdx++
         }
-
-        return if (qIdx == qLen) consolidateRanges(matched) else null
+        if (qi != q.length) return null
+        if (matched.first() !in wordStarts) return null
+        if (matched.last() - matched.first() + 1 > q.length * 2) return null
+        return consolidate(matched)
     }
 
-    private fun consolidateRanges(indices: List<Int>): List<IntRange> {
+    private fun consolidate(indices: List<Int>): List<IntRange> {
         if (indices.isEmpty()) return emptyList()
-        val sorted = indices.sorted()
         val ranges = mutableListOf<IntRange>()
-        var start = sorted[0]
+        var start = indices[0]
         var prev = start
-        for (i in 1 until sorted.size) {
-            val curr = sorted[i]
-            if (curr == prev + 1) {
-                prev = curr
-            } else {
-                ranges.add(start..prev)
-                start = curr
-                prev = curr
+        for (i in 1 until indices.size) {
+            val cur = indices[i]
+            if (cur == prev + 1) prev = cur else {
+                ranges += start..prev
+                start = cur; prev = cur
             }
         }
-        ranges.add(start..prev)
+        ranges += start..prev
         return ranges
     }
 }

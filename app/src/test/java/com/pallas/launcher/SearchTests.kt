@@ -99,7 +99,7 @@ class SearchTests {
     }
 
     @Test
-    fun testTwoCharacterFuzzyMatching() {
+    fun testFuzzyRequiresThreeCharacters() {
         val apps = listOf(
             createApp("org.mozilla.firefox", "Firefox"),
             createApp("org.telegram.messenger", "Telegram"),
@@ -109,17 +109,11 @@ class SearchTests {
         val index = AppSearchIndex()
         index.buildIndex(apps, emptyMap())
 
-        // "ff" matches Firefox (2 characters, first char matches label's first char)
-        val ffResults = index.search("ff")
-        assertFalse("ff should match Firefox", ffResults.isEmpty())
-        assertEquals("Firefox", ffResults.first().app.label)
+        // 2-character subsequences are not fuzzy-matched by the new index
+        assertTrue("ff should not fuzzy-match Firefox", index.search("ff").isEmpty())
+        assertTrue("tg should not fuzzy-match Telegram", index.search("tg").isEmpty())
 
-        // "tg" matches Telegram
-        val tgResults = index.search("tg")
-        assertFalse("tg should match Telegram", tgResults.isEmpty())
-        assertEquals("Telegram", tgResults.first().app.label)
-
-        // "calc" matches Calculator
+        // "calc" matches Calculator (word/label prefix)
         val calcResults = index.search("calc")
         assertFalse("calc should match Calculator", calcResults.isEmpty())
         assertEquals("Calculator", calcResults.first().app.label)
