@@ -13,33 +13,37 @@ import androidx.lifecycle.viewModelScope
 import com.pallas.launcher.data.repository.AppRepository
 import com.pallas.launcher.data.repository.AppUsageTracker
 import com.pallas.launcher.data.repository.ScreenRepository
+import com.pallas.launcher.data.repository.SettingsBackup
 import com.pallas.launcher.data.repository.SettingsRepository
 import com.pallas.launcher.domain.model.AppItem
-import com.pallas.launcher.domain.model.AppsHorizontalAlignment
-import com.pallas.launcher.domain.model.AppsVerticalPosition
-import com.pallas.launcher.domain.model.ClockHorizontalAlignment
-import com.pallas.launcher.domain.model.ClockVerticalPosition
-import com.pallas.launcher.domain.model.EdgeScrubPosition
-import com.pallas.launcher.domain.model.EdgeScrubReleaseAction
 import com.pallas.launcher.domain.model.GestureAction
 import com.pallas.launcher.domain.model.HomeScreen
 import com.pallas.launcher.domain.model.LauncherSettings
 import com.pallas.launcher.domain.model.NameLengthSortOrder
 import com.pallas.launcher.domain.model.ScreenApp
-import com.pallas.launcher.domain.model.ThemeMode
-import com.pallas.launcher.domain.search.AppSearchResult
+import com.pallas.launcher.domain.search.AsyncCommandRequest
 import com.pallas.launcher.domain.search.LauncherSearchResult
+import com.pallas.launcher.domain.search.SETTINGS_COMMAND_ID
 import com.pallas.launcher.domain.search.SearchEngine
+import com.pallas.launcher.domain.search.WebSearchConfig
+import com.pallas.launcher.domain.search.isInertOnTap
 import com.pallas.launcher.platform.BatteryManagerHelper
+import com.pallas.launcher.platform.BrowserHelper
+import com.pallas.launcher.platform.LiveCommandService
 import com.pallas.launcher.platform.SystemActionsManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -51,16 +55,20 @@ sealed interface LauncherOverlay {
     data object Settings : LauncherOverlay
     data object AppPicker : LauncherOverlay
     data class AppOptions(val app: ScreenApp) : LauncherOverlay
+    data class SetAlias(val app: ScreenApp) : LauncherOverlay
+    data class RenameApp(val app: ScreenApp) : LauncherOverlay
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context = application.applicationContext
 
-    val appUsageTracker = AppUsageTracker(context)
-    private val settingsRepository = SettingsRepository(context)
-    val appRepository = AppRepository(context, viewModelScope, settingsRepository)
-    private val screenRepository = ScreenRepository(context)
+    val appUsageTracker = AppUsageTracker.getInstance(context)
+    private val settingsRepository = SettingsRepository.getInstance(context)
+    val appRepository = AppRepository.getInstance(context)
+    private val screenRepository = ScreenRepository.getInstance(context)
+
+    private val uiPrefs = context.getSharedPreferences("pallas_ui_state", Context.MODE_PRIVATE)
 
     val installedApps: StateFlow<List<AppItem>> = appRepository.installedApps
     val isAppsLoaded: StateFlow<Boolean> = appRepository.isLoaded
@@ -68,17 +76,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val settings: StateFlow<LauncherSettings> = settingsRepository.settings
 
     val favoriteApps: StateFlow<List<AppItem>> =
-        combine(installedApps, appUsageTracker.recentPackages) { apps, recents ->
-            recents.mapNotNull { pkg -> apps.firstOrNull { it.packageName == pkg } }.take(8)
+        combine(installedApps, appUsageTracker.recentAppKeys, settings) { apps, recents, s ->
+            val byKey = apps.associateBy { it.uniqueKey }
+            val byPackage = apps.groupBy { it.packageName }
+            recents.asSequence()
+                .filterNot { key ->
+                    key in s.hiddenFromAppList || key.substringBefore('/') in s.hiddenFromAppList
+                }
+                .mapNotNull { key -> byKey[key] ?: byPackage[key]?.firstOrNull() }
+                .take(8)
+                .toList()
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val _currentScreenIndex = MutableStateFlow(0)
+    val appUsageCounts: StateFlow<Map<String, Int>> = appUsageTracker.launchCountsSnapshot
+    val appUsageScores: StateFlow<Map<String, Double>> = appUsageTracker.usageScoresSnapshot
+
+    val displayScreens: StateFlow<List<HomeScreen>> =
+        combine(screenRepository.screens, settingsRepository.settings.map { it.nameLengthSortOrder }.distinctUntilChanged()) { list, order ->
+            if (order == NameLengthSortOrder.OFF) list
+            else list.map { it.copy(apps = screenRepository.sortAppsByNameLength(it.apps, order)) }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, screenRepository.screens.value)
+
+    private fun savedScreenIndex(): Int {
+        val id = uiPrefs.getString(KEY_CURRENT_SCREEN_ID, null) ?: return 0
+        return screenRepository.screens.value.indexOfFirst { it.id == id }.coerceAtLeast(0)
+    }
+
+    private fun persistCurrentScreen() {
+        val id = screens.value.getOrNull(_currentScreenIndex.value)?.id ?: return
+        uiPrefs.edit().putString(KEY_CURRENT_SCREEN_ID, id).apply()
+    }
+
+    private val _currentScreenIndex = MutableStateFlow(savedScreenIndex())
     val currentScreenIndex: StateFlow<Int> = combine(_currentScreenIndex, screenRepository.screens) { index, screenList ->
         if (screenList.isEmpty()) 0
         else index.coerceIn(0, screenList.size - 1)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, _currentScreenIndex.value)
 
-    private val _screenSwipeDirection = MutableStateFlow(1) // 1 = forward (swipe left), -1 = backward (swipe right)
+    private val _screenSwipeDirection = MutableStateFlow(1)
     val screenSwipeDirection: StateFlow<Int> = _screenSwipeDirection.asStateFlow()
 
     private fun formatCurrentTime(is24Hour: Boolean): String {
@@ -100,25 +135,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _batteryLevel = MutableStateFlow(BatteryManagerHelper.getBatteryPercentage(context))
     val batteryLevel: StateFlow<Int> = _batteryLevel.asStateFlow()
 
-    // Clock, date, battery - initialized synchronously with live values to prevent layout flash/jumping on launch/unlock
     private val _currentTime = MutableStateFlow(formatCurrentTime(settingsRepository.settings.value.is24HourClock))
     val currentTime: StateFlow<String> = _currentTime.asStateFlow()
 
     private val _currentDate = MutableStateFlow(formatCurrentDate(settingsRepository.settings.value.showBattery, _batteryLevel.value))
     val currentDate: StateFlow<String> = _currentDate.asStateFlow()
 
-    // Search state
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     private val _searchResults = MutableStateFlow<List<LauncherSearchResult>>(emptyList())
     val searchResults: StateFlow<List<LauncherSearchResult>> = _searchResults.asStateFlow()
 
-    // Overlay state
+    private var liveCommandJob: Job? = null
+
     private val _overlay = MutableStateFlow<LauncherOverlay>(LauncherOverlay.None)
     val overlay: StateFlow<LauncherOverlay> = _overlay.asStateFlow()
 
-    // Convenience mappings for components observing individual overlay visibility
     val isAppDrawerOpen: StateFlow<Boolean> = _overlay
         .map { it is LauncherOverlay.Drawer }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -172,7 +205,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         context.registerReceiver(timeTickReceiver, timeFilter)
         updateTimeAndDate()
 
-        // Refresh time and date whenever settings change (e.g. 24-hour clock or show battery)
         viewModelScope.launch {
             settings.collect {
                 updateTimeAndDate()
@@ -181,9 +213,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             screens.collect { screenList ->
-                if (screenList.isNotEmpty() && _currentScreenIndex.value >= screenList.size) {
-                    _currentScreenIndex.value = screenList.size - 1
-                }
+                if (screenList.isEmpty()) return@collect
+                val savedId = uiPrefs.getString(KEY_CURRENT_SCREEN_ID, null)
+                val byId = savedId?.let { id -> screenList.indexOfFirst { it.id == id } } ?: -1
+                _currentScreenIndex.value = if (byId >= 0) byId else _currentScreenIndex.value.coerceIn(0, screenList.size - 1)
+                persistCurrentScreen()
             }
         }
 
@@ -193,7 +227,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     .filter { !it.customLabel.isNullOrBlank() }
                     .associate { it.uniqueKey to it.customLabel!! }
                 Triple(apps, s.customAliases, custom)
-            }.collect { (apps, aliases, custom) -> searchEngine.updateIndex(apps, aliases, custom) }
+            }.distinctUntilChanged().collect { (apps, aliases, custom) -> searchEngine.updateIndex(apps, aliases, custom) }
+        }
+
+        viewModelScope.launch {
+            installedApps.collect { apps ->
+                if (apps.isNotEmpty()) {
+                    appUsageTracker.migratePackageKeysToUniqueKeys(apps)
+                    settingsRepository.migrateHiddenApps(apps)
+                }
+            }
         }
     }
 
@@ -207,25 +250,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (screenList.size <= 1) return
         val current = _currentScreenIndex.value.coerceIn(0, screenList.size - 1)
 
-        val nextIndex = if (direction > 0) { // Swipe Left -> Go to Next Screen
+        val nextIndex = if (direction > 0) {
             (current + 1) % screenList.size
-        } else if (direction < 0) { // Swipe Right -> Go to Prev Screen
+        } else if (direction < 0) {
             (current - 1 + screenList.size) % screenList.size
         } else {
             current
         }
         _screenSwipeDirection.value = if (direction >= 0) 1 else -1
         _currentScreenIndex.value = nextIndex
+        persistCurrentScreen()
     }
 
     fun setScreenIndex(index: Int) {
         if (index in screens.value.indices) {
             _screenSwipeDirection.value = if (index >= _currentScreenIndex.value) 1 else -1
             _currentScreenIndex.value = index
+            persistCurrentScreen()
         }
     }
 
-    // Overlay controls
     fun openDrawer() {
         _overlay.value = LauncherOverlay.Drawer
     }
@@ -235,9 +279,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _overlay.value = LauncherOverlay.None
         }
     }
-
-
-
 
     fun setAppDrawerOpen(open: Boolean) {
         if (open) openDrawer() else closeDrawer()
@@ -249,6 +290,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun closeSearch() {
         if (_overlay.value is LauncherOverlay.Search) {
+            liveCommandJob?.cancel()
+            liveCommandJob = null
             _overlay.value = LauncherOverlay.None
             _searchQuery.value = ""
             _searchResults.value = emptyList()
@@ -283,6 +326,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _overlay.value = LauncherOverlay.AppOptions(app)
     }
 
+    fun openSetAlias(app: ScreenApp) {
+        _overlay.value = LauncherOverlay.SetAlias(app)
+    }
+
+    fun openRenameApp(app: ScreenApp) {
+        _overlay.value = LauncherOverlay.RenameApp(app)
+    }
+
     fun dismissAppOptions() {
         if (_overlay.value is LauncherOverlay.AppOptions) {
             _overlay.value = LauncherOverlay.None
@@ -295,6 +346,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissOverlay() {
         if (_overlay.value is LauncherOverlay.Search) {
+            liveCommandJob?.cancel()
+            liveCommandJob = null
             _searchQuery.value = ""
             _searchResults.value = emptyList()
         }
@@ -303,26 +356,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onSearchQueryChanged(query: String) {
         _searchQuery.value = query
+        liveCommandJob?.cancel()
+        liveCommandJob = null
         if (query.isBlank()) {
             _searchResults.value = emptyList()
             return
         }
-        val contacts = settings.value.searchContacts
-        _searchResults.value = searchEngine.searchAll(query, contacts)
+        val s = settings.value
+        val (immediate, asyncRequest) = searchEngine.searchAll(
+            query,
+            s.searchContacts,
+            webSearchConfig(s),
+            s.commandConfigs,
+            s.defaultWeatherCity
+        )
+        _searchResults.value = immediate
+
+        if (s.autoLaunchSingleMatch && asyncRequest == null && query.trim().length >= 2) {
+            val only = immediate.singleOrNull()
+            if (only is LauncherSearchResult.App && only.score >= AUTO_LAUNCH_MIN_SCORE) {
+                launchSearchResult(only)
+                return
+            }
+        }
+
+        if (asyncRequest != null) {
+            liveCommandJob = viewModelScope.launch {
+                delay(180)
+                val resolved = resolveLiveCommand(asyncRequest)
+                _searchResults.value = _searchResults.value.map { current ->
+                    if (current is LauncherSearchResult.RichCard && current.isLoading) resolved else current
+                }
+            }
+        }
+    }
+
+    private suspend fun resolveLiveCommand(request: AsyncCommandRequest): LauncherSearchResult.RichCard =
+        when (request) {
+            is AsyncCommandRequest.Finance -> LiveCommandService.fetchMarketQuote(request.query)
+            is AsyncCommandRequest.Weather -> LiveCommandService.fetchWeatherOrSolar(request.city, request.isSolarOnly)
+            is AsyncCommandRequest.Wolfram -> LiveCommandService.fetchWolframShortAnswer(request.query, settings.value.wolframAppId)
+        }
+
+    private val browserLabelCache = HashMap<String, String?>()
+
+    private fun webSearchConfig(s: LauncherSettings): WebSearchConfig {
+        val pkg = s.preferredBrowserPackage
+        val label = if (pkg == null) null else browserLabelCache.getOrPut(pkg) { BrowserHelper.labelFor(context, pkg) }
+        return WebSearchConfig(s.webSearchEngine, pkg.takeIf { label != null }, label)
     }
 
     fun launchSearchResult(result: LauncherSearchResult) {
+        if (result.isInertOnTap) return
         dismissOverlay()
         when (result) {
             is LauncherSearchResult.App -> {
                 launchApp(result.app.packageName, result.app.activityName, result.app.userHandle)
             }
             is LauncherSearchResult.Command -> {
-                result.execute(context)
+                if (result.id == SETTINGS_COMMAND_ID) openSettings() else result.execute(context)
             }
-            is LauncherSearchResult.ContactCall -> {
-                result.execute(context)
-            }
+            is LauncherSearchResult.RichCard -> result.execute(context)
+            is LauncherSearchResult.ContactCall -> result.execute(context)
         }
     }
 
@@ -348,115 +443,97 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun launchApp(packageName: String, activityName: String? = null, userHandle: UserHandle? = null) {
-        appUsageTracker.recordAppLaunch(packageName)
-        appRepository.launchApp(packageName, activityName, userHandle)
+        val targetUser = userHandle ?: Process.myUserHandle()
+        val app = installedApps.value.firstOrNull {
+            it.packageName == packageName &&
+                    (activityName == null || it.activityName == activityName) &&
+                    (it.userHandle == null || it.userHandle == targetUser)
+        }
+        val key = app?.uniqueKey ?: "$packageName/${activityName.orEmpty()}#0"
+        appUsageTracker.recordAppLaunch(key)
+        appRepository.launchApp(packageName, activityName, targetUser)
     }
 
     fun openAppInfo(packageName: String, activityName: String? = null, userHandle: UserHandle? = null) {
         appRepository.openAppInfo(packageName, activityName, userHandle)
     }
 
-    fun getShortcutsForApp(packageName: String): List<android.content.pm.ShortcutInfo> {
-        val launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? android.content.pm.LauncherApps ?: return emptyList()
-        val userManager = context.getSystemService(Context.USER_SERVICE) as? android.os.UserManager ?: return emptyList()
-        val query = android.content.pm.LauncherApps.ShortcutQuery().apply {
-            setPackage(packageName)
-            setQueryFlags(
-                android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
-                android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
-                android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
-            )
-        }
-        return try {
-            userManager.userProfiles.flatMap { profile ->
-                launcherApps.getShortcuts(query, profile) ?: emptyList()
-            }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
+    fun getShortcutsForApp(packageName: String, userHandle: UserHandle? = null): List<android.content.pm.ShortcutInfo> =
+        appRepository.getAppShortcuts(packageName, userHandle)
 
     fun launchShortcut(packageName: String, shortcutId: String, userHandle: UserHandle? = null) {
         val handle = userHandle ?: Process.myUserHandle()
         SystemActionsManager.launchShortcut(context, packageName, shortcutId, handle)
     }
 
-    fun resetToHomeScreen() {
-        dismissOverlay()
-        _currentScreenIndex.value = 0
+    fun onHomeIntent(launcherWasVisible: Boolean) {
+        val current = _overlay.value
+        if (launcherWasVisible) {
+            if (current !is LauncherOverlay.None) dismissOverlay()
+            else if (_currentScreenIndex.value != 0) setScreenIndex(0)
+        } else {
+            when (current) {
+                is LauncherOverlay.Drawer, is LauncherOverlay.Search,
+                is LauncherOverlay.AppOptions, is LauncherOverlay.AppPicker -> dismissOverlay()
+                else -> Unit
+            }
+        }
     }
 
-    // --- Screen repository actions (ViewModel façade) ---
+    fun sortedForDisplay(apps: List<ScreenApp>): List<ScreenApp> =
+        screenRepository.sortAppsByNameLength(apps, settings.value.nameLengthSortOrder)
+
+    sealed interface ImportOutcome {
+        data class Success(val screens: Int, val apps: Int) : ImportOutcome
+        data class Failure(val message: String) : ImportOutcome
+    }
+
+    suspend fun buildBackupJson(): String = withContext(Dispatchers.Default) {
+        SettingsBackup.export(settings.value, screenRepository.screens.value, screenRepository)
+    }
+
+    suspend fun previewBackup(text: String): SettingsBackup.ParseResult =
+        withContext(Dispatchers.Default) { SettingsBackup.parse(text) }
+
+    suspend fun applyBackup(text: String): ImportOutcome = withContext(Dispatchers.Default) {
+        when (val result = SettingsBackup.parse(text)) {
+            is SettingsBackup.ParseResult.Error -> ImportOutcome.Failure(result.message)
+            is SettingsBackup.ParseResult.Ok -> {
+                val parsed = result.parsed
+                settingsRepository.replaceAll(parsed.settings)
+                parsed.screensJson?.let { screenRepository.replaceAll(screenRepository.parseScreens(it)) }
+                _currentScreenIndex.value = savedScreenIndex()
+                persistCurrentScreen()
+                ImportOutcome.Success(parsed.screenCount, parsed.appCount)
+            }
+        }
+    }
+
     fun addScreen(name: String, contextTag: String? = null) = screenRepository.addScreen(name, contextTag)
     fun renameScreen(screenId: String, newName: String, newContextTag: String? = null) = screenRepository.renameScreen(screenId, newName, newContextTag)
     fun moveScreen(fromIndex: Int, toIndex: Int) = screenRepository.moveScreen(fromIndex, toIndex)
     fun removeScreen(screenId: String) = screenRepository.removeScreen(screenId)
-    fun addAppToScreen(screenId: String, appItem: AppItem, customLabel: String? = null) {
-        val sortOrder = settings.value.nameLengthSortOrder
-        screenRepository.addAppToScreen(screenId, appItem, customLabel, sortOrder)
-    }
-    fun addAppsToScreen(screenId: String, appItems: List<AppItem>) {
-        val sortOrder = settings.value.nameLengthSortOrder
-        screenRepository.addAppsToScreen(screenId, appItems, sortOrder)
-    }
+    fun addAppToScreen(screenId: String, appItem: AppItem, customLabel: String? = null) =
+        screenRepository.addAppToScreen(screenId, appItem, customLabel, NameLengthSortOrder.OFF)
+    fun addAppsToScreen(screenId: String, appItems: List<AppItem>) =
+        screenRepository.addAppsToScreen(screenId, appItems, NameLengthSortOrder.OFF)
     fun removeAppFromScreen(screenId: String, uniqueKey: String) = screenRepository.removeAppFromScreen(screenId, uniqueKey)
-    fun updateAppLabelAcrossScreens(uniqueKey: String, newLabel: String) {
-        val sortOrder = settings.value.nameLengthSortOrder
-        screenRepository.updateAppLabelAcrossScreens(uniqueKey, newLabel, sortOrder)
-    }
-    fun updateAppLabel(screenId: String, uniqueKey: String, newLabel: String) {
-        val sortOrder = settings.value.nameLengthSortOrder
-        screenRepository.updateAppLabel(screenId, uniqueKey, newLabel, sortOrder)
-    }
+    fun updateAppLabelAcrossScreens(uniqueKey: String, newLabel: String) =
+        screenRepository.updateAppLabelAcrossScreens(uniqueKey, newLabel, NameLengthSortOrder.OFF)
+    fun updateAppLabel(screenId: String, uniqueKey: String, newLabel: String) =
+        screenRepository.updateAppLabel(screenId, uniqueKey, newLabel, NameLengthSortOrder.OFF)
     fun reorderApps(screenId: String, reordered: List<ScreenApp>) = screenRepository.reorderApps(screenId, reordered)
 
-    // --- Settings repository actions (ViewModel façade) ---
-    fun updateNameLengthSortOrder(order: NameLengthSortOrder) {
-        settingsRepository.updateNameLengthSortOrder(order)
-        if (order != NameLengthSortOrder.OFF) {
-            screenRepository.sortAllScreensByNameLength(order)
-        }
-    }
-    fun updateThemeMode(theme: ThemeMode) = settingsRepository.updateThemeMode(theme)
-    fun updateWallpaperScrim(scrim: Boolean) = settingsRepository.updateWallpaperScrim(scrim)
-    fun updateHideStatusBar(hide: Boolean) = settingsRepository.updateHideStatusBar(hide)
-    fun updateClockPosition(vertical: ClockVerticalPosition, horizontal: ClockHorizontalAlignment) = settingsRepository.updateClockPosition(vertical, horizontal)
-    fun updateAppsPosition(vertical: AppsVerticalPosition, horizontal: AppsHorizontalAlignment) = settingsRepository.updateAppsPosition(vertical, horizontal)
-    fun update24HourClock(is24Hour: Boolean) = settingsRepository.update24HourClock(is24Hour)
-    fun updateShowDate(show: Boolean) = settingsRepository.updateShowDate(show)
-    fun updateShowBattery(show: Boolean) = settingsRepository.updateShowBattery(show)
-    fun updateGestureActions(
-        swipeLeft: GestureAction? = null,
-        swipeRight: GestureAction? = null,
-        swipeUp: GestureAction? = null,
-        swipeDown: GestureAction? = null
-    ) = settingsRepository.updateGestureActions(swipeLeft, swipeRight, swipeUp, swipeDown)
+    fun updateSettings(transform: (LauncherSettings) -> LauncherSettings) =
+        settingsRepository.update(transform)
+
     fun setAlias(alias: String, target: String) = settingsRepository.setAlias(alias, target)
     fun removeAlias(alias: String) = settingsRepository.removeAlias(alias)
-    fun hideApp(packageName: String) = settingsRepository.hideApp(packageName)
-    fun unhideApp(packageName: String) = settingsRepository.unhideApp(packageName)
-    fun hideFromAppList(packageName: String) = settingsRepository.hideFromAppList(packageName)
-    fun unhideFromAppList(packageName: String) = settingsRepository.unhideFromAppList(packageName)
-    fun updateFontScale(scale: Float) = settingsRepository.updateFontScale(scale)
-    fun updateScreensFontScale(scale: Float) = settingsRepository.updateScreensFontScale(scale)
-    fun updateAppListFontScale(scale: Float) = settingsRepository.updateAppListFontScale(scale)
-    fun updateClockPadding(paddingDp: Int) = settingsRepository.updateClockPadding(paddingDp)
-    fun updateClockPaddingLeft(dp: Int) = settingsRepository.updateClockPaddingLeft(dp)
-    fun updateClockPaddingRight(dp: Int) = settingsRepository.updateClockPaddingRight(dp)
-    fun updateClockPaddingTop(dp: Int) = settingsRepository.updateClockPaddingTop(dp)
-    fun updateClockPaddingBottom(dp: Int) = settingsRepository.updateClockPaddingBottom(dp)
+    fun hideApp(uniqueKey: String) = settingsRepository.hideApp(uniqueKey)
+    fun unhideApp(uniqueKey: String) = settingsRepository.unhideApp(uniqueKey)
+    fun hideFromAppList(uniqueKey: String) = settingsRepository.hideFromAppList(uniqueKey)
+    fun unhideFromAppList(uniqueKey: String) = settingsRepository.unhideFromAppList(uniqueKey)
 
-    fun updateScreensPadding(paddingDp: Int) = settingsRepository.updateScreensPadding(paddingDp)
-    fun updateScreensPaddingLeft(dp: Int) = settingsRepository.updateScreensPaddingLeft(dp)
-    fun updateScreensPaddingRight(dp: Int) = settingsRepository.updateScreensPaddingRight(dp)
-    fun updateScreensPaddingTop(dp: Int) = settingsRepository.updateScreensPaddingTop(dp)
-    fun updateScreensPaddingBottom(dp: Int) = settingsRepository.updateScreensPaddingBottom(dp)
-    fun updateEdgeScrubPosition(position: EdgeScrubPosition) = settingsRepository.updateEdgeScrubPosition(position)
-    fun updateEdgeScrubReleaseAction(action: EdgeScrubReleaseAction) = settingsRepository.updateEdgeScrubReleaseAction(action)
-    fun addSearchContact(nickname: String, name: String, phoneNumber: String) =
-        settingsRepository.addSearchContact(nickname, name, phoneNumber)
-    fun removeSearchContact(id: String) =
-        settingsRepository.removeSearchContact(id)
     fun requestSetDefaultLauncher() =
         SystemActionsManager.requestSetDefaultLauncher(context)
 
@@ -465,7 +542,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             context.unregisterReceiver(batteryReceiver)
             context.unregisterReceiver(timeTickReceiver)
         } catch (_: Exception) {}
-        appRepository.unregister()
         super.onCleared()
+    }
+
+    private companion object {
+        const val KEY_CURRENT_SCREEN_ID = "current_screen_id"
+        const val AUTO_LAUNCH_MIN_SCORE = 3500.0
     }
 }

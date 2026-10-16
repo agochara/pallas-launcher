@@ -1,136 +1,178 @@
 package com.pallas.launcher.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.platform.LocalContext
 import com.pallas.launcher.domain.model.ThemeMode
 
-/**
- * Shared tinted backdrop for the App Drawer and Search: transparent at the very top (wallpaper stays visible),
- * increasingly tinted towards the bottom - same idea as Niagara.
- */
-@Composable
-fun launcherBackdropBrush(): Brush {
-    val colorScheme = MaterialTheme.colorScheme
-    val isDark = LocalLauncherColors.current.isDark
-    val bottomColor = colorScheme.surfaceContainer.copy(alpha = if (isDark) 0.80f else 0.62f)
-    val midColor = colorScheme.surface.copy(alpha = if (isDark) 0.40f else 0.25f)
-    return Brush.verticalGradient(
-        0.0f to Color.Transparent,
-        0.28f to midColor,
-        1.0f to bottomColor
-    )
-}
-
-data class HomeLauncherColors(
-    val isDark: Boolean,
+@Immutable
+data class LauncherColors(
     val textPrimary: Color,
     val textSecondary: Color,
     val textDimmed: Color,
-    val surface: Color,
-    val cardBackground: Color,
-    val cardBackgroundLight: Color,
-    val accent: Color,
-    val shadow: Shadow
+    val isDark: Boolean
 )
 
-typealias LauncherColors = HomeLauncherColors
-
-val DarkLauncherColors = HomeLauncherColors(
-    isDark = true,
-    textPrimary = TextWhite,
-    textSecondary = TextMuted,
-    textDimmed = TextDimmed,
-    surface = Color(0xFF121212),
-    cardBackground = CardBackground,
-    cardBackgroundLight = CardBackgroundLight,
-    accent = AccentGold,
-    shadow = Shadow(Color.Black.copy(alpha = 0.5f), Offset(0f, 2f), 6f)
-)
-
-val LightLauncherColors = HomeLauncherColors(
-    isDark = false,
-    textPrimary = TextDarkPrimary,
-    textSecondary = TextDarkSecondary,
-    textDimmed = TextDarkDimmed,
-    surface = Color(0xFFF2F2F7),
-    cardBackground = CardBackgroundLightMode,
-    cardBackgroundLight = CardBackgroundLightModeSubtle,
-    accent = AccentGoldDark,
-    shadow = Shadow(Color.White.copy(alpha = 0.65f), Offset(0f, 1f), 4f)
-)
-
-val LocalLauncherColors = staticCompositionLocalOf { DarkLauncherColors }
-
-@Composable
-private fun resolveDark(themeMode: ThemeMode): Boolean = when (themeMode) {
-    ThemeMode.DARK -> true
-    ThemeMode.LIGHT -> false
-    ThemeMode.SYSTEM -> isSystemInDarkTheme()
+val LocalLauncherColors = staticCompositionLocalOf {
+    LauncherColors(
+        textPrimary = Color(0xFFF5F2EB),
+        textSecondary = Color(0xFFC7C2B8),
+        textDimmed = Color(0xFF8E8A82),
+        isDark = true
+    )
 }
 
-/** dynamicXxxColorScheme() crashes below Android 12 - fall back to a static scheme there. */
+/**
+ * Callback hook provided by [com.pallas.launcher.MainActivity] to animate window-level background blur
+ * on Android 12+ (API 31+) without touching the Window from inside composables.
+ */
+val LocalWindowBlurController = staticCompositionLocalOf<(Int) -> Unit> { {} }
+
+private val DarkColorScheme = darkColorScheme(
+    primary = Color(0xFFE2C48E),
+    onPrimary = Color(0xFF3E2D00),
+    primaryContainer = Color(0xFF594319),
+    onPrimaryContainer = Color(0xFFFFDEA6),
+    inversePrimary = Color(0xFF725A2E),
+    secondary = Color(0xFFD5C4A8),
+    onSecondary = Color(0xFF392F1B),
+    secondaryContainer = Color(0xFF504530),
+    onSecondaryContainer = Color(0xFFF2E0C3),
+    tertiary = Color(0xFFB5CEA8),
+    onTertiary = Color(0xFF21361B),
+    tertiaryContainer = Color(0xFF374D2F),
+    onTertiaryContainer = Color(0xFFD1EAC3),
+    background = Color(0xFF121316),
+    onBackground = Color(0xFFE5E2E6),
+    surface = Color(0xFF121316),
+    onSurface = Color(0xFFE5E2E6),
+    surfaceVariant = Color(0xFF49463F),
+    onSurfaceVariant = Color(0xFFC6C6D0),
+    surfaceTint = Color(0xFFE2C48E),
+    inverseSurface = Color(0xFFE5E2E6),
+    inverseOnSurface = Color(0xFF2F3033),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005),
+    errorContainer = Color(0xFF93000A),
+    onErrorContainer = Color(0xFFFFDAD6),
+    outline = Color(0xFF958F84),
+    outlineVariant = Color(0xFF49463F),
+    scrim = Color(0xFF000000),
+    surfaceBright = Color(0xFF38393D),
+    surfaceDim = Color(0xFF121316),
+    surfaceContainerLowest = Color(0xFF0D0E11),
+    surfaceContainerLow = Color(0xFF1A1B1F),
+    surfaceContainer = Color(0xFF1E1F23),
+    surfaceContainerHigh = Color(0xFF282A2E),
+    surfaceContainerHighest = Color(0xFF33353A)
+)
+
+private val LightColorScheme = lightColorScheme(
+    primary = Color(0xFF725A2E),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFDEA6),
+    onPrimaryContainer = Color(0xFF271900),
+    inversePrimary = Color(0xFFE2C48E),
+    secondary = Color(0xFF685D46),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFF1E0C4),
+    onSecondaryContainer = Color(0xFF221A09),
+    tertiary = Color(0xFF4E6545),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFD0EBC3),
+    onTertiaryContainer = Color(0xFF0C2008),
+    background = Color(0xFFFAF9FC),
+    onBackground = Color(0xFF1A1B1E),
+    surface = Color(0xFFFAF9FC),
+    onSurface = Color(0xFF1A1B1E),
+    surfaceVariant = Color(0xFFE7E1D7),
+    onSurfaceVariant = Color(0xFF45464F),
+    surfaceTint = Color(0xFF725A2E),
+    inverseSurface = Color(0xFF2F3033),
+    inverseOnSurface = Color(0xFFF1F0F4),
+    error = Color(0xFFBA1A1A),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFFDAD6),
+    onErrorContainer = Color(0xFF410002),
+    outline = Color(0xFF7B766C),
+    outlineVariant = Color(0xFFCBC5BB),
+    scrim = Color(0xFF000000),
+    surfaceBright = Color(0xFFFAF9FC),
+    surfaceDim = Color(0xFFDAD9DD),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF4F3F7),
+    surfaceContainer = Color(0xFFEEEDF1),
+    surfaceContainerHigh = Color(0xFFE8E7EC),
+    surfaceContainerHighest = Color(0xFFE2E2E6)
+)
+
+/**
+ * Gradient backdrop for overlays (Drawer & Search), with lowered 0.55–0.65 alpha so wallpaper
+ * and optional window blur show through cleanly.
+ */
 @Composable
-private fun launcherColorScheme(isDark: Boolean): ColorScheme {
-    val context = LocalContext.current
-    return when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-            if (isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        isDark -> darkColorScheme(primary = AccentGold, secondary = AccentBlue, error = AccentRed)
-        else -> lightColorScheme(primary = AccentGoldDark, secondary = AccentBlue, error = AccentRed)
-    }
+fun launcherBackdropBrush(): Brush {
+    val cs = MaterialTheme.colorScheme
+    return Brush.verticalGradient(
+        colors = listOf(
+            cs.surface.copy(alpha = 0.55f),
+            cs.surface.copy(alpha = 0.60f),
+            cs.surface.copy(alpha = 0.65f)
+        )
+    )
 }
 
-/** Root theme: dynamic M3 colors + scoped colors for the Olauncher-style home. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PallasLauncherTheme(
     themeMode: ThemeMode = ThemeMode.DARK,
+    onWindowBlurChange: (Int) -> Unit = {},
     content: @Composable () -> Unit
 ) {
-    val isDark = resolveDark(themeMode)
-    val colors = if (isDark) DarkLauncherColors else LightLauncherColors
+    val isDark = when (themeMode) {
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
 
-    CompositionLocalProvider(LocalLauncherColors provides colors) {
-        MaterialTheme(
-            colorScheme = launcherColorScheme(isDark),
+    val colorScheme = if (isDark) DarkColorScheme else LightColorScheme
+    val launcherColors = if (isDark) {
+        LauncherColors(
+            textPrimary = Color(0xFFF5F2EB),
+            textSecondary = Color(0xFFC7C2B8),
+            textDimmed = Color(0xFF8E8A82),
+            isDark = true
+        )
+    } else {
+        LauncherColors(
+            textPrimary = Color(0xFF1A1917),
+            textSecondary = Color(0xFF4A4742),
+            textDimmed = Color(0xFF7A756E),
+            isDark = false
+        )
+    }
+
+    CompositionLocalProvider(
+        LocalLauncherColors provides launcherColors,
+        LocalHomeContrastState provides LiveHomeContrastHolder.current,
+        LocalWindowBlurController provides onWindowBlurChange
+    ) {
+        MaterialExpressiveTheme(
+            colorScheme = colorScheme,
+            motionScheme = MotionScheme.expressive(),
             shapes = ExpressiveShapes,
             typography = Typography,
             content = content
         )
     }
-}
-
-/**
- * REAL Material 3 Expressive theme for Settings / sheets / dialogs: expressive motion scheme (springy,
- * shape-morphing components) instead of the standard easing curves. Needs material3 >= 1.4.0.
- */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-fun MaterialExpressiveSettingsTheme(
-    themeMode: ThemeMode = ThemeMode.DARK,
-    content: @Composable () -> Unit
-) {
-    MaterialExpressiveTheme(
-        colorScheme = launcherColorScheme(resolveDark(themeMode)),
-        motionScheme = MotionScheme.expressive(),
-        shapes = ExpressiveShapes,
-        typography = Typography,
-        content = content
-    )
 }

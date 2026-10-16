@@ -11,12 +11,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.pallas.launcher.domain.model.AppsHorizontalAlignment
 import com.pallas.launcher.domain.model.ClockHorizontalAlignment
 import com.pallas.launcher.ui.theme.LauncherTypography
+import com.pallas.launcher.ui.theme.LocalHomeContrastState
 import com.pallas.launcher.ui.theme.LocalLauncherColors
+import com.pallas.launcher.ui.theme.homeLocalContrastScrim
+import com.pallas.launcher.ui.theme.scaled
 
 @Composable
 fun ClockHeader(
@@ -31,9 +35,11 @@ fun ClockHeader(
     paddingRightDp: Int = 24,
     paddingTopDp: Int = 24,
     paddingBottomDp: Int = 12,
+    shadow: Shadow? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalLauncherColors.current
+    val contrastState = LocalHomeContrastState.current
 
     val horizontalAlignment = when (alignment) {
         ClockHorizontalAlignment.LEFT -> Alignment.Start
@@ -47,9 +53,24 @@ fun ClockHeader(
         ClockHorizontalAlignment.RIGHT -> TextAlign.End
     }
 
+    val scrimAlignment = when (alignment) {
+        ClockHorizontalAlignment.LEFT -> AppsHorizontalAlignment.LEFT
+        ClockHorizontalAlignment.CENTER -> AppsHorizontalAlignment.CENTER
+        ClockHorizontalAlignment.RIGHT -> AppsHorizontalAlignment.RIGHT
+    }
+
+    val effectiveTextPrimary = contrastState.resolvePrimaryText(colors.textPrimary)
+    val effectiveTextSecondary = contrastState.resolveSecondaryText(colors.textSecondary)
+    val effectiveShadow = if (contrastState.localScrimAlpha > 0f) null else shadow
+
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .homeLocalContrastScrim(
+                alignment = scrimAlignment,
+                scrimColor = contrastState.scrimColor,
+                scrimAlpha = contrastState.localScrimAlpha
+            )
             .padding(
                 start = paddingLeftDp.dp,
                 end = paddingRightDp.dp,
@@ -61,12 +82,10 @@ fun ClockHeader(
     ) {
         Text(
             text = timeString.ifBlank { "12:00" },
-            style = LauncherTypography.clock.copy(
-                fontSize = (78 * fontScale).sp,
-                lineHeight = (82 * fontScale).sp,
-                shadow = colors.shadow
+            style = LauncherTypography.clock.scaled(fontScale).copy(
+                shadow = effectiveShadow
             ),
-            color = colors.textPrimary,
+            color = effectiveTextPrimary,
             textAlign = textAlign,
             modifier = Modifier
                 .clickable(
@@ -79,12 +98,10 @@ fun ClockHeader(
         if (showDate && dateString.isNotBlank()) {
             Text(
                 text = dateString,
-                style = LauncherTypography.dateAndBattery.copy(
-                    fontSize = (16 * fontScale).sp,
-                    lineHeight = (22 * fontScale).sp,
-                    shadow = colors.shadow
+                style = LauncherTypography.dateAndBattery.scaled(fontScale).copy(
+                    shadow = effectiveShadow
                 ),
-                color = colors.textSecondary,
+                color = effectiveTextSecondary,
                 textAlign = textAlign,
                 modifier = Modifier
                     .clickable(

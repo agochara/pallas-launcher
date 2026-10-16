@@ -40,12 +40,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.contentColorFor
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.pallas.launcher.ui.theme.LauncherTypography
 
 /** Outer corners of a grouped card; the rows inside use a much smaller radius -> the M3E "segmented list" look. */
 private val GroupShape = RoundedCornerShape(28.dp)
@@ -123,9 +126,8 @@ private fun settingsTopBarColors(): TopAppBarColors = TopAppBarDefaults.topAppBa
 fun SettingsSectionHeader(title: String) {
     Text(
         text = title,
-        style = MaterialTheme.typography.labelLarge,
+        style = LauncherTypography.settingsSectionHeader,
         color = MaterialTheme.colorScheme.primary,
-        fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(start = 28.dp, top = 24.dp, bottom = 8.dp)
     )
 }
@@ -193,7 +195,8 @@ fun SettingsNavRow(
     subtitle: String? = null,
     icon: ImageVector? = null,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    containerColor: Color = MaterialTheme.colorScheme.primaryContainer
 ) {
     Surface(
         color = rowContainerColor(),
@@ -213,10 +216,15 @@ fun SettingsNavRow(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer),
+                        .background(containerColor),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.contentColorFor(containerColor),
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
                 Spacer(modifier = Modifier.width(16.dp))
             }

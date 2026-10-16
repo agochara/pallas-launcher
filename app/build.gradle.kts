@@ -14,25 +14,50 @@ android {
         minSdk = 33
         targetSdk = 37
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(
+                providers.gradleProperty("LAUNCHER_STORE_FILE").get()
+            )
+            storePassword = providers.gradleProperty(
+                "LAUNCHER_STORE_PASSWORD"
+            ).get()
+            keyAlias = providers.gradleProperty(
+                "LAUNCHER_KEY_ALIAS"
+            ).get()
+            keyPassword = providers.gradleProperty(
+                "LAUNCHER_KEY_PASSWORD"
+            ).get()
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             optimization {
                 enable = true
             }
         }
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
     buildFeatures {
         compose = true
     }
+
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
@@ -50,6 +75,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     testImplementation(libs.junit)
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

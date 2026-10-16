@@ -23,6 +23,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+
+
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -69,6 +71,7 @@ fun RenameAppDialog(
                 OutlinedTextField(
                     value = newLabelText,
                     onValueChange = { newLabelText = it },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = colorScheme.onSurface),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { submit() }),
@@ -81,12 +84,12 @@ fun RenameAppDialog(
         },
         confirmButton = {
             TextButton(onClick = { submit() }) {
-                Text(text = "Save", color = colorScheme.primary, fontWeight = FontWeight.Bold)
+                Text(text = "Save", color = colorScheme.primary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text(text = "Cancel", color = colorScheme.onSurfaceVariant)
+                Text(text = "Cancel", color = colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
             }
         }
     )

@@ -1,41 +1,37 @@
 package com.pallas.launcher.ui.home
 
-import android.content.Context
-import androidx.compose.animation.AnimatedContent
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
-import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,57 +40,77 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.model.AppsVerticalPosition
 import com.pallas.launcher.domain.model.ClockVerticalPosition
+import com.pallas.launcher.domain.model.GestureAction
 import com.pallas.launcher.domain.model.ScreenApp
+import com.pallas.launcher.domain.model.TextShadowMode
 import com.pallas.launcher.platform.SystemActionsManager
-import androidx.activity.compose.BackHandler
-import com.pallas.launcher.ui.MainViewModel
 import com.pallas.launcher.ui.LauncherOverlay
+import com.pallas.launcher.ui.MainViewModel
 import com.pallas.launcher.ui.apps.AlphabeticalAppDrawer
 import com.pallas.launcher.ui.components.RenameAppDialog
 import com.pallas.launcher.ui.screens.AppPickerSheet
 import com.pallas.launcher.ui.search.LauncherSearchOverlay
 import com.pallas.launcher.ui.settings.SettingsScreen
-import com.pallas.launcher.ui.theme.AccentGold
-import com.pallas.launcher.ui.theme.AccentRed
-import com.pallas.launcher.ui.theme.LauncherTypography
-import com.pallas.launcher.ui.theme.LocalLauncherColors
+import com.pallas.launcher.ui.theme.LocalWindowBlurController
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
+
+private fun gestureActionLabel(action: GestureAction, installedApps: List<AppItem>): String = when (action) {
+    is GestureAction.OpenSearch -> "Search"
+    is GestureAction.OpenAppDrawer -> "Apps"
+    is GestureAction.OpenNotifications -> "Notifications"
+    is GestureAction.OpenQuickSettings -> "Quick Settings"
+    is GestureAction.OpenCamera -> "Camera"
+    is GestureAction.OpenDialer -> "Dialer"
+    is GestureAction.LaunchApp -> {
+        installedApps.firstOrNull { it.packageName == action.packageName }?.label
+            ?: action.packageName.substringAfterLast('.')
+    }
+    is GestureAction.None -> ""
+}
 
 @Composable
 fun PallasHomeScreen(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier
 ) {
-    val screens by viewModel.screens.collectAsState()
+    val screens by viewModel.displayScreens.collectAsState()
     val currentScreenIndex by viewModel.currentScreenIndex.collectAsState()
-    val screenSwipeDirection by viewModel.screenSwipeDirection.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val currentTime by viewModel.currentTime.collectAsState()
     val currentDate by viewModel.currentDate.collectAsState()
     val installedApps by viewModel.installedApps.collectAsState()
     val favoriteApps by viewModel.favoriteApps.collectAsState()
+    val usageScores by viewModel.appUsageScores.collectAsState()
     val isAppsLoaded by viewModel.isAppsLoaded.collectAsState()
 
     val overlay by viewModel.overlay.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
 
-    var aliasToSet by remember { mutableStateOf<ScreenApp?>(null) }
-    var appToRename by remember { mutableStateOf<ScreenApp?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    val pagerOffsetX = remember { Animatable(0f) }
 
     BackHandler(enabled = overlay !is LauncherOverlay.None || currentScreenIndex != 0) {
         if (overlay !is LauncherOverlay.None) {
@@ -104,19 +120,29 @@ fun PallasHomeScreen(
         }
     }
 
-    var showScreenNameIndicator by remember { mutableStateOf(false) }
-    LaunchedEffect(currentScreenIndex) {
-        if (screens.size > 1) {
-            showScreenNameIndicator = true
-            kotlinx.coroutines.delay(1200)
-            showScreenNameIndicator = false
-        }
-    }
-
     val currentScreen = screens.getOrNull(currentScreenIndex) ?: screens.firstOrNull()
-    val colors = LocalLauncherColors.current
     val colorScheme = MaterialTheme.colorScheme
     val context = LocalContext.current
+
+    val homeTextShadow: Shadow? = remember(settings.textShadowMode, settings.showWallpaperScrim) {
+        when (settings.textShadowMode) {
+            TextShadowMode.OFF -> null
+            TextShadowMode.AUTO -> if (settings.showWallpaperScrim) {
+                null
+            } else {
+                Shadow(
+                    color = Color.Black.copy(alpha = 0.55f),
+                    offset = Offset(0f, 2f),
+                    blurRadius = 6f
+                )
+            }
+            TextShadowMode.ON -> Shadow(
+                color = Color.Black.copy(alpha = 0.72f),
+                offset = Offset(0f, 2f),
+                blurRadius = 8f
+            )
+        }
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         GestureContainer(
@@ -127,187 +153,280 @@ fun PallasHomeScreen(
             onLongSwipeLeft = { viewModel.onScreenSwiped(1) },
             onLongSwipeRight = { viewModel.onScreenSwiped(-1) },
             onBackgroundLongPress = { viewModel.openSettings() },
+            canLongSwipeHorizontal = screens.size > 1,
+            labelFor = { dir, isLong ->
+                when (dir) {
+                    SwipeDir.UP -> {
+                        val label = gestureActionLabel(settings.swipeUpAction, installedApps)
+                        if (label.isNotBlank()) "↑ $label" else null
+                    }
+                    SwipeDir.DOWN -> {
+                        val label = gestureActionLabel(settings.swipeDownAction, installedApps)
+                        if (label.isNotBlank()) "↓ $label" else null
+                    }
+                    SwipeDir.LEFT -> {
+                        if (isLong && screens.size > 1) "Next screen"
+                        else {
+                            val label = gestureActionLabel(settings.shortSwipeLeftAction, installedApps)
+                            if (label.isNotBlank()) "← $label" else null
+                        }
+                    }
+                    SwipeDir.RIGHT -> {
+                        if (isLong && screens.size > 1) "Previous screen"
+                        else {
+                            val label = gestureActionLabel(settings.shortSwipeRightAction, installedApps)
+                            if (label.isNotBlank()) "→ $label" else null
+                        }
+                    }
+                }
+            },
+            onHorizontalDrag = { dragX ->
+                coroutineScope.launch {
+                    pagerOffsetX.snapTo(dragX)
+                }
+            },
+            onHorizontalDragEnd = { isCommitLong, isLeft ->
+                coroutineScope.launch {
+                    if (isCommitLong && screens.size > 1) {
+                        val newIndex = if (isLeft) {
+                            (currentScreenIndex + 1) % screens.size
+                        } else {
+                            (currentScreenIndex - 1 + screens.size) % screens.size
+                        }
+                        viewModel.setScreenIndex(newIndex)
+                        pagerOffsetX.snapTo(0f)
+                    } else {
+                        pagerOffsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                        if (isLeft) {
+                            viewModel.executeGesture(settings.shortSwipeLeftAction)
+                        } else {
+                            viewModel.executeGesture(settings.shortSwipeRightAction)
+                        }
+                    }
+                }
+            },
+            onHorizontalDragCancel = {
+                coroutineScope.launch {
+                    pagerOffsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                }
+            },
             modifier = Modifier.fillMaxSize(),
             enabled = overlay is LauncherOverlay.None
         ) {
-        // Wallpaper contrast gradient behind content
-        if (settings.showWallpaperScrim) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.15f),
-                                Color.Black.copy(alpha = 0.45f)
+            if (settings.showWallpaperScrim) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.15f),
+                                    Color.Black.copy(alpha = 0.45f)
+                                )
                             )
                         )
+                )
+            }
+
+            val statusBarTopPadding = if (settings.hideStatusBar) 0.dp else WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding()
+            val navBarBottomPadding = WindowInsets.navigationBarsIgnoringVisibility.asPaddingValues().calculateBottomPadding()
+
+            val isDrawerOrSearchActive = overlay is LauncherOverlay.Drawer || overlay is LauncherOverlay.Search
+            val homeAlpha by animateFloatAsState(
+                targetValue = if (isDrawerOrSearchActive) 0f else 1f,
+                animationSpec = if (isDrawerOrSearchActive) {
+                    tween(120)
+                } else {
+                    spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
+                },
+                label = "home_content_alpha"
+            )
+            val blurFraction by animateFloatAsState(
+                targetValue = if (isDrawerOrSearchActive) 1f else 0f,
+                animationSpec = if (isDrawerOrSearchActive) {
+                    spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
+                } else {
+                    tween(120)
+                },
+                label = "window_blur_radius"
+            )
+            val windowBlurController = LocalWindowBlurController.current
+            LaunchedEffect(blurFraction) {
+                windowBlurController((blurFraction * 40f).roundToInt())
+            }
+
+            val isClockTop = settings.clockVerticalPosition == ClockVerticalPosition.TOP
+            val appsPos = settings.appsVerticalPosition
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = homeAlpha
+                    }
+                    .padding(top = statusBarTopPadding, bottom = navBarBottomPadding)
+            ) {
+                val clockComposable: @Composable () -> Unit = {
+                    ClockHeader(
+                        timeString = currentTime,
+                        dateString = currentDate,
+                        alignment = settings.clockHorizontalAlignment,
+                        showDate = settings.showDate,
+                        onClockClick = { viewModel.openClock() },
+                        onDateClick = { viewModel.openCalendar() },
+                        fontScale = settings.appFontScale,
+                        paddingLeftDp = settings.clockPaddingLeftDp,
+                        paddingRightDp = settings.clockPaddingRightDp,
+                        paddingTopDp = settings.clockPaddingTopDp,
+                        paddingBottomDp = settings.clockPaddingBottomDp,
+                        shadow = homeTextShadow
                     )
+                }
+
+                val appsComposable: @Composable () -> Unit = {
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                        val screenWidthPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+                        val currentOffset = pagerOffsetX.value
+
+                        if (screens.isEmpty()) return@BoxWithConstraints
+
+                        val currScreen = screens.getOrNull(currentScreenIndex) ?: screens.first()
+                        val currAllApps = currScreen.apps
+                        val currVisibleApps = remember(currAllApps, installedApps, isAppsLoaded) {
+                            if (!isAppsLoaded) currAllApps.filterNot { it.isProfileRemoved }
+                            else {
+                                val installedKeys = installedApps.map { it.uniqueKey }.toSet()
+                                currAllApps.filter { app -> !app.isProfileRemoved && app.uniqueKey in installedKeys }
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .offset { IntOffset(currentOffset.roundToInt(), 0) }
+                        ) {
+                            AppListView(
+                                apps = currVisibleApps,
+                                alignment = settings.appsHorizontalAlignment,
+                                fontScale = settings.screensFontScale,
+                                paddingLeftDp = settings.screensPaddingLeftDp,
+                                paddingRightDp = settings.screensPaddingRightDp,
+                                paddingTopDp = settings.screensPaddingTopDp,
+                                paddingBottomDp = settings.screensPaddingBottomDp,
+                                isLoaded = isAppsLoaded,
+                                shadow = homeTextShadow,
+                                onAppClick = { app ->
+                                    if (!app.isProfileRemoved) viewModel.launchApp(app.packageName, app.activityName, app.userHandle)
+                                },
+                                onAppLongClick = { app ->
+                                    viewModel.setAppToCustomize(app)
+                                },
+                                onEmptyScreenClick = {
+                                    viewModel.openAppPicker()
+                                }
+                            )
+                        }
+
+                        if (screens.size > 1 && currentOffset != 0f) {
+                            val adjacentIndex = if (currentOffset < 0) {
+                                (currentScreenIndex + 1) % screens.size
+                            } else {
+                                (currentScreenIndex - 1 + screens.size) % screens.size
+                            }
+                            val adjScreen = screens[adjacentIndex]
+                            val adjAllApps = adjScreen.apps
+                            val adjVisibleApps = remember(adjAllApps, installedApps, isAppsLoaded) {
+                                if (!isAppsLoaded) adjAllApps.filterNot { it.isProfileRemoved }
+                                else {
+                                    val installedKeys = installedApps.map { it.uniqueKey }.toSet()
+                                    adjAllApps.filter { app -> !app.isProfileRemoved && app.uniqueKey in installedKeys }
+                                }
+                            }
+                            val adjacentBaseX = if (currentOffset < 0) screenWidthPx else -screenWidthPx
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .offset { IntOffset((adjacentBaseX + currentOffset).roundToInt(), 0) }
+                            ) {
+                                AppListView(
+                                    apps = adjVisibleApps,
+                                    alignment = settings.appsHorizontalAlignment,
+                                    fontScale = settings.screensFontScale,
+                                    paddingLeftDp = settings.screensPaddingLeftDp,
+                                    paddingRightDp = settings.screensPaddingRightDp,
+                                    paddingTopDp = settings.screensPaddingTopDp,
+                                    paddingBottomDp = settings.screensPaddingBottomDp,
+                                    isLoaded = isAppsLoaded,
+                                    shadow = homeTextShadow,
+                                    onAppClick = { app ->
+                                        if (!app.isProfileRemoved) viewModel.launchApp(app.packageName, app.activityName, app.userHandle)
+                                    },
+                                    onAppLongClick = { app ->
+                                        viewModel.setAppToCustomize(app)
+                                    },
+                                    onEmptyScreenClick = {
+                                        viewModel.openAppPicker()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                val appsAlignment = when (appsPos) {
+                    AppsVerticalPosition.TOP -> Alignment.TopCenter
+                    AppsVerticalPosition.CENTER -> Alignment.Center
+                    AppsVerticalPosition.BOTTOM -> Alignment.BottomCenter
+                }
+
+                if (isClockTop) clockComposable()
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentAlignment = appsAlignment
+                ) { appsComposable() }
+                if (!isClockTop) {
+                    clockComposable()
+                    Spacer(Modifier.height(24.dp))
+                }
+            }
+        }
+
+        if (overlay !is LauncherOverlay.Search) {
+            val drawerApps = remember(installedApps, settings.hiddenFromAppList) {
+                installedApps.filterNot {
+                    settings.hiddenFromAppList.contains(it.uniqueKey) || settings.hiddenFromAppList.contains(it.packageName)
+                }
+            }
+            AlphabeticalAppDrawer(
+                installedApps = drawerApps,
+                favoriteApps = favoriteApps,
+                usageScores = usageScores,
+                edgeScrubPosition = settings.edgeScrubPosition,
+                edgeScrubReleaseAction = settings.edgeScrubReleaseAction,
+                isOpen = overlay is LauncherOverlay.Drawer,
+                fontScale = settings.appListFontScale,
+                onOpenChange = { viewModel.setAppDrawerOpen(it) },
+                onLaunchApp = { app ->
+                    viewModel.closeDrawer()
+                    viewModel.launchApp(app.packageName, app.activityName, app.userHandle)
+                },
+                onAppLongPress = { app ->
+                    val screenApp = ScreenApp(
+                        uniqueKey = app.uniqueKey,
+                        packageName = app.packageName,
+                        activityName = app.activityName,
+                        customLabel = null,
+                        defaultLabel = app.label,
+                        userSerialNumber = app.userSerialNumber,
+                        userHandle = app.userHandle
+                    )
+                    viewModel.showAppOptions(screenApp)
+                },
+                onDismiss = { viewModel.closeDrawer() }
             )
         }
 
-        val statusBarTopPadding = if (settings.hideStatusBar) 0.dp else WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding()
-        val navBarBottomPadding = WindowInsets.navigationBarsIgnoringVisibility.asPaddingValues().calculateBottomPadding()
-
-        // Screen identity indicator pill on swipe
-        AnimatedVisibility(
-            visible = showScreenNameIndicator && (screens.size > 1),
-            enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(300)),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = statusBarTopPadding + 8.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = colorScheme.surfaceContainerHigh.copy(alpha = 0.9f)
-            ) {
-                val tagStr = currentScreen?.contextTag?.takeIf { it.isNotBlank() }?.let { " • $it" } ?: ""
-                Text(
-                    text = "${currentScreen?.name ?: "Screen"}$tagStr",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                )
-            }
-        }
-
-        val isDrawerOrSearchActive = overlay is LauncherOverlay.Drawer || overlay is LauncherOverlay.Search
-        val homeAlpha by androidx.compose.animation.core.animateFloatAsState(
-            targetValue = if (isDrawerOrSearchActive) 0f else 1f,
-            animationSpec = tween(220),
-            label = "home_content_alpha"
-        )
-
-        val isClockTop = settings.clockVerticalPosition == ClockVerticalPosition.TOP
-        val appsPos = settings.appsVerticalPosition
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    alpha = homeAlpha
-                }
-                .padding(top = statusBarTopPadding, bottom = navBarBottomPadding)
-        ) {
-            val clockComposable: @Composable () -> Unit = {
-                ClockHeader(
-                    timeString = currentTime,
-                    dateString = currentDate,
-                    alignment = settings.clockHorizontalAlignment,
-                    showDate = settings.showDate,
-                    onClockClick = { viewModel.openClock() },
-                    onDateClick = { viewModel.openCalendar() },
-                    fontScale = settings.appFontScale,
-                    paddingLeftDp = settings.clockPaddingLeftDp,
-                    paddingRightDp = settings.clockPaddingRightDp,
-                    paddingTopDp = settings.clockPaddingTopDp,
-                    paddingBottomDp = settings.clockPaddingBottomDp
-                )
-            }
-
-            val appsComposable: @Composable () -> Unit = {
-                AnimatedContent(
-                    targetState = currentScreenIndex,
-                    transitionSpec = {
-                        val spec = tween<Float>(220, easing = FastOutSlowInEasing)
-                        val slideSpec = tween<IntOffset>(220, easing = FastOutSlowInEasing)
-                        val isForward = screenSwipeDirection > 0
-                        if (isForward) {
-                            (slideInHorizontally(animationSpec = slideSpec) { width -> width / 2 } + fadeIn(animationSpec = spec)) togetherWith
-                                    (slideOutHorizontally(animationSpec = slideSpec) { width -> -width / 2 } + fadeOut(animationSpec = spec))
-                        } else {
-                            (slideInHorizontally(animationSpec = slideSpec) { width -> -width / 2 } + fadeIn(animationSpec = spec)) togetherWith
-                                    (slideOutHorizontally(animationSpec = slideSpec) { width -> width / 2 } + fadeOut(animationSpec = spec))
-                        }
-                    },
-                    label = "screen_pager"
-                ) { targetIndex ->
-                    val screen = screens.getOrNull(targetIndex) ?: currentScreen
-                    val allApps = screen?.apps ?: emptyList()
-                    val visibleApps = remember(allApps, installedApps, isAppsLoaded) {
-                        if (!isAppsLoaded) allApps.filterNot { it.isProfileRemoved }
-                        else allApps.filter { app ->
-                            !app.isProfileRemoved && installedApps.any { it.uniqueKey == app.uniqueKey }
-                        }
-                    }
-
-                    AppListView(
-                        apps = visibleApps,
-                        alignment = settings.appsHorizontalAlignment,
-                        fontScale = settings.screensFontScale,
-                        paddingLeftDp = settings.screensPaddingLeftDp,
-                        paddingRightDp = settings.screensPaddingRightDp,
-                        paddingTopDp = settings.screensPaddingTopDp,
-                        paddingBottomDp = settings.screensPaddingBottomDp,
-                        isLoaded = isAppsLoaded,
-                        onAppClick = { app ->
-                            if (!app.isProfileRemoved) viewModel.launchApp(app.packageName, app.activityName, app.userHandle)
-                        },
-                        onAppLongClick = { app ->
-                            viewModel.setAppToCustomize(app)
-                        },
-                        onEmptyScreenClick = {
-                            viewModel.openAppPicker()
-                        }
-                    )
-                }
-            }
-            val appsAlignment = when (appsPos) {
-                AppsVerticalPosition.TOP -> Alignment.TopCenter
-                AppsVerticalPosition.CENTER -> Alignment.Center
-                AppsVerticalPosition.BOTTOM -> Alignment.BottomCenter
-            }
-
-            if (isClockTop) clockComposable()
-            Box(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentAlignment = appsAlignment
-            ) { appsComposable() }
-            if (!isClockTop) {
-                clockComposable()
-                Spacer(Modifier.height(24.dp))
-            }
-
-        }
-    }
-
-    // Edge Scrub App Drawer - hidden while Search overlay is active to avoid rail bleed-through
-    if (overlay !is LauncherOverlay.Search) {
-        val drawerApps = remember(installedApps, settings.hiddenFromAppList) {
-            installedApps.filterNot { settings.hiddenFromAppList.contains(it.packageName) }
-        }
-        AlphabeticalAppDrawer(
-            installedApps = drawerApps,
-            favoriteApps = favoriteApps,
-            edgeScrubPosition = settings.edgeScrubPosition,
-            edgeScrubReleaseAction = settings.edgeScrubReleaseAction,
-            isOpen = overlay is LauncherOverlay.Drawer,
-            fontScale = settings.appListFontScale,
-            onOpenChange = { viewModel.setAppDrawerOpen(it) },
-            onLaunchApp = { app ->
-                viewModel.closeDrawer()
-                viewModel.launchApp(app.packageName, app.activityName, app.userHandle)
-            },
-            onAppLongPress = { app ->
-                val screenApp = ScreenApp(
-                    uniqueKey = app.uniqueKey,
-                    packageName = app.packageName,
-                    activityName = app.activityName,
-                    customLabel = null,
-                    defaultLabel = app.label,
-                    userSerialNumber = app.userSerialNumber,
-                    userHandle = app.userHandle
-                )
-                viewModel.showAppOptions(screenApp)
-            },
-            onDismiss = { viewModel.closeDrawer() }
-        )
-    }
-
-        // Global Search Overlay
         AnimatedVisibility(
             visible = overlay is LauncherOverlay.Search,
             enter = fadeIn(tween(180)),
@@ -322,7 +441,6 @@ fun PallasHomeScreen(
             )
         }
 
-        // App Picker Bottom Sheet
         if (overlay is LauncherOverlay.AppPicker) {
             val alreadyAddedKeys = remember(currentScreen?.apps) {
                 currentScreen?.apps?.map { it.uniqueKey }?.toSet() ?: emptySet()
@@ -340,22 +458,19 @@ fun PallasHomeScreen(
             )
         }
 
-        // Settings Modal
         AnimatedVisibility(
             visible = overlay is LauncherOverlay.Settings,
             enter = slideInHorizontally(tween(220)) { it } + fadeIn(tween(180)),
             exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(180))
         ) {
             SettingsScreen(
-                viewModel = viewModel,
                 onDismiss = { viewModel.closeSettings() }
             )
         }
 
-        // Material 3 Expressive App Long-Press Action Modal
         (overlay as? LauncherOverlay.AppOptions)?.app?.let { app ->
-            val shortcuts = remember(app.packageName) {
-                viewModel.getShortcutsForApp(app.packageName)
+            val shortcuts = remember(app.packageName, app.userHandle) {
+                viewModel.getShortcutsForApp(app.packageName, app.userHandle)
             }
 
             AppOptionsModal(
@@ -371,12 +486,10 @@ fun PallasHomeScreen(
                     viewModel.dismissAppOptions()
                 },
                 onSetAlias = {
-                    aliasToSet = app
-                    viewModel.dismissAppOptions()
+                    viewModel.openSetAlias(app)
                 },
                 onRenameApp = {
-                    appToRename = app
-                    viewModel.dismissAppOptions()
+                    viewModel.openRenameApp(app)
                 },
                 onRemoveFromScreen = {
                     currentScreen?.let {
@@ -387,7 +500,7 @@ fun PallasHomeScreen(
                 onAddToScreen = {
                     currentScreen?.let { screen ->
                         val item = installedApps.find { it.uniqueKey == app.uniqueKey }
-                            ?: com.pallas.launcher.domain.model.AppItem(
+                            ?: AppItem(
                                 packageName = app.packageName,
                                 activityName = app.activityName,
                                 label = app.defaultLabel,
@@ -399,11 +512,11 @@ fun PallasHomeScreen(
                     viewModel.dismissAppOptions()
                 },
                 onHideFromAppList = {
-                    viewModel.hideFromAppList(app.packageName)
+                    viewModel.hideFromAppList(app.uniqueKey)
                     viewModel.dismissAppOptions()
                 },
                 onHideApp = {
-                    viewModel.hideApp(app.packageName)
+                    viewModel.hideApp(app.uniqueKey)
                     currentScreen?.let {
                         viewModel.removeAppFromScreen(it.id, app.uniqueKey)
                     }
@@ -423,8 +536,7 @@ fun PallasHomeScreen(
             )
         }
 
-        // Material 3 Expressive Alias Creation Dialog
-        aliasToSet?.let { app ->
+        (overlay as? LauncherOverlay.SetAlias)?.app?.let { app ->
             var aliasText by remember { mutableStateOf("") }
             val focusRequester = remember { FocusRequester() }
             val keyboardController = LocalSoftwareKeyboardController.current
@@ -435,13 +547,13 @@ fun PallasHomeScreen(
                 keyboardController?.show()
             }
 
-            val existingTarget = remember(aliasText) {
+            val existingTarget = remember(aliasText, settings.customAliases) {
                 val clean = aliasText.lowercase().trim()
                 if (clean.isNotEmpty()) settings.customAliases[clean] else null
             }
 
             AlertDialog(
-                onDismissRequest = { aliasToSet = null },
+                onDismissRequest = { viewModel.dismissOverlay() },
                 shape = RoundedCornerShape(24.dp),
                 title = { Text(text = "Set Alias for '${app.displayLabel}'", color = colorScheme.onSurface) },
                 text = {
@@ -459,8 +571,8 @@ fun PallasHomeScreen(
                             keyboardActions = KeyboardActions(
                                 onDone = {
                                     if (aliasText.isNotBlank()) {
-                                        viewModel.setAlias(aliasText.trim(), app.packageName)
-                                        aliasToSet = null
+                                        viewModel.setAlias(aliasText.trim(), app.uniqueKey)
+                                        viewModel.dismissOverlay()
                                     }
                                 }
                             ),
@@ -469,7 +581,7 @@ fun PallasHomeScreen(
                                 .focusRequester(focusRequester),
                             shape = RoundedCornerShape(14.dp)
                         )
-                        if (existingTarget != null && existingTarget != app.packageName) {
+                        if (existingTarget != null && existingTarget != app.uniqueKey && existingTarget != app.packageName) {
                             Text(
                                 text = "⚠️ Overwrites existing alias pointing to '$existingTarget'",
                                 fontSize = 12.sp,
@@ -482,8 +594,8 @@ fun PallasHomeScreen(
                     TextButton(
                         onClick = {
                             if (aliasText.isNotBlank()) {
-                                viewModel.setAlias(aliasText.trim(), app.packageName)
-                                aliasToSet = null
+                                viewModel.setAlias(aliasText.trim(), app.uniqueKey)
+                                viewModel.dismissOverlay()
                             }
                         }
                     ) {
@@ -491,7 +603,7 @@ fun PallasHomeScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { aliasToSet = null }) {
+                    TextButton(onClick = { viewModel.dismissOverlay() }) {
                         Text(text = "Cancel", color = colorScheme.onSurfaceVariant)
                     }
                 },
@@ -499,17 +611,16 @@ fun PallasHomeScreen(
             )
         }
 
-        // Rename App Dialog
-        appToRename?.let { app ->
+        (overlay as? LauncherOverlay.RenameApp)?.app?.let { app ->
             RenameAppDialog(
                 initialLabel = app.displayLabel,
                 onConfirm = { trimmed ->
-                    val currentScreen = screens.getOrNull(currentScreenIndex) ?: screens.firstOrNull()
+                    val curr = screens.getOrNull(currentScreenIndex) ?: screens.firstOrNull()
                     val isOnAnyScreen = screens.any { s -> s.apps.any { it.uniqueKey == app.uniqueKey } }
-                    if (!isOnAnyScreen && currentScreen != null) {
+                    if (!isOnAnyScreen && curr != null) {
                         viewModel.addAppToScreen(
-                            currentScreen.id,
-                            com.pallas.launcher.domain.model.AppItem(
+                            curr.id,
+                            AppItem(
                                 packageName = app.packageName,
                                 activityName = app.activityName,
                                 label = app.defaultLabel,
@@ -521,10 +632,10 @@ fun PallasHomeScreen(
                     } else {
                         viewModel.updateAppLabelAcrossScreens(app.uniqueKey, trimmed)
                     }
+                    viewModel.dismissOverlay()
                 },
-                onDismiss = { appToRename = null }
+                onDismiss = { viewModel.dismissOverlay() }
             )
         }
     }
 }
-

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.TouchApp
@@ -170,31 +171,43 @@ fun MainSettingsPage(
                         title = "Appearance",
                         subtitle = "Theme, wallpaper scrim, status bar, text size",
                         icon = Icons.Default.Palette,
+                        containerColor = colorScheme.primaryContainer,
                         onClick = { onNavigate(SettingsSubpage.APPEARANCE) }
                     )
                     SettingsNavRow(
                         title = "Clock & Date",
                         subtitle = "Position, alignment, 24-hour time, date, battery",
                         icon = Icons.Default.Schedule,
+                        containerColor = colorScheme.secondaryContainer,
                         onClick = { onNavigate(SettingsSubpage.CLOCK_DATE) }
                     )
                     SettingsNavRow(
                         title = "Home Screens & Apps",
                         subtitle = "Manage screens, reorder apps, hidden apps",
                         icon = Icons.Default.GridView,
+                        containerColor = colorScheme.tertiaryContainer,
                         onClick = { onNavigate(SettingsSubpage.SCREENS_APPS) }
                     )
                     SettingsNavRow(
                         title = "Gestures",
                         subtitle = "Swipe actions, app list rail",
                         icon = Icons.Default.TouchApp,
+                        containerColor = colorScheme.secondaryContainer,
                         onClick = { onNavigate(SettingsSubpage.GESTURES) }
                     )
                     SettingsNavRow(
                         title = "Search",
                         subtitle = "Search aliases, contact nicknames & quick calling",
                         icon = Icons.Default.Search,
+                        containerColor = colorScheme.primaryContainer,
                         onClick = { onNavigate(SettingsSubpage.SEARCH) }
+                    )
+                    SettingsNavRow(
+                        title = "Backup & Restore",
+                        subtitle = "Export or import your launcher setup as a JSON file",
+                        icon = Icons.Default.Save,
+                        containerColor = colorScheme.tertiaryContainer,
+                        onClick = { onNavigate(SettingsSubpage.BACKUP) }
                     )
                 }
 

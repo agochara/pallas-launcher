@@ -18,12 +18,11 @@ class AppSearchIndex(
 ) {
     data class IndexedApp(
         val app: AppItem,
+        val rawLabel: String,
         val normalizedLabel: String,
         val normalizedWords: List<String>,
-        /** start offset of each word inside [normalizedLabel] (same length as [normalizedWords]) */
         val wordStarts: List<Int>,
         val initials: String,
-        /** true when this entry was built from a user-renamed label (ranges don't map onto app.label) */
         val isCustomLabel: Boolean
     )
 
@@ -38,10 +37,6 @@ class AppSearchIndex(
     @Volatile
     private var aliasEntries: List<AliasEntry> = emptyList()
 
-    /**
-     * @param customLabels uniqueKey -> user-chosen label (Rename Display Label). Both the original and the
-     *                     custom label are searchable.
-     */
     fun buildIndex(
         apps: List<AppItem>,
         aliases: Map<String, String>,
@@ -62,8 +57,6 @@ class AppSearchIndex(
             if (normAlias.isEmpty()) continue
 
             val normTarget = SearchRanking.normalize(target.trim())
-            // Aliases created from the long-press menu store a package name / uniqueKey,
-            // aliases typed in Settings store an app NAME - support both.
             val targetApp = apps.firstOrNull { it.uniqueKey == target }
                 ?: apps.firstOrNull { it.packageName.equals(target, ignoreCase = true) }
                 ?: apps.firstOrNull { it.activityName.equals(target, ignoreCase = true) }
@@ -84,7 +77,6 @@ class AppSearchIndex(
         val initials = StringBuilder()
         var cursor = 0
         for (w in words) {
-            // search from the running cursor so repeated words ("Google Google") don't all map to the first one
             val idx = normLabel.indexOf(w, cursor)
             if (idx == -1) continue
             starts += idx
@@ -95,6 +87,7 @@ class AppSearchIndex(
 
         return IndexedApp(
             app = app,
+            rawLabel = label,
             normalizedLabel = normLabel,
             normalizedWords = keptWords,
             wordStarts = starts,
@@ -122,7 +115,7 @@ class AppSearchIndex(
         // 1. aliases (exact)
         for (entry in aliasEntries) {
             if (q == entry.normalizedAlias) {
-                val frecency = appUsageTracker?.getUsageBonus(entry.targetApp.packageName) ?: 0.0
+                val frecency = appUsageTracker?.getUsageBonus(entry.targetApp.uniqueKey) ?: 0.0
                 offer(entry.targetApp, MatchTier.ALIAS.baseScore + frecency, emptyList())
             }
         }
@@ -147,7 +140,6 @@ class AppSearchIndex(
                     val s = item.wordStarts[wordIdx]
                     ranges = listOf(s until (s + qLen))
                 } else if (qLen >= 2 && item.initials.startsWith(q)) {
-                    // "wa" -> WhatsApp-style initials ("Whats App"), "gm" -> "Google Maps"
                     tier = MatchTier.PREFIX; sub = 0.0
                     ranges = (0 until qLen).map { item.wordStarts[it].let { p -> p..p } }
                 } else {
@@ -168,11 +160,11 @@ class AppSearchIndex(
 
             if (tier == MatchTier.NONE) continue
 
-            val frecency = appUsageTracker?.getUsageBonus(item.app.packageName) ?: 0.0
-            // shorter labels first inside the same tier ("Camera" before "Camera Pro Studio")
+            val frecency = appUsageTracker?.getUsageBonus(item.app.uniqueKey) ?: 0.0
             val lengthPenalty = label.length * 0.5
             val score = tier.baseScore + sub + frecency - lengthPenalty
-            offer(item.app, score, if (item.isCustomLabel) emptyList() else ranges)
+            val canHighlight = !item.isCustomLabel && item.rawLabel.length == item.normalizedLabel.length
+            offer(item.app, score, if (canHighlight) ranges else emptyList())
         }
 
         return candidates.values
@@ -183,12 +175,6 @@ class AppSearchIndex(
             .take(8)
     }
 
-    /**
-     * Subsequence match with guard rails so it doesn't return noise:
-     *  - at least 3 chars
-     *  - first matched char must start a word
-     *  - matched characters must be reasonably compact (span <= 2x query length)
-     */
     private fun fuzzyRanges(q: String, target: String, wordStarts: List<Int>): List<IntRange>? {
         if (q.length < 3 || target.length < q.length) return null
 

@@ -1,6 +1,5 @@
 package com.pallas.launcher.ui.search
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -48,13 +47,11 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.pallas.launcher.domain.search.LauncherSearchResult
-import com.pallas.launcher.ui.theme.GaramondFontFamily
+import com.pallas.launcher.domain.search.isEnterEligible
+import com.pallas.launcher.ui.theme.LauncherTypography
 import com.pallas.launcher.ui.theme.launcherBackdropBrush
 import kotlinx.coroutines.delay
 
@@ -138,11 +135,7 @@ fun LauncherSearchOverlay(
                     item {
                         Text(
                             text = "No apps match \"$query\"",
-                            style = TextStyle(
-                                fontFamily = GaramondFontFamily,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Normal
-                            ),
+                            style = MaterialTheme.typography.bodyMedium,
                             color = colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp)
                         )
@@ -164,9 +157,6 @@ fun LauncherSearchOverlay(
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = colorScheme.surfaceContainerHigh,
-                tonalElevation = 6.dp,
-                shadowElevation = 4.dp,
-                border = BorderStroke(1.dp, colorScheme.outlineVariant.copy(alpha = 0.45f)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 10.dp)
@@ -190,25 +180,27 @@ fun LauncherSearchOverlay(
                         if (query.isEmpty()) {
                             Text(
                                 text = "Search apps",
-                                style = TextStyle(fontFamily = GaramondFontFamily, fontSize = 17.sp),
+                                style = LauncherTypography.searchInput,
                                 color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                             )
                         }
                         BasicTextField(
                             value = query,
                             onValueChange = onQueryChange,
-                            textStyle = TextStyle(
-                                fontFamily = GaramondFontFamily,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = colorScheme.onSurface
-                            ),
+                            textStyle = LauncherTypography.searchInput.copy(color = colorScheme.onSurface),
                             cursorBrush = SolidColor(colorScheme.primary),
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(
                                 onSearch = {
-                                    results.firstOrNull()?.let {
+                                    // Safety: the keyboard's Enter must NEVER place a phone call from an ambiguous query.
+                                    // A call only fires from Enter when the user typed "call <name>" AND exactly one contact matches.
+                                    val explicitCall = query.trim().startsWith("call ", ignoreCase = true) &&
+                                        results.count { it is LauncherSearchResult.ContactCall } == 1
+                                    val target = results.firstOrNull {
+                                        it.isEnterEligible && (it !is LauncherSearchResult.ContactCall || explicitCall)
+                                    }
+                                    target?.let {
                                         keyboardController?.hide()
                                         onResultClick(it)
                                     }

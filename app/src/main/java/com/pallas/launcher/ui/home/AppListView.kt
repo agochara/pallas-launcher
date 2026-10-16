@@ -9,22 +9,23 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.pallas.launcher.domain.model.AppsHorizontalAlignment
 import com.pallas.launcher.domain.model.ScreenApp
 import com.pallas.launcher.ui.theme.LauncherTypography
+import com.pallas.launcher.ui.theme.LocalHomeContrastState
 import com.pallas.launcher.ui.theme.LocalLauncherColors
+import com.pallas.launcher.ui.theme.homeLocalContrastScrim
+import com.pallas.launcher.ui.theme.scaled
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -40,9 +41,11 @@ fun AppListView(
     onAppClick: (ScreenApp) -> Unit,
     onAppLongClick: (ScreenApp) -> Unit,
     onEmptyScreenClick: () -> Unit,
+    shadow: Shadow? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalLauncherColors.current
+    val contrastState = LocalHomeContrastState.current
 
     val horizontalAlignment = when (alignment) {
         AppsHorizontalAlignment.LEFT -> Alignment.Start
@@ -56,11 +59,21 @@ fun AppListView(
         AppsHorizontalAlignment.RIGHT -> TextAlign.End
     }
 
+    val effectiveTextPrimary = contrastState.resolvePrimaryText(colors.textPrimary)
+    val effectiveTextDimmed = contrastState.resolveSecondaryText(colors.textDimmed)
+    // Only keep legacy drop shadow if explicitly passed and local scrim is off
+    val effectiveShadow = if (contrastState.localScrimAlpha > 0f) null else shadow
+
     if (apps.isEmpty()) {
-        if (!isLoaded) return // Prevent cold-start flash while apps are loading from disk/PackageManager
+        if (!isLoaded) return
         Column(
             modifier = modifier
                 .fillMaxWidth()
+                .homeLocalContrastScrim(
+                    alignment = alignment,
+                    scrimColor = contrastState.scrimColor,
+                    scrimAlpha = contrastState.localScrimAlpha
+                )
                 .padding(
                     start = paddingLeftDp.dp,
                     end = paddingRightDp.dp,
@@ -71,8 +84,8 @@ fun AppListView(
         ) {
             Text(
                 text = "+ Add apps to this screen",
-                style = LauncherTypography.dateAndBattery.copy(shadow = colors.shadow),
-                color = colors.textDimmed,
+                style = LauncherTypography.dateAndBattery.copy(shadow = effectiveShadow),
+                color = effectiveTextDimmed,
                 textAlign = textAlign,
                 modifier = Modifier
                     .combinedClickable(
@@ -89,6 +102,11 @@ fun AppListView(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .homeLocalContrastScrim(
+                alignment = alignment,
+                scrimColor = contrastState.scrimColor,
+                scrimAlpha = contrastState.localScrimAlpha
+            )
             .padding(
                 start = paddingLeftDp.dp,
                 end = paddingRightDp.dp,
@@ -96,7 +114,7 @@ fun AppListView(
                 bottom = paddingBottomDp.dp
             ),
         horizontalAlignment = horizontalAlignment,
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         apps.forEach { app ->
             val interactionSource = remember { MutableInteractionSource() }
@@ -106,14 +124,13 @@ fun AppListView(
 
             Text(
                 text = app.displayLabel,
-                style = LauncherTypography.appLabel.copy(
-                    fontSize = (25 * fontScale).sp,
-                    lineHeight = (34 * fontScale).sp,
-                    shadow = colors.shadow
+                style = LauncherTypography.appLabel.scaled(fontScale).copy(
+                    shadow = effectiveShadow
                 ),
-                color = colors.textPrimary,
+                color = effectiveTextPrimary,
                 textAlign = textAlign,
                 modifier = Modifier
+                    .fillMaxWidth()
                     .graphicsLayer {
                         scaleX = scale
                         scaleY = scale
@@ -125,7 +142,7 @@ fun AppListView(
                         onClick = { onAppClick(app) },
                         onLongClick = { onAppLongClick(app) }
                     )
-                    .padding(vertical = 4.dp)
+                    .padding(vertical = 10.dp)
             )
         }
     }

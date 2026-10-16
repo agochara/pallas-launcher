@@ -1,14 +1,33 @@
 package com.pallas.launcher.domain.search
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import com.pallas.launcher.domain.model.CommandConfig
 import com.pallas.launcher.domain.model.SearchContact
+import com.pallas.launcher.domain.model.WebSearchEngine
 import com.pallas.launcher.platform.SystemActionsManager
 import java.util.Locale
 
 data class ParsedAlarm(val hour: Int, val minute: Int)
+data class ParsedTimer(val totalSeconds: Int, val formattedDuration: String)
 
-data class ParsedTimer(
-    val totalSeconds: Int,
-    val formattedDuration: String
+data class WebSearchConfig(
+    val engine: WebSearchEngine = WebSearchEngine.GOOGLE,
+    val browserPackage: String? = null,
+    val browserLabel: String? = null
+)
+
+sealed interface AsyncCommandRequest {
+    data class Finance(val query: String) : AsyncCommandRequest
+    data class Weather(val city: String, val isSolarOnly: Boolean) : AsyncCommandRequest
+    data class Wolfram(val query: String) : AsyncCommandRequest
+}
+
+data class CommandEvaluation(
+    val immediateResults: List<LauncherSearchResult>,
+    val asyncRequest: AsyncCommandRequest? = null
 )
 
 object SmartCommandEngine {
@@ -19,7 +38,6 @@ object SmartCommandEngine {
             trimmed == "al" || trimmed == "alarm" -> return null
             trimmed.startsWith("alarm ") -> "alarm"
             trimmed.startsWith("al ") -> "al"
-            // Also handle without space if followed immediately by digit, e.g. "al5", "al530"
             trimmed.startsWith("alarm") && trimmed.length > 5 && trimmed[5].isDigit() -> "alarm"
             trimmed.startsWith("al") && trimmed.length > 2 && trimmed[2].isDigit() -> "al"
             else -> return null
@@ -60,12 +78,10 @@ object SmartCommandEngine {
                     minute = 0
                 }
                 3 -> {
-                    // e.g. "530" -> 5:30
                     hour = clean.substring(0, 1).toInt()
                     minute = clean.substring(1, 3).toInt()
                 }
                 4 -> {
-                    // e.g. "1805" -> 18:05, "0530" -> 5:30
                     hour = clean.substring(0, 2).toInt()
                     minute = clean.substring(2, 4).toInt()
                 }
@@ -106,70 +122,70 @@ object SmartCommandEngine {
         return parseTimerDuration(rawArg)
     }
 
+    const val MAX_TIMER_SECONDS = 24L * 3600L
+
+    private val PLAIN_NUMBER = Regex("""\d{1,5}""")
+    private val COLON_FORM = Regex("""(\d{1,3}):(\d{1,2})(?::(\d{1,2}))?""")
+    private val UNIT_TOKEN = Regex("""(\d{1,6})\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)""")
+
     fun parseTimerDuration(rawArg: String): ParsedTimer? {
-        val trimmed = rawArg.trim().lowercase(Locale.ROOT)
-        if (trimmed.isEmpty()) return null
+        val text = rawArg.trim().lowercase(Locale.ROOT)
+        if (text.isEmpty()) return null
 
-        // Format 1: Colon notation "1:05", "1:30", "1:05:30"
-        if (trimmed.contains(":")) {
-            val parts = trimmed.split(":")
-            if (parts.size == 2) {
-                val hours = parts[0].toIntOrNull() ?: return null
-                val minutes = parts[1].toIntOrNull() ?: return null
-                if (hours < 0 || minutes < 0 || minutes >= 60) return null
-                val totalSeconds = hours * 3600 + minutes * 60
-                if (totalSeconds <= 0) return null
-                return ParsedTimer(totalSeconds, formatDuration(hours, minutes, 0))
-            } else if (parts.size == 3) {
-                val hours = parts[0].toIntOrNull() ?: return null
-                val minutes = parts[1].toIntOrNull() ?: return null
-                val seconds = parts[2].toIntOrNull() ?: return null
-                if (hours < 0 || minutes < 0 || minutes >= 60 || seconds < 0 || seconds >= 60) return null
-                val totalSeconds = hours * 3600 + minutes * 60 + seconds
-                if (totalSeconds <= 0) return null
-                return ParsedTimer(totalSeconds, formatDuration(hours, minutes, seconds))
+        var hours = 0L
+        var minutes = 0L
+        var seconds = 0L
+
+        val colon = COLON_FORM.matchEntire(text)
+        if (colon != null) {
+            val a = colon.groupValues[1].toLong()
+            val b = colon.groupValues[2].toLong()
+            val c = colon.groupValues[3]
+            if (b >= 60) return null
+            hours = a
+            minutes = b
+            if (c.isNotEmpty()) {
+                seconds = c.toLong()
+                if (seconds >= 60) return null
             }
-        }
-
-        // Format 2: Plain number -> default to minutes, e.g. "5" -> 5 minutes
-        trimmed.toIntOrNull()?.let { num ->
-            if (num > 0) {
-                val totalSeconds = num * 60
-                val hours = num / 60
-                val minutes = num % 60
-                return ParsedTimer(totalSeconds, formatDuration(hours, minutes, 0))
-            }
-        }
-
-        // Format 3: Unit strings, e.g. "5m", "1h 5m", "1hr5m", "30s", "1hr 30min"
-        var hours = 0
-        var minutes = 0
-        var seconds = 0
-        var matched = false
-
-        val unitRegex = """(\d+)\s*(h(?:ours?|rs?)?|m(?:in(?:utes?)?)?|s(?:ec(?:onds?)?)?)""".toRegex()
-        val matches = unitRegex.findAll(trimmed).toList()
-        if (matches.isNotEmpty()) {
-            for (m in matches) {
-                val value = m.groupValues[1].toIntOrNull() ?: return null
-                val unit = m.groupValues[2]
-                when {
-                    unit.startsWith("h") -> hours += value
-                    unit.startsWith("m") -> minutes += value
-                    unit.startsWith("s") -> seconds += value
+        } else if (PLAIN_NUMBER.matches(text)) {
+            minutes = text.toLong()
+        } else {
+            var pos = 0
+            var seenH = false
+            var seenM = false
+            var seenS = false
+            while (pos < text.length) {
+                while (pos < text.length && text[pos].isWhitespace()) pos++
+                if (pos >= text.length) break
+                val m = UNIT_TOKEN.matchAt(text, pos) ?: return null
+                val value = m.groupValues[1].toLong()
+                when (m.groupValues[2][0]) {
+                    'h' -> { if (seenH) return null; seenH = true; hours = value }
+                    'm' -> { if (seenM) return null; seenM = true; minutes = value }
+                    's' -> { if (seenS) return null; seenS = true; seconds = value }
+                    else -> return null
                 }
-                matched = true
+                pos = m.range.last + 1
             }
+            if (!seenH && !seenM && !seenS) return null
         }
 
-        if (!matched) return null
+        val total = hours * 3600L + minutes * 60L + seconds
+        if (total <= 0L || total > MAX_TIMER_SECONDS) return null
+        val t = total.toInt()
+        return ParsedTimer(t, formatDuration(t / 3600, (t % 3600) / 60, t % 60))
+    }
 
-        val totalSeconds = hours * 3600 + minutes * 60 + seconds
-        if (totalSeconds <= 0) return null
-        val actualHours = totalSeconds / 3600
-        val actualMinutes = (totalSeconds % 3600) / 60
-        val actualSeconds = totalSeconds % 60
-        return ParsedTimer(totalSeconds, formatDuration(actualHours, actualMinutes, actualSeconds))
+    fun parseWebQuery(query: String): String? {
+        val trimmed = query.trim()
+        val lower = trimmed.lowercase(Locale.ROOT)
+        val verbLength = when {
+            lower.startsWith("query ") -> 5
+            lower.startsWith("q ") -> 1
+            else -> return null
+        }
+        return trimmed.substring(verbLength).trim().takeIf { it.isNotEmpty() }
     }
 
     private fun formatDuration(hours: Int, minutes: Int, seconds: Int): String {
@@ -187,110 +203,277 @@ object SmartCommandEngine {
         return "$hour12:$minStr $amPm"
     }
 
+    private fun matchPrefixArg(input: String, prefix: String, allowDigitGlue: Boolean = false): String? {
+        val p = prefix.trim().lowercase(Locale.ROOT)
+        if (p.isEmpty()) return null
+        val lower = input.lowercase(Locale.ROOT)
+        if (lower == p) return ""
+        if (lower.startsWith("$p ")) return input.substring(p.length + 1).trim()
+        if (allowDigitGlue && lower.startsWith(p) && input.length > p.length && input[p.length].isDigit()) {
+            return input.substring(p.length).trim()
+        }
+        return null
+    }
+
     fun evaluateCommands(
         rawQuery: String,
-        contacts: List<SearchContact>
-    ): List<LauncherSearchResult> {
+        contacts: List<SearchContact>,
+        webSearch: WebSearchConfig = WebSearchConfig(),
+        configs: Map<String, CommandConfig> = CommandConfig.ALL_ENABLED,
+        defaultWeatherCity: String = "Raipur"
+    ): CommandEvaluation {
         val trimmed = rawQuery.trim()
-        if (trimmed.isEmpty()) return emptyList()
+        if (trimmed.isEmpty()) return CommandEvaluation(emptyList())
         val lower = trimmed.lowercase(Locale.ROOT)
         val results = mutableListOf<LauncherSearchResult>()
+        var asyncReq: AsyncCommandRequest? = null
 
-        // 1. Check for Alarm command
-        if (lower == "al" || lower == "alarm") {
+        fun cfg(id: String) = configs[id] ?: CommandConfig.DEFAULTS.getValue(id)
+        val fallbackCity = defaultWeatherCity.trim().ifEmpty { "Raipur" }
+
+        // 1. Math & Fat-Tailed Probability
+        val mathCfg = cfg("math")
+        if (lower == mathCfg.prefix.lowercase(Locale.ROOT)) {
             results.add(
                 LauncherSearchResult.Command(
-                    id = "cmd_alarm_hint",
-                    title = "Set Alarm",
-                    subtitle = "Clock • e.g. 'al 5', 'al 530', 'alarm 1805'",
-                    type = SmartCommandType.ALARM,
-                    execute = { SystemActionsManager.openClock(it) }
+                    id = "cmd_math_hint",
+                    title = "Math & Fat-Tailed Probability",
+                    subtitle = "e.g. '${mathCfg.prefix} pareto(5, 1.5)' or 'choose(52,5)' • Tap (i) for guide",
+                    type = SmartCommandType.MATH_STATS,
+                    hasInfoManual = true,
+                    execute = {}
                 )
             )
         } else {
-            val parsedAlarm = parseAlarm(trimmed)
-            if (parsedAlarm != null) {
-                val formatted = formatAlarmTime(parsedAlarm)
+            MathStatsEngine.evaluate(trimmed, mathCfg.prefix)?.let { out ->
                 results.add(
-                    LauncherSearchResult.Command(
-                        id = "cmd_alarm_${parsedAlarm.hour}_${parsedAlarm.minute}",
-                        title = "Set alarm for $formatted",
-                        subtitle = "Clock • Tap or press Enter to set alarm",
-                        type = SmartCommandType.ALARM,
-                        execute = { SystemActionsManager.setAlarm(it, parsedAlarm.hour, parsedAlarm.minute) }
+                    LauncherSearchResult.RichCard(
+                        id = "cmd_math_${out.title}",
+                        type = SmartCommandType.MATH_STATS,
+                        title = out.title,
+                        primaryValue = out.primaryValue,
+                        badgeText = out.badge,
+                        isBadgePositive = true,
+                        subtitle = out.subtitle,
+                        hasInfoManual = true,
+                        execute = { ctx ->
+                            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                            cm?.setPrimaryClip(ClipData.newPlainText("Pallas Math", out.copyText))
+                            Toast.makeText(ctx, "Copied ${out.copyText}", Toast.LENGTH_SHORT).show()
+                        }
                     )
                 )
             }
         }
 
-        // 2. Check for Timer command
-        if (lower == "timer") {
+        // 2. Weather
+        val wxCfg = cfg("weather")
+        val wxArg = matchPrefixArg(trimmed, wxCfg.prefix) ?: matchPrefixArg(trimmed, "weather")
+        if (wxArg != null) {
+            val targetCity = wxArg.ifEmpty { fallbackCity }
             results.add(
-                LauncherSearchResult.Command(
-                    id = "cmd_timer_hint",
-                    title = "Set Timer",
-                    subtitle = "Clock • e.g. 'timer 5m', 'timer 1h 5m', 'timer 1:05'",
-                    type = SmartCommandType.TIMER,
-                    execute = { SystemActionsManager.openClock(it) }
+                LauncherSearchResult.RichCard(
+                    id = "wx_loading_$targetCity",
+                    type = SmartCommandType.WEATHER,
+                    title = targetCity,
+                    subtitle = "fetching current conditions…",
+                    isLoading = true
                 )
             )
-        } else {
-            val parsedTimer = parseTimer(trimmed)
-            if (parsedTimer != null) {
-                results.add(
-                    LauncherSearchResult.Command(
-                        id = "cmd_timer_${parsedTimer.totalSeconds}",
-                        title = "Set timer for ${parsedTimer.formattedDuration}",
-                        subtitle = "Clock • Tap or press Enter to start timer",
-                        type = SmartCommandType.TIMER,
-                        execute = { SystemActionsManager.setTimer(it, parsedTimer.totalSeconds) }
-                    )
-                )
+            if (asyncReq == null) {
+                asyncReq = AsyncCommandRequest.Weather(targetCity, isSolarOnly = false)
             }
         }
 
-        // 3. Check for Call command (ONLY matching contacts added in Search Settings)
-        if (lower.startsWith("call")) {
-            val afterCall = trimmed.substring(4).trim()
-            if (afterCall.isEmpty()) {
-                // List configured contacts
-                for (contact in contacts) {
-                    results.add(
-                        LauncherSearchResult.ContactCall(
-                            id = "contact_call_${contact.id}",
-                            nickname = contact.nickname,
-                            contactName = contact.name,
-                            phoneNumber = contact.phoneNumber,
-                            execute = { SystemActionsManager.callPhoneNumber(it, contact.phoneNumber) }
-                        )
+        // 3. Finance & Markets
+        val stockCfg = cfg("stock")
+        val stockArg = matchPrefixArg(trimmed, stockCfg.prefix)
+        if (stockArg != null) {
+            if (stockArg.isEmpty()) {
+                results.add(
+                    LauncherSearchResult.Command(
+                        id = "cmd_stock_hint",
+                        title = "Markets & Commodities",
+                        subtitle = "e.g. '${stockCfg.prefix} nifty', '${stockCfg.prefix} reliance', '${stockCfg.prefix} nvda', '${stockCfg.prefix} gold'",
+                        type = SmartCommandType.FINANCE,
+                        execute = {}
                     )
-                }
+                )
             } else {
-                // Find matching contact by nickname
-                val matches = contacts.filter {
-                    it.nickname.equals(afterCall, ignoreCase = true)
-                }.ifEmpty {
-                    contacts.filter {
-                        it.nickname.startsWith(afterCall, ignoreCase = true)
-                    }
+                results.add(
+                    LauncherSearchResult.RichCard(
+                        id = "fin_loading_$stockArg",
+                        type = SmartCommandType.FINANCE,
+                        title = stockArg.uppercase(Locale.ROOT),
+                        subtitle = "fetching market quote…",
+                        isLoading = true
+                    )
+                )
+                if (asyncReq == null) {
+                    asyncReq = AsyncCommandRequest.Finance(stockArg)
                 }
+            }
+        }
 
-                for (contact in matches) {
+        // 4. Sunrise / Sunset
+        val solarCfg = cfg("solar")
+        val solarArg = matchPrefixArg(trimmed, solarCfg.prefix)
+            ?: matchPrefixArg(trimmed, "sunrise")
+            ?: matchPrefixArg(trimmed, "sunset")
+        if (solarArg != null) {
+            val targetCity = solarArg.ifEmpty { fallbackCity }
+            results.add(
+                LauncherSearchResult.RichCard(
+                    id = "solar_loading_$targetCity",
+                    type = SmartCommandType.SOLAR,
+                    title = targetCity,
+                    subtitle = "calculating solar times…",
+                    isLoading = true
+                )
+            )
+            if (asyncReq == null) {
+                asyncReq = AsyncCommandRequest.Weather(targetCity, isSolarOnly = true)
+            }
+        }
+
+        // 5. Wolfram Alpha
+        val waCfg = cfg("wolfram")
+        val waArg = matchPrefixArg(trimmed, waCfg.prefix)
+        if (waArg != null) {
+            if (waArg.isEmpty()) {
+                results.add(
+                    LauncherSearchResult.Command(
+                        id = "cmd_wa_hint",
+                        title = "Wolfram|Alpha Short Answer",
+                        subtitle = "Type '${waCfg.prefix} <query>'",
+                        type = SmartCommandType.WOLFRAM,
+                        execute = {}
+                    )
+                )
+            } else {
+                results.add(
+                    LauncherSearchResult.RichCard(
+                        id = "wa_loading_$waArg",
+                        type = SmartCommandType.WOLFRAM,
+                        title = waArg,
+                        subtitle = "querying Wolfram|Alpha…",
+                        isLoading = true
+                    )
+                )
+                if (asyncReq == null) {
+                    asyncReq = AsyncCommandRequest.Wolfram(waArg)
+                }
+            }
+        }
+
+        // 6. Alarm
+        val alCfg = cfg("alarm")
+        val alArg = matchPrefixArg(trimmed, alCfg.prefix, allowDigitGlue = true)
+            ?: matchPrefixArg(trimmed, "alarm", allowDigitGlue = true)
+        if (alArg != null) {
+            if (alArg.isEmpty()) {
+                results.add(
+                    LauncherSearchResult.Command(
+                        id = "cmd_alarm_hint",
+                        title = "Set Alarm",
+                        subtitle = "Clock • e.g. '${alCfg.prefix} 530', '${alCfg.prefix} 1805'",
+                        type = SmartCommandType.ALARM,
+                        execute = { SystemActionsManager.openClock(it) }
+                    )
+                )
+            } else {
+                parseAlarmTime(alArg)?.let { parsed ->
+                    val formatted = formatAlarmTime(parsed)
                     results.add(
-                        LauncherSearchResult.ContactCall(
-                            id = "contact_call_${contact.id}",
-                            nickname = contact.nickname,
-                            contactName = contact.name,
-                            phoneNumber = contact.phoneNumber,
-                            execute = { SystemActionsManager.callPhoneNumber(it, contact.phoneNumber) }
+                        LauncherSearchResult.Command(
+                            id = "cmd_alarm_${parsed.hour}_${parsed.minute}",
+                            title = "Set alarm for $formatted",
+                            subtitle = "Clock • Tap or press Enter to set alarm",
+                            type = SmartCommandType.ALARM,
+                            execute = { SystemActionsManager.setAlarm(it, parsed.hour, parsed.minute) }
                         )
                     )
                 }
             }
+        }
+
+        // 7. Timer
+        val timerCfg = cfg("timer")
+        val timerArg = matchPrefixArg(trimmed, timerCfg.prefix, allowDigitGlue = true)
+        if (timerArg != null) {
+            if (timerArg.isEmpty()) {
+                results.add(
+                    LauncherSearchResult.Command(
+                        id = "cmd_timer_hint",
+                        title = "Set Timer",
+                        subtitle = "Clock • e.g. '${timerCfg.prefix} 5m', '${timerCfg.prefix} 1:05'",
+                        type = SmartCommandType.TIMER,
+                        execute = { SystemActionsManager.openClock(it) }
+                    )
+                )
+            } else {
+                parseTimerDuration(timerArg)?.let { parsed ->
+                    results.add(
+                        LauncherSearchResult.Command(
+                            id = "cmd_timer_${parsed.totalSeconds}",
+                            title = "Set timer for ${parsed.formattedDuration}",
+                            subtitle = "Clock • Tap or press Enter to start timer",
+                            type = SmartCommandType.TIMER,
+                            execute = { SystemActionsManager.setTimer(it, parsed.totalSeconds) }
+                        )
+                    )
+                }
+            }
+        }
+
+        // 8. Web Search
+        val webCfg = cfg("web")
+        val webArg = matchPrefixArg(trimmed, webCfg.prefix) ?: matchPrefixArg(trimmed, "query")
+        if (webArg != null) {
+            if (webArg.isEmpty()) {
+                results.add(
+                    LauncherSearchResult.Command(
+                        id = "cmd_web_hint",
+                        title = "Search the web",
+                        subtitle = "Type '${webCfg.prefix} <terms>' • opens in ${webSearch.browserLabel ?: "your default browser"}",
+                        type = SmartCommandType.WEB_SEARCH,
+                        execute = { SystemActionsManager.openWebSearch(it, "", webSearch.engine, webSearch.browserPackage) }
+                    )
+                )
+            } else {
+                results.add(
+                    LauncherSearchResult.Command(
+                        id = "cmd_web_$webArg",
+                        title = "Search ${webSearch.engine.label} for \"$webArg\"",
+                        subtitle = "Opens in ${webSearch.browserLabel ?: "your default browser"}",
+                        type = SmartCommandType.WEB_SEARCH,
+                        execute = { SystemActionsManager.openWebSearch(it, webArg, webSearch.engine, webSearch.browserPackage) }
+                    )
+                )
+            }
+        }
+
+        // 9. Call
+        val callCfg = cfg("call")
+        val afterCall = matchPrefixArg(trimmed, callCfg.prefix)
+        if (afterCall != null) {
+            val matches = if (afterCall.isEmpty()) contacts else {
+                contacts.filter { it.nickname.equals(afterCall, ignoreCase = true) }
+                    .ifEmpty { contacts.filter { it.nickname.startsWith(afterCall, ignoreCase = true) } }
+            }
+            for (contact in matches) {
+                results.add(
+                    LauncherSearchResult.ContactCall(
+                        id = "contact_call_${contact.id}",
+                        nickname = contact.nickname,
+                        contactName = contact.name,
+                        phoneNumber = contact.phoneNumber,
+                        execute = { SystemActionsManager.callPhoneNumber(it, contact.phoneNumber) }
+                    )
+                )
+            }
         } else {
-            // Also allow typing nickname directly if it matches exactly
-            val directMatch = contacts.filter { it.nickname.equals(trimmed, ignoreCase = true) }
-            for (contact in directMatch) {
+            contacts.filter { it.nickname.equals(trimmed, ignoreCase = true) }.forEach { contact ->
                 results.add(
                     LauncherSearchResult.ContactCall(
                         id = "contact_call_${contact.id}",
@@ -303,6 +486,18 @@ object SmartCommandEngine {
             }
         }
 
-        return results
+        if (lower == "settings" || lower == "pallas") {
+            results.add(
+                LauncherSearchResult.Command(
+                    id = SETTINGS_COMMAND_ID,
+                    title = "Pallas settings",
+                    subtitle = "Open launcher settings",
+                    type = SmartCommandType.SETTINGS,
+                    execute = {}
+                )
+            )
+        }
+
+        return CommandEvaluation(results, asyncReq)
     }
 }

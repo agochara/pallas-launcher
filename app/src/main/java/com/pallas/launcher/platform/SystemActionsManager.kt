@@ -16,6 +16,7 @@ import android.provider.CalendarContract
 import android.provider.MediaStore
 import android.provider.Settings
 import android.widget.Toast
+import com.pallas.launcher.domain.model.WebSearchEngine
 import java.lang.reflect.Method
 
 object SystemActionsManager {
@@ -26,7 +27,7 @@ object SystemActionsManager {
         val intents = listOf(
             Intent(AlarmClock.ACTION_SHOW_ALARMS),
             Intent(AlarmClock.ACTION_SET_ALARM),
-            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_MESSAGING)
+            Intent(AlarmClock.ACTION_SHOW_TIMERS)
         )
         for (intent in intents) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -74,7 +75,7 @@ object SystemActionsManager {
     }
 
     fun dialPhoneNumber(context: Context, phoneNumber: String) {
-        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(phoneNumber)}"))
+        val intent = Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", phoneNumber, null))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             context.startActivity(intent)
@@ -84,17 +85,14 @@ object SystemActionsManager {
     }
 
     fun callPhoneNumber(context: Context, phoneNumber: String) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
-            context.checkSelfPermission(android.Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
-        ) {
-            try {
-                val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:${Uri.encode(phoneNumber)}"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                return
-            } catch (_: Exception) {}
+        val uri = Uri.fromParts("tel", phoneNumber, null)
+        val intent = Intent(Intent.ACTION_DIAL, uri)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(context, "Could not dial number", Toast.LENGTH_SHORT).show()
         }
-        dialPhoneNumber(context, phoneNumber)
     }
 
     fun sendSms(context: Context, phoneNumber: String) {
@@ -141,7 +139,7 @@ object SystemActionsManager {
             val expand: Method = statusBarManager.getMethod("expandNotificationsPanel")
             expand.invoke(statusBarService)
         } catch (e: Exception) {
-            // Silently ignore if not supported or permission lacking
+            Toast.makeText(context, "Couldn't open notifications", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -290,11 +288,35 @@ object SystemActionsManager {
         }
     }
 
-    fun openWebSearch(context: Context, query: String) {
-        val uri = Uri.parse("https://www.google.com/search?q=${Uri.encode(query.trim())}")
-        val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    /**
+     * Opens a web search in the browser chosen in Settings (null = system default). If the chosen browser was
+     * uninstalled or refuses the intent we silently fall back to the default browser instead of failing.
+     * An empty query just opens the engine's start page.
+     */
+    fun openWebSearch(
+        context: Context,
+        query: String,
+        engine: WebSearchEngine = WebSearchEngine.GOOGLE,
+        browserPackage: String? = null
+    ) {
+        val trimmed = query.trim()
+        val url = if (trimmed.isEmpty()) {
+            Uri.parse(engine.urlTemplate).let { "${it.scheme}://${it.authority}/" }
+        } else {
+            engine.urlTemplate.replace("%s", Uri.encode(trimmed))
+        }
+        val base = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        if (!browserPackage.isNullOrBlank()) {
+            try {
+                context.startActivity(Intent(base).setPackage(browserPackage))
+                return
+            } catch (_: Exception) {
+                // fall through to the default browser
+            }
+        }
         try {
-            context.startActivity(intent)
+            context.startActivity(base)
         } catch (_: Exception) {
             Toast.makeText(context, "No web browser found", Toast.LENGTH_SHORT).show()
         }

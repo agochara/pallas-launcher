@@ -1,13 +1,15 @@
 package com.pallas.launcher.ui.theme
 
 import androidx.compose.material3.Typography
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import com.pallas.launcher.R
 
@@ -18,36 +20,60 @@ val GaramondFontFamily = FontFamily(
     Font(R.font.garamond_bold, FontWeight.Bold)
 )
 
-val NunitoFontFamily = GaramondFontFamily
+@OptIn(ExperimentalTextApi::class)
+val InterFamily = FontFamily(
+    Font(
+        resId = R.font.inter_variable,
+        weight = FontWeight.Normal,
+        style = FontStyle.Normal,
+        variationSettings = FontVariation.Settings(FontWeight.Normal, FontStyle.Normal)
+    ),
+    Font(
+        resId = R.font.inter_variable,
+        weight = FontWeight.Medium,
+        style = FontStyle.Normal,
+        variationSettings = FontVariation.Settings(FontWeight.Medium, FontStyle.Normal)
+    ),
+    Font(
+        resId = R.font.inter_variable,
+        weight = FontWeight.SemiBold,
+        style = FontStyle.Normal,
+        variationSettings = FontVariation.Settings(FontWeight.SemiBold, FontStyle.Normal)
+    ),
+    Font(
+        resId = R.font.inter_variable,
+        weight = FontWeight.Bold,
+        style = FontStyle.Normal,
+        variationSettings = FontVariation.Settings(FontWeight.Bold, FontStyle.Normal)
+    )
+)
 
-val LauncherShadow = Shadow(
-    color = Color.Black.copy(alpha = 0.45f),
-    offset = Offset(0f, 2f),
-    blurRadius = 6f
+object LauncherFonts {
+    val serif = GaramondFontFamily
+    val sans = InterFamily
+}
+
+/**
+ * Scales [TextStyle.fontSize] and [TextStyle.lineHeight] proportionally by [f].
+ */
+fun TextStyle.scaled(f: Float): TextStyle = copy(
+    fontSize = if (fontSize.isSpecified) fontSize * f else TextUnit.Unspecified,
+    lineHeight = if (lineHeight.isSpecified) lineHeight * f else TextUnit.Unspecified
 )
 
 /**
- * Dedicated typography for Home screen overlays (Clock, date, battery, search header)
- * with drop shadows designed to remain legible over arbitrary wallpapers.
+ * Named typography tokens for Pallas Launcher.
+ * Garamond = the voice (clock, home app labels, Settings display/headline).
+ * Inter = the tools (date/battery, gesture hint, drawer rows, rail, search, rich cards, dialogs, modals).
  */
 object LauncherTypography {
     val clock = TextStyle(
         fontFamily = GaramondFontFamily,
-        fontWeight = FontWeight.Light,
+        fontWeight = FontWeight.Normal,
         fontSize = 78.sp,
         lineHeight = 82.sp,
         letterSpacing = (-1.5).sp,
-        fontFeatureSettings = "tnum",
-        shadow = LauncherShadow
-    )
-
-    val dateAndBattery = TextStyle(
-        fontFamily = GaramondFontFamily,
-        fontWeight = FontWeight.Medium,
-        fontSize = 16.sp,
-        lineHeight = 22.sp,
-        letterSpacing = 0.2.sp,
-        shadow = LauncherShadow
+        fontFeatureSettings = "lnum, tnum"
     )
 
     val appLabel = TextStyle(
@@ -55,37 +81,105 @@ object LauncherTypography {
         fontWeight = FontWeight.Medium,
         fontSize = 25.sp,
         lineHeight = 34.sp,
+        letterSpacing = 0.sp
+    )
+
+    val dateAndBattery = TextStyle(
+        fontFamily = InterFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
         letterSpacing = 0.3.sp,
-        shadow = LauncherShadow
+        fontFeatureSettings = "tnum"
+    )
+
+    val gestureHint = TextStyle(
+        fontFamily = InterFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.8.sp
+    )
+
+    val drawerRow = TextStyle(
+        fontFamily = InterFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 20.sp,
+        lineHeight = 26.sp,
+        letterSpacing = (-0.1).sp
+    )
+
+    val railLetter = TextStyle(
+        fontFamily = InterFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 11.sp,
+        lineHeight = 14.sp,
+        letterSpacing = 0.sp
     )
 
     val searchInput = TextStyle(
-        fontFamily = GaramondFontFamily,
+        fontFamily = InterFamily,
         fontWeight = FontWeight.Normal,
-        fontSize = 20.sp,
-        lineHeight = 26.sp,
+        fontSize = 18.sp,
+        lineHeight = 24.sp,
         letterSpacing = 0.sp
     )
 
     val searchResultTitle = TextStyle(
-        fontFamily = GaramondFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 17.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.2.sp
+        fontFamily = InterFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 16.sp,
+        lineHeight = 22.sp,
+        letterSpacing = 0.sp
     )
 
     val searchResultSubtitle = TextStyle(
-        fontFamily = GaramondFontFamily,
+        fontFamily = InterFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 13.sp,
         lineHeight = 18.sp,
-        letterSpacing = 0.2.sp
+        letterSpacing = 0.1.sp
     )
+
+    val cardValue = TextStyle(
+        fontFamily = InterFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 20.sp,
+        lineHeight = 26.sp,
+        letterSpacing = 0.sp,
+        fontFeatureSettings = "tnum"
+    )
+
+    val badge = TextStyle(
+        fontFamily = InterFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 11.sp,
+        lineHeight = 14.sp,
+        letterSpacing = 0.1.sp
+    )
+
+    val settingsSectionHeader = TextStyle(
+        fontFamily = InterFamily,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        letterSpacing = 0.6.sp
+    )
+
+    val chip: TextStyle
+        get() = Typography.labelLarge
+
+    val modalTitle: TextStyle
+        get() = Typography.titleLarge
+
+    val dialogBody: TextStyle
+        get() = Typography.bodyMedium
 }
 
 /**
- * Full Material 3 Expressive Typography set for secondary UI (Settings, Dialogs, Pickers, Modals).
+ * Material 3 Expressive Typography:
+ * - display* and headline* use Garamond (voice / large collapsing top bar titles).
+ * - title*, body*, label* use Inter (tools / settings rows, dialogs, modals, chips).
  */
 val Typography = Typography(
     displayLarge = TextStyle(
@@ -111,86 +205,86 @@ val Typography = Typography(
     ),
     headlineLarge = TextStyle(
         fontFamily = GaramondFontFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Normal,
         fontSize = 32.sp,
         lineHeight = 40.sp,
         letterSpacing = 0.sp
     ),
     headlineMedium = TextStyle(
         fontFamily = GaramondFontFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Normal,
         fontSize = 28.sp,
         lineHeight = 36.sp,
         letterSpacing = 0.sp
     ),
     headlineSmall = TextStyle(
         fontFamily = GaramondFontFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Normal,
         fontSize = 24.sp,
         lineHeight = 32.sp,
         letterSpacing = 0.sp
     ),
     titleLarge = TextStyle(
-        fontFamily = GaramondFontFamily,
+        fontFamily = InterFamily,
         fontWeight = FontWeight.SemiBold,
         fontSize = 22.sp,
         lineHeight = 28.sp,
         letterSpacing = 0.sp
     ),
     titleMedium = TextStyle(
-        fontFamily = GaramondFontFamily,
+        fontFamily = InterFamily,
         fontWeight = FontWeight.Medium,
         fontSize = 16.sp,
         lineHeight = 24.sp,
-        letterSpacing = 0.15.sp
+        letterSpacing = 0.sp
     ),
     titleSmall = TextStyle(
-        fontFamily = GaramondFontFamily,
-        fontWeight = FontWeight.Medium,
+        fontFamily = InterFamily,
+        fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.1.sp
     ),
     bodyLarge = TextStyle(
-        fontFamily = GaramondFontFamily,
+        fontFamily = InterFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
+        letterSpacing = 0.sp
     ),
     bodyMedium = TextStyle(
-        fontFamily = GaramondFontFamily,
+        fontFamily = InterFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 14.sp,
         lineHeight = 20.sp,
-        letterSpacing = 0.25.sp
+        letterSpacing = 0.1.sp
     ),
     bodySmall = TextStyle(
-        fontFamily = GaramondFontFamily,
+        fontFamily = InterFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.4.sp
+        letterSpacing = 0.2.sp
     ),
     labelLarge = TextStyle(
-        fontFamily = GaramondFontFamily,
+        fontFamily = InterFamily,
         fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.1.sp
     ),
     labelMedium = TextStyle(
-        fontFamily = GaramondFontFamily,
+        fontFamily = InterFamily,
         fontWeight = FontWeight.Medium,
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
+        letterSpacing = 0.2.sp
     ),
     labelSmall = TextStyle(
-        fontFamily = GaramondFontFamily,
-        fontWeight = FontWeight.Medium,
+        fontFamily = InterFamily,
+        fontWeight = FontWeight.Normal,
         fontSize = 11.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
+        letterSpacing = 0.2.sp
     )
 )

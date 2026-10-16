@@ -18,7 +18,7 @@ object SearchRanking {
     fun normalize(input: String): String {
         val nfd = Normalizer.normalize(input, Normalizer.Form.NFD)
         return nfd.replace(DIACRITICS_REGEX, "")
-            .lowercase(Locale.getDefault())
+            .lowercase(Locale.ROOT)
     }
 
     fun extractWords(input: String): List<String> {

@@ -1,37 +1,47 @@
 package com.pallas.launcher.ui.settings.pages
 
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.dp
 import com.pallas.launcher.domain.model.ClockHorizontalAlignment
 import com.pallas.launcher.domain.model.ClockVerticalPosition
-import com.pallas.launcher.ui.MainViewModel
+import com.pallas.launcher.ui.settings.SettingsViewModel
+import com.pallas.launcher.ui.settings.components.SettingsGroup
+import com.pallas.launcher.ui.settings.components.SettingsLargeTopBar
 import com.pallas.launcher.ui.settings.components.SettingsSectionHeader
 import com.pallas.launcher.ui.settings.components.SettingsSegmentedRow
 import com.pallas.launcher.ui.settings.components.SettingsSliderRow
 import com.pallas.launcher.ui.settings.components.SettingsSwitchRow
-import com.pallas.launcher.ui.settings.components.SettingsTopBar
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClockDateSettingsPage(
-    viewModel: MainViewModel,
+    viewModel: SettingsViewModel,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val settings by viewModel.settings.collectAsState()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
-            SettingsTopBar(title = "Clock & Date", onBack = onBack)
+            SettingsLargeTopBar(title = "Clock & Date", scrollBehavior = scrollBehavior, onBack = onBack)
         }
     ) { innerPadding ->
         LazyColumn(
@@ -41,86 +51,89 @@ fun ClockDateSettingsPage(
         ) {
             item {
                 SettingsSectionHeader("Clock Placement")
-                SettingsSegmentedRow(
-                    title = "Vertical Position",
-                    options = ClockVerticalPosition.entries,
-                    selected = settings.clockVerticalPosition,
-                    onSelected = { viewModel.updateClockPosition(it, settings.clockHorizontalAlignment) },
-                    label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-                SettingsSegmentedRow(
-                    title = "Horizontal Alignment",
-                    options = ClockHorizontalAlignment.entries,
-                    selected = settings.clockHorizontalAlignment,
-                    onSelected = { viewModel.updateClockPosition(settings.clockVerticalPosition, it) },
-                    label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-            }
+                SettingsGroup {
+                    SettingsSegmentedRow(
+                        title = "Vertical Position",
+                        options = ClockVerticalPosition.entries,
+                        selected = settings.clockVerticalPosition,
+                        onSelected = { viewModel.updateSettings { copy(clockVerticalPosition = it) } },
+                        label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
+                    )
+                    SettingsSegmentedRow(
+                        title = "Horizontal Alignment",
+                        options = ClockHorizontalAlignment.entries,
+                        selected = settings.clockHorizontalAlignment,
+                        onSelected = { viewModel.updateSettings { copy(clockHorizontalAlignment = it) } },
+                        label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
+                    )
+                    SettingsSliderRow(
+                        title = "Clock Scale",
+                        persistedValue = settings.appFontScale,
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(appFontScale = value) } },
+                        valueRange = 0.8f..1.3f,
+                        steps = 4
+                    )
+                }
 
-            item {
                 SettingsSectionHeader("Clock Spacing")
-                SettingsSliderRow(
-                    title = "Left Padding",
-                    persistedValue = settings.clockPaddingLeftDp.toFloat(),
-                    onValueChangeFinished = { viewModel.updateClockPaddingLeft(it.toInt()) },
-                    valueRange = 0f..64f,
-                    steps = 15,
-                    valueFormat = { "${it.toInt()} dp" }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-                SettingsSliderRow(
-                    title = "Right Padding",
-                    persistedValue = settings.clockPaddingRightDp.toFloat(),
-                    onValueChangeFinished = { viewModel.updateClockPaddingRight(it.toInt()) },
-                    valueRange = 0f..64f,
-                    steps = 15,
-                    valueFormat = { "${it.toInt()} dp" }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-                SettingsSliderRow(
-                    title = "Top Padding",
-                    persistedValue = settings.clockPaddingTopDp.toFloat(),
-                    onValueChangeFinished = { viewModel.updateClockPaddingTop(it.toInt()) },
-                    valueRange = 0f..64f,
-                    steps = 15,
-                    valueFormat = { "${it.toInt()} dp" }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-                SettingsSliderRow(
-                    title = "Bottom Padding",
-                    persistedValue = settings.clockPaddingBottomDp.toFloat(),
-                    onValueChangeFinished = { viewModel.updateClockPaddingBottom(it.toInt()) },
-                    valueRange = 0f..64f,
-                    steps = 15,
-                    valueFormat = { "${it.toInt()} dp" }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-            }
+                SettingsGroup {
+                    SettingsSliderRow(
+                        title = "Left Padding",
+                        persistedValue = settings.clockPaddingLeftDp.toFloat(),
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingLeftDp = value.toInt()) } },
+                        valueRange = 0f..64f,
+                        steps = 15,
+                        valueFormat = { "${it.toInt()} dp" }
+                    )
+                    SettingsSliderRow(
+                        title = "Right Padding",
+                        persistedValue = settings.clockPaddingRightDp.toFloat(),
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingRightDp = value.toInt()) } },
+                        valueRange = 0f..64f,
+                        steps = 15,
+                        valueFormat = { "${it.toInt()} dp" }
+                    )
+                    SettingsSliderRow(
+                        title = "Top Padding",
+                        persistedValue = settings.clockPaddingTopDp.toFloat(),
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingTopDp = value.toInt()) } },
+                        valueRange = 0f..64f,
+                        steps = 15,
+                        valueFormat = { "${it.toInt()} dp" }
+                    )
+                    SettingsSliderRow(
+                        title = "Bottom Padding",
+                        persistedValue = settings.clockPaddingBottomDp.toFloat(),
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingBottomDp = value.toInt()) } },
+                        valueRange = 0f..64f,
+                        steps = 15,
+                        valueFormat = { "${it.toInt()} dp" }
+                    )
+                }
 
-            item {
                 SettingsSectionHeader("Format & Metadata")
-                SettingsSwitchRow(
-                    title = "24-Hour Time",
-                    subtitle = "Display time in 24-hour military format instead of AM/PM.",
-                    checked = settings.is24HourClock,
-                    onCheckedChange = { viewModel.update24HourClock(it) }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-                SettingsSwitchRow(
-                    title = "Show Date",
-                    subtitle = "Show current date below the clock time.",
-                    checked = settings.showDate,
-                    onCheckedChange = { viewModel.updateShowDate(it) }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-                SettingsSwitchRow(
-                    title = "Show Battery Level",
-                    subtitle = "Show current device battery percentage beside date.",
-                    checked = settings.showBattery,
-                    onCheckedChange = { viewModel.updateShowBattery(it) }
-                )
+                SettingsGroup {
+                    SettingsSwitchRow(
+                        title = "24-Hour Time",
+                        subtitle = "Display time in 24-hour military format instead of AM/PM.",
+                        checked = settings.is24HourClock,
+                        onCheckedChange = { viewModel.updateSettings { copy(is24HourClock = it) } }
+                    )
+                    SettingsSwitchRow(
+                        title = "Show Date",
+                        subtitle = "Show current date below the clock time.",
+                        checked = settings.showDate,
+                        onCheckedChange = { viewModel.updateSettings { copy(showDate = it) } }
+                    )
+                    SettingsSwitchRow(
+                        title = "Show Battery Level",
+                        subtitle = "Show current device battery percentage beside date.",
+                        checked = settings.showBattery,
+                        onCheckedChange = { viewModel.updateSettings { copy(showBattery = it) } }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(28.dp))
             }
         }
     }

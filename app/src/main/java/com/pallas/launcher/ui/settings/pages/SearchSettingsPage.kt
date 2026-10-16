@@ -6,7 +6,7 @@ import android.net.Uri
 import android.provider.ContactsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,15 +26,18 @@ import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,26 +46,67 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.pallas.launcher.ui.MainViewModel
-import com.pallas.launcher.ui.settings.components.SettingsTopBar
+import com.pallas.launcher.domain.model.CommandConfig
+import com.pallas.launcher.domain.model.WebSearchEngine
+import com.pallas.launcher.platform.BrowserHelper
+import com.pallas.launcher.platform.BrowserInfo
+import com.pallas.launcher.ui.settings.SettingsViewModel
+import com.pallas.launcher.ui.settings.components.SettingsGroup
+import com.pallas.launcher.ui.settings.components.SettingsLargeTopBar
+import com.pallas.launcher.ui.settings.components.SettingsNavRow
+import com.pallas.launcher.ui.settings.components.SettingsSectionHeader
+import com.pallas.launcher.ui.settings.components.SettingsSegmentedRow
+import com.pallas.launcher.ui.settings.components.SettingsSwitchRow
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchSettingsPage(
-    viewModel: MainViewModel,
+    viewModel: SettingsViewModel,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
     val settings by viewModel.settings.collectAsState()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
+    var showBrowserDialog by remember { mutableStateOf(false) }
+    var browsers by remember { mutableStateOf(emptyList<BrowserInfo>()) }
+    val browserLabel = remember(settings.preferredBrowserPackage) {
+        BrowserHelper.labelFor(context, settings.preferredBrowserPackage) ?: "System default"
+    }
+
+    if (showBrowserDialog) {
+        AlertDialog(
+            onDismissRequest = { showBrowserDialog = false },
+            title = { Text("Open searches in") },
+            text = {
+                Column {
+                    TextButton(onClick = { viewModel.updateSettings { copy(preferredBrowserPackage = null) }; showBrowserDialog = false }) { Text("System default") }
+                    browsers.forEach { b ->
+                        TextButton(onClick = { viewModel.updateSettings { copy(preferredBrowserPackage = b.packageName) }; showBrowserDialog = false }) { Text(b.label) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showBrowserDialog = false }) { Text("Close") } }
+        )
+    }
 
     var showAddAliasDialog by remember { mutableStateOf(false) }
     var newAliasKey by remember { mutableStateOf("") }
     var newAliasTarget by remember { mutableStateOf("") }
+
+    // Smart Commands state
+    var showWeatherCityDialog by remember { mutableStateOf(false) }
+    var weatherCityInput by remember { mutableStateOf("") }
+    var showWolframDialog by remember { mutableStateOf(false) }
+    var wolframInput by remember { mutableStateOf("") }
+    var editingConfig by remember { mutableStateOf<CommandConfig?>(null) }
+    var editPrefixInput by remember { mutableStateOf("") }
 
     // Contacts state
     var showAddContactDialog by remember { mutableStateOf(false) }
@@ -102,10 +146,12 @@ fun SearchSettingsPage(
     }
 
     Scaffold(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
-            SettingsTopBar(title = "Search", onBack = onBack)
+            SettingsLargeTopBar(title = "Search", scrollBehavior = scrollBehavior, onBack = onBack)
         }
     ) { innerPadding ->
         LazyColumn(
@@ -113,17 +159,133 @@ fun SearchSettingsPage(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            // ------------------------------------------------------------- Section: Search Behavior
+            item {
+                SettingsSectionHeader("Search Behavior")
+                SettingsGroup {
+                    SettingsSwitchRow(
+                        title = "Open single match automatically",
+                        subtitle = "Launch the app as soon as only one confident match is left",
+                        checked = settings.autoLaunchSingleMatch,
+                        onCheckedChange = { viewModel.updateSettings { copy(autoLaunchSingleMatch = it) } }
+                    )
+                }
+            }
+
+            // ------------------------------------------------------------- Section: Web search
+            item {
+                SettingsSectionHeader("Web Search")
+                SettingsGroup {
+                    SettingsSegmentedRow(
+                        title = "Search engine",
+                        options = WebSearchEngine.entries,
+                        selected = settings.webSearchEngine,
+                        onSelected = { viewModel.updateSettings { copy(webSearchEngine = it) } },
+                        label = { it.label }
+                    )
+                    SettingsNavRow(
+                        title = "Browser",
+                        subtitle = browserLabel,
+                        onClick = {
+                            browsers = BrowserHelper.listBrowsers(context)
+                            showBrowserDialog = true
+                        }
+                    )
+                }
+                Text(
+                    text = "Type 'q <words>' in search to look something up. It never clutters normal results.",
+                    color = colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp)
+                )
+            }
+
+            // ------------------------------------------------------------- Section: Smart Commands
+            item {
+                SettingsSectionHeader("Smart Commands")
+                SettingsGroup {
+                    SettingsNavRow(
+                        title = "Default Weather & Solar City",
+                        subtitle = settings.defaultWeatherCity.ifBlank { "Not set (pass city inline)" },
+                        onClick = {
+                            weatherCityInput = settings.defaultWeatherCity
+                            showWeatherCityDialog = true
+                        }
+                    )
+                    SettingsNavRow(
+                        title = "Wolfram Alpha AppID",
+                        subtitle = if (settings.wolframAppId.isBlank()) "Not configured" else "Configured",
+                        onClick = {
+                            wolframInput = settings.wolframAppId
+                            showWolframDialog = true
+                        }
+                    )
+
+                    settings.commandConfigs.values.forEach { config ->
+                        Surface(
+                            color = colorScheme.surfaceContainerHigh,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = config.label,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = colorScheme.onSurface,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 12.dp)
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = colorScheme.surfaceContainerHighest,
+                                        modifier = Modifier.clickable {
+                                            editingConfig = config
+                                            editPrefixInput = config.prefix
+                                        }
+                                    ) {
+                                        Text(
+                                            text = config.prefix,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colorScheme.primary,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                    Switch(
+                                        checked = config.enabled,
+                                        onCheckedChange = { isChecked ->
+                                            viewModel.updateCommandConfig(config.id, isChecked, config.prefix)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // ------------------------------------------------------------- Section: Contact Nicknames
             item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp),
+                        .padding(start = 28.dp, end = 20.dp, top = 24.dp, bottom = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Contact Nicknames (Direct Calling)",
+                        text = "Contact Nicknames",
                         style = MaterialTheme.typography.labelLarge,
                         color = colorScheme.primary,
                         fontWeight = FontWeight.SemiBold
@@ -150,7 +312,7 @@ fun SearchSettingsPage(
                     text = "Assign nicknames to call contacts directly from search using 'call <nickname>' (e.g. 'call Mom'):",
                     color = colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 4.dp)
                 )
 
                 Row(
@@ -201,81 +363,75 @@ fun SearchSettingsPage(
                         text = "No contact nicknames added yet. Only contacts configured here can be called via search.",
                         color = colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp)
                     )
                 } else {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                    SettingsGroup {
                         settings.searchContacts.forEach { contact ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(colorScheme.surfaceContainerHigh)
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            Surface(
+                                color = colorScheme.surfaceContainerHigh,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Phone,
-                                        contentDescription = null,
-                                        tint = colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Column {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Phone,
+                                            contentDescription = null,
+                                            tint = colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = contact.nickname,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = colorScheme.primary,
+                                                    style = MaterialTheme.typography.titleMedium
+                                                )
+                                                Text(
+                                                    text = "('call ${contact.nickname}')",
+                                                    color = colorScheme.onSurfaceVariant,
+                                                    style = MaterialTheme.typography.bodySmall
+                                                )
+                                            }
+                                            val details = listOf(contact.name, contact.phoneNumber).filter { it.isNotBlank() }.joinToString(" • ")
                                             Text(
-                                                text = contact.nickname,
-                                                fontWeight = FontWeight.Bold,
-                                                color = colorScheme.primary,
-                                                style = MaterialTheme.typography.titleMedium
-                                            )
-                                            Text(
-                                                text = "('call ${contact.nickname}')",
-                                                color = colorScheme.onSurfaceVariant,
+                                                text = details,
+                                                color = colorScheme.onSurface,
                                                 style = MaterialTheme.typography.bodySmall
                                             )
                                         }
-                                        val details = listOf(contact.name, contact.phoneNumber).filter { it.isNotBlank() }.joinToString(" • ")
-                                        Text(
-                                            text = details,
-                                            color = colorScheme.onSurface,
-                                            style = MaterialTheme.typography.bodySmall
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.removeSearchContact(contact.id) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove",
+                                            tint = colorScheme.error,
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
-                                }
-                                IconButton(
-                                    onClick = { viewModel.removeSearchContact(contact.id) },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Remove",
-                                        tint = colorScheme.error,
-                                        modifier = Modifier.size(18.dp)
-                                    )
                                 }
                             }
                         }
                     }
                 }
-
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
-                )
             }
 
             // ------------------------------------------------------------- Section: Search Aliases
@@ -283,7 +439,7 @@ fun SearchSettingsPage(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+                        .padding(start = 28.dp, end = 20.dp, top = 24.dp, bottom = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -310,7 +466,7 @@ fun SearchSettingsPage(
                     text = "Instant keyword shortcuts (e.g. 'wa' → WhatsApp, 'calc' → Calculator):",
                     color = colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 4.dp)
                 )
 
                 if (settings.customAliases.isEmpty()) {
@@ -318,56 +474,55 @@ fun SearchSettingsPage(
                         text = "No custom aliases added.",
                         color = colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp)
                     )
                 } else {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                    SettingsGroup {
                         settings.customAliases.forEach { (alias, target) ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(colorScheme.surfaceContainerHigh)
-                                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            Surface(
+                                color = colorScheme.surfaceContainerHigh,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = alias,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colorScheme.primary,
-                                        style = MaterialTheme.typography.titleMedium
-                                    )
-                                    Text(
-                                        text = "→",
-                                        color = colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Text(
-                                        text = target,
-                                        color = colorScheme.onSurface,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-                                IconButton(
-                                    onClick = { viewModel.removeAlias(alias) },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Remove",
-                                        tint = colorScheme.error,
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Text(
+                                            text = alias,
+                                            fontWeight = FontWeight.Bold,
+                                            color = colorScheme.primary,
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                        Text(
+                                            text = "→",
+                                            color = colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                        Text(
+                                            text = target,
+                                            color = colorScheme.onSurface,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.removeAlias(alias) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove",
+                                            tint = colorScheme.error,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -481,6 +636,111 @@ fun SearchSettingsPage(
             },
             dismissButton = {
                 TextButton(onClick = { showAddAliasDialog = false }) {
+                    Text("Cancel", color = colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
+
+    // Default Weather & Solar City Dialog
+    if (showWeatherCityDialog) {
+        AlertDialog(
+            onDismissRequest = { showWeatherCityDialog = false },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = colorScheme.surfaceContainerHigh,
+            title = { Text(text = "Default Weather & Solar City", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                OutlinedTextField(
+                    value = weatherCityInput,
+                    onValueChange = { weatherCityInput = it },
+                    label = { Text("City name (e.g. London)") },
+                    supportingText = { Text("Used when typing weather or solar command without a city") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateSettings { copy(defaultWeatherCity = weatherCityInput.trim()) }
+                    showWeatherCityDialog = false
+                }) {
+                    Text("Save", color = colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWeatherCityDialog = false }) {
+                    Text("Cancel", color = colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
+
+    // Wolfram Alpha AppID Dialog
+    if (showWolframDialog) {
+        AlertDialog(
+            onDismissRequest = { showWolframDialog = false },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = colorScheme.surfaceContainerHigh,
+            title = { Text(text = "Wolfram Alpha AppID", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                OutlinedTextField(
+                    value = wolframInput,
+                    onValueChange = { wolframInput = it },
+                    label = { Text("App ID") },
+                    supportingText = { Text("From developer.wolframalpha.com") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateSettings { copy(wolframAppId = wolframInput.trim()) }
+                    showWolframDialog = false
+                }) {
+                    Text("Save", color = colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWolframDialog = false }) {
+                    Text("Cancel", color = colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
+
+    // Edit Command Prefix Dialog
+    editingConfig?.let { targetCfg ->
+        AlertDialog(
+            onDismissRequest = { editingConfig = null },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = colorScheme.surfaceContainerHigh,
+            title = { Text(text = "Edit Prefix: ${targetCfg.label}", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                OutlinedTextField(
+                    value = editPrefixInput,
+                    onValueChange = { editPrefixInput = it },
+                    label = { Text("Command prefix") },
+                    supportingText = { Text("Default was '${CommandConfig.DEFAULTS[targetCfg.id]?.prefix ?: targetCfg.prefix}'") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val newPrefix = editPrefixInput.trim()
+                    if (newPrefix.isNotEmpty()) {
+                        viewModel.updateCommandConfig(targetCfg.id, targetCfg.enabled, newPrefix)
+                        editingConfig = null
+                    }
+                }) {
+                    Text("Save", color = colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingConfig = null }) {
                     Text("Cancel", color = colorScheme.onSurfaceVariant)
                 }
             }

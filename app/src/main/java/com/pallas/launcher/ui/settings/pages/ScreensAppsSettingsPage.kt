@@ -24,7 +24,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +33,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -45,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -56,17 +58,19 @@ import com.pallas.launcher.domain.model.AppsVerticalPosition
 import com.pallas.launcher.domain.model.HomeScreen
 import com.pallas.launcher.domain.model.NameLengthSortOrder
 import com.pallas.launcher.domain.model.ScreenApp
-import com.pallas.launcher.ui.MainViewModel
 import com.pallas.launcher.ui.components.RenameAppDialog
 import com.pallas.launcher.ui.screens.AppPickerSheet
+import com.pallas.launcher.ui.settings.SettingsViewModel
+import com.pallas.launcher.ui.settings.components.SettingsGroup
+import com.pallas.launcher.ui.settings.components.SettingsLargeTopBar
 import com.pallas.launcher.ui.settings.components.SettingsSectionHeader
 import com.pallas.launcher.ui.settings.components.SettingsSegmentedRow
 import com.pallas.launcher.ui.settings.components.SettingsSliderRow
-import com.pallas.launcher.ui.settings.components.SettingsTopBar
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScreensAppsSettingsPage(
-    viewModel: MainViewModel,
+    viewModel: SettingsViewModel,
     screens: List<HomeScreen>,
     currentScreenIndex: Int,
     onBack: () -> Unit,
@@ -76,6 +80,8 @@ fun ScreensAppsSettingsPage(
     val settings by viewModel.settings.collectAsState()
     val installedApps by viewModel.installedApps.collectAsState()
     val haptic = LocalHapticFeedback.current
+
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     var selectedIndex by remember { mutableStateOf(currentScreenIndex.coerceIn(0, (screens.size - 1).coerceAtLeast(0))) }
     val activeScreen = screens.getOrNull(selectedIndex) ?: screens.firstOrNull()
@@ -95,10 +101,12 @@ fun ScreensAppsSettingsPage(
     var showAppPickerSheet by remember { mutableStateOf(false) }
 
     Scaffold(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
-            SettingsTopBar(title = "Home Screens & Apps", onBack = onBack)
+            SettingsLargeTopBar(title = "Screens & Apps", scrollBehavior = scrollBehavior, onBack = onBack)
         }
     ) { innerPadding ->
         LazyColumn(
@@ -109,82 +117,89 @@ fun ScreensAppsSettingsPage(
             // Placement & Alignment
             item {
                 SettingsSectionHeader("Apps Placement")
-                SettingsSegmentedRow(
-                    title = "Vertical Position",
-                    options = AppsVerticalPosition.entries,
-                    selected = settings.appsVerticalPosition,
-                    onSelected = { viewModel.updateAppsPosition(it, settings.appsHorizontalAlignment) },
-                    label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-                SettingsSegmentedRow(
-                    title = "Horizontal Alignment",
-                    options = AppsHorizontalAlignment.entries,
-                    selected = settings.appsHorizontalAlignment,
-                    onSelected = { viewModel.updateAppsPosition(settings.appsVerticalPosition, it) },
-                    label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+                SettingsGroup {
+                    SettingsSegmentedRow(
+                        title = "Vertical Position",
+                        options = AppsVerticalPosition.entries,
+                        selected = settings.appsVerticalPosition,
+                        onSelected = { viewModel.updateSettings { copy(appsVerticalPosition = it) } },
+                        label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
+                    )
+                    SettingsSegmentedRow(
+                        title = "Horizontal Alignment",
+                        options = AppsHorizontalAlignment.entries,
+                        selected = settings.appsHorizontalAlignment,
+                        onSelected = { viewModel.updateSettings { copy(appsHorizontalAlignment = it) } },
+                        label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
+                    )
+                }
             }
 
             // Screens Spacing
             item {
                 SettingsSectionHeader("Screens Spacing")
-                SettingsSliderRow(
-                    title = "Left Padding",
-                    persistedValue = settings.screensPaddingLeftDp.toFloat(),
-                    onValueChangeFinished = { viewModel.updateScreensPaddingLeft(it.toInt()) },
-                    valueRange = 0f..64f,
-                    steps = 15,
-                    valueFormat = { "${it.toInt()} dp" }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-                SettingsSliderRow(
-                    title = "Right Padding",
-                    persistedValue = settings.screensPaddingRightDp.toFloat(),
-                    onValueChangeFinished = { viewModel.updateScreensPaddingRight(it.toInt()) },
-                    valueRange = 0f..64f,
-                    steps = 15,
-                    valueFormat = { "${it.toInt()} dp" }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-                SettingsSliderRow(
-                    title = "Top Padding",
-                    persistedValue = settings.screensPaddingTopDp.toFloat(),
-                    onValueChangeFinished = { viewModel.updateScreensPaddingTop(it.toInt()) },
-                    valueRange = 0f..64f,
-                    steps = 15,
-                    valueFormat = { "${it.toInt()} dp" }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-                SettingsSliderRow(
-                    title = "Bottom Padding",
-                    persistedValue = settings.screensPaddingBottomDp.toFloat(),
-                    onValueChangeFinished = { viewModel.updateScreensPaddingBottom(it.toInt()) },
-                    valueRange = 0f..64f,
-                    steps = 15,
-                    valueFormat = { "${it.toInt()} dp" }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+                SettingsGroup {
+                    SettingsSliderRow(
+                        title = "Left Padding",
+                        persistedValue = settings.screensPaddingLeftDp.toFloat(),
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingLeftDp = value.toInt()) } },
+                        valueRange = 0f..64f,
+                        steps = 15,
+                        valueFormat = { "${it.toInt()} dp" }
+                    )
+                    SettingsSliderRow(
+                        title = "Right Padding",
+                        persistedValue = settings.screensPaddingRightDp.toFloat(),
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingRightDp = value.toInt()) } },
+                        valueRange = 0f..64f,
+                        steps = 15,
+                        valueFormat = { "${it.toInt()} dp" }
+                    )
+                    SettingsSliderRow(
+                        title = "Top Padding",
+                        persistedValue = settings.screensPaddingTopDp.toFloat(),
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingTopDp = value.toInt()) } },
+                        valueRange = 0f..64f,
+                        steps = 15,
+                        valueFormat = { "${it.toInt()} dp" }
+                    )
+                    SettingsSliderRow(
+                        title = "Bottom Padding",
+                        persistedValue = settings.screensPaddingBottomDp.toFloat(),
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingBottomDp = value.toInt()) } },
+                        valueRange = 0f..64f,
+                        steps = 15,
+                        valueFormat = { "${it.toInt()} dp" }
+                    )
+                }
             }
 
             // App Arrangement
             item {
                 SettingsSectionHeader("App Arrangement")
-                SettingsSegmentedRow(
-                    title = "Sort by Visual Space",
-                    options = NameLengthSortOrder.entries,
-                    selected = settings.nameLengthSortOrder,
-                    onSelected = { viewModel.updateNameLengthSortOrder(it) },
-                    label = {
-                        when (it) {
-                            NameLengthSortOrder.OFF -> "Off"
-                            NameLengthSortOrder.ASCENDING -> "Ascending"
-                            NameLengthSortOrder.DESCENDING -> "Descending"
+                SettingsGroup {
+                    SettingsSegmentedRow(
+                        title = "Sort by Visual Space",
+                        options = NameLengthSortOrder.entries,
+                        selected = settings.nameLengthSortOrder,
+                        onSelected = { viewModel.updateSettings { copy(nameLengthSortOrder = it) } },
+                        label = {
+                            when (it) {
+                                NameLengthSortOrder.OFF -> "Off"
+                                NameLengthSortOrder.ASCENDING -> "Short first"
+                                NameLengthSortOrder.DESCENDING -> "Long first"
+                            }
                         }
-                    }
+                    )
+                }
+                Text(
+                    text = if (settings.nameLengthSortOrder == NameLengthSortOrder.OFF)
+                        "Apps appear in the order you arranged below."
+                    else "Sorted by how wide each name looks on screen. Your own order is kept and returns when you switch this off.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp)
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
             }
 
             // Screens Manager
@@ -238,27 +253,35 @@ fun ScreensAppsSettingsPage(
                                         shadowElevation = 8f
                                     }
                                 }
-                                .pointerInput(index, screens.size) {
+                                .pointerInput(s.id, screens.size) {
                                     detectDragGestures(
                                         onDragStart = {
-                                            draggedScreenIndex = index
-                                            screenDragDeltaX = 0f
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            val currentIdx = screens.indexOfFirst { it.id == s.id }
+                                            if (currentIdx != -1) {
+                                                draggedScreenIndex = currentIdx
+                                                screenDragDeltaX = 0f
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            }
                                         },
                                         onDrag = { change, dragAmount ->
                                             change.consume()
-                                            screenDragDeltaX += dragAmount.x
-                                            val stepThreshold = 80.dp.toPx()
-                                            if (screenDragDeltaX > stepThreshold && index < screens.size - 1) {
-                                                viewModel.moveScreen(index, index + 1)
-                                                selectedIndex = index + 1
-                                                screenDragDeltaX -= stepThreshold
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            } else if (screenDragDeltaX < -stepThreshold && index > 0) {
-                                                viewModel.moveScreen(index, index - 1)
-                                                selectedIndex = index - 1
-                                                screenDragDeltaX += stepThreshold
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            val currentIdx = screens.indexOfFirst { it.id == s.id }
+                                            if (currentIdx != -1) {
+                                                screenDragDeltaX += dragAmount.x
+                                                val stepThreshold = 80.dp.toPx()
+                                                if (screenDragDeltaX > stepThreshold && currentIdx < screens.size - 1) {
+                                                    viewModel.moveScreen(currentIdx, currentIdx + 1)
+                                                    selectedIndex = currentIdx + 1
+                                                    draggedScreenIndex = currentIdx + 1
+                                                    screenDragDeltaX -= stepThreshold
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                } else if (screenDragDeltaX < -stepThreshold && currentIdx > 0) {
+                                                    viewModel.moveScreen(currentIdx, currentIdx - 1)
+                                                    selectedIndex = currentIdx - 1
+                                                    draggedScreenIndex = currentIdx - 1
+                                                    screenDragDeltaX += stepThreshold
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                }
                                             }
                                         },
                                         onDragEnd = {
@@ -318,7 +341,6 @@ fun ScreensAppsSettingsPage(
                         }
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
             }
 
             // Apps in Active Screen
@@ -349,7 +371,8 @@ fun ScreensAppsSettingsPage(
                     }
                 }
 
-                val apps = activeScreen?.apps ?: emptyList()
+                val sortActive = settings.nameLengthSortOrder != NameLengthSortOrder.OFF
+                val apps = if (sortActive) viewModel.sortedForDisplay(activeScreen?.apps ?: emptyList()) else (activeScreen?.apps ?: emptyList())
                 if (apps.isEmpty()) {
                     TextButton(
                         onClick = { showAppPickerSheet = true },
@@ -388,35 +411,45 @@ fun ScreensAppsSettingsPage(
                                 Box(
                                     modifier = Modifier
                                         .padding(end = 10.dp)
-                                        .pointerInput(appIdx, apps.size) {
+                                        .pointerInput(app.uniqueKey, apps.size, sortActive) {
+                                            if (sortActive) return@pointerInput
                                             detectDragGestures(
                                                 onDragStart = {
-                                                    draggedAppIdx = appIdx
-                                                    appDragDeltaY = 0f
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    val currentIdx = activeScreen?.apps?.indexOfFirst { it.uniqueKey == app.uniqueKey } ?: -1
+                                                    if (currentIdx != -1) {
+                                                        draggedAppIdx = currentIdx
+                                                        appDragDeltaY = 0f
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    }
                                                 },
                                                 onDrag = { change, dragAmount ->
                                                     change.consume()
-                                                    appDragDeltaY += dragAmount.y
-                                                    val rowHeightThreshold = 52.dp.toPx()
-                                                    if (appDragDeltaY > rowHeightThreshold && appIdx < apps.size - 1) {
-                                                        activeScreen?.let { s ->
-                                                            val list = s.apps.toMutableList()
-                                                            val item = list.removeAt(appIdx)
-                                                            list.add(appIdx + 1, item)
-                                                            viewModel.reorderApps(s.id, list)
+                                                    val currentIdx = activeScreen?.apps?.indexOfFirst { it.uniqueKey == app.uniqueKey } ?: -1
+                                                    if (currentIdx != -1) {
+                                                        appDragDeltaY += dragAmount.y
+                                                        val rowHeightThreshold = 52.dp.toPx()
+                                                        val currentApps = activeScreen?.apps ?: emptyList()
+                                                        if (appDragDeltaY > rowHeightThreshold && currentIdx < currentApps.size - 1) {
+                                                            activeScreen?.let { s ->
+                                                                val list = s.apps.toMutableList()
+                                                                val item = list.removeAt(currentIdx)
+                                                                list.add(currentIdx + 1, item)
+                                                                viewModel.reorderApps(s.id, list)
+                                                                draggedAppIdx = currentIdx + 1
+                                                            }
+                                                            appDragDeltaY -= rowHeightThreshold
+                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        } else if (appDragDeltaY < -rowHeightThreshold && currentIdx > 0) {
+                                                            activeScreen?.let { s ->
+                                                                val list = s.apps.toMutableList()
+                                                                val item = list.removeAt(currentIdx)
+                                                                list.add(currentIdx - 1, item)
+                                                                viewModel.reorderApps(s.id, list)
+                                                                draggedAppIdx = currentIdx - 1
+                                                            }
+                                                            appDragDeltaY += rowHeightThreshold
+                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                         }
-                                                        appDragDeltaY -= rowHeightThreshold
-                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                    } else if (appDragDeltaY < -rowHeightThreshold && appIdx > 0) {
-                                                        activeScreen?.let { s ->
-                                                            val list = s.apps.toMutableList()
-                                                            val item = list.removeAt(appIdx)
-                                                            list.add(appIdx - 1, item)
-                                                            viewModel.reorderApps(s.id, list)
-                                                        }
-                                                        appDragDeltaY += rowHeightThreshold
-                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                     }
                                                 },
                                                 onDragEnd = {
@@ -490,7 +523,6 @@ fun ScreensAppsSettingsPage(
                         }
                     }
                 }
-                HorizontalDivider(modifier = Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
             }
 
             // Hidden from App List
@@ -548,7 +580,6 @@ fun ScreensAppsSettingsPage(
                         }
                     }
                 }
-                HorizontalDivider(modifier = Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
             }
 
             // Hidden Apps (Global)

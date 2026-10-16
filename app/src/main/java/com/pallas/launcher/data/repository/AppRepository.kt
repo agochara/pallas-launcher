@@ -15,18 +15,18 @@ import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.ui.apps.AppIconHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.Collator
 import java.util.Locale
-
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
 
 class AppRepository(
     private val context: Context,
@@ -45,8 +45,14 @@ class AppRepository(
 
     val installedApps: StateFlow<List<AppItem>> = if (settingsRepository != null) {
         combine(_rawInstalledApps, settingsRepository.settings) { apps, settings ->
-            if (settings.hiddenApps.isEmpty()) apps
-            else apps.filterNot { settings.hiddenApps.contains(it.packageName) }
+            if (settings.hiddenApps.isEmpty()) {
+                apps
+            } else {
+                apps.filterNot { app ->
+                    settings.hiddenApps.contains(app.uniqueKey) ||
+                            settings.hiddenApps.contains(app.packageName)
+                }
+            }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
     } else {
         _rawInstalledApps.asStateFlow()
@@ -60,21 +66,24 @@ class AppRepository(
 
     init {
         registerLauncherCallback()
-        reloadApps()
+        reloadApps(clearAllIcons = false)
     }
 
     private fun registerLauncherCallback() {
         val callback = object : LauncherApps.Callback() {
             override fun onPackageRemoved(packageName: String, user: UserHandle) {
-                reloadApps()
+                AppIconHelper.invalidate(packageName)
+                reloadApps(clearAllIcons = false)
             }
 
             override fun onPackageAdded(packageName: String, user: UserHandle) {
-                reloadApps()
+                AppIconHelper.invalidate(packageName)
+                reloadApps(clearAllIcons = false)
             }
 
             override fun onPackageChanged(packageName: String, user: UserHandle) {
-                reloadApps()
+                AppIconHelper.invalidate(packageName)
+                reloadApps(clearAllIcons = false)
             }
 
             override fun onPackagesAvailable(
@@ -82,7 +91,8 @@ class AppRepository(
                 user: UserHandle,
                 replacing: Boolean
             ) {
-                reloadApps()
+                packageNames.forEach { AppIconHelper.invalidate(it) }
+                reloadApps(clearAllIcons = false)
             }
 
             override fun onPackagesUnavailable(
@@ -90,7 +100,8 @@ class AppRepository(
                 user: UserHandle,
                 replacing: Boolean
             ) {
-                reloadApps()
+                packageNames.forEach { AppIconHelper.invalidate(it) }
+                reloadApps(clearAllIcons = false)
             }
 
             override fun onShortcutsChanged(
@@ -110,10 +121,10 @@ class AppRepository(
         launcherAppsCallback = null
     }
 
-    fun reloadApps() {
+    fun reloadApps(clearAllIcons: Boolean = true) {
         reloadJob?.cancel()
         reloadJob = scope.launch(Dispatchers.IO) {
-            AppIconHelper.clear()
+            if (clearAllIcons) AppIconHelper.clear()
             val apps = queryInstalledApps()
             _rawInstalledApps.value = apps
             _isLoaded.value = true
@@ -130,7 +141,6 @@ class AppRepository(
                 val activityList = launcherApps.getActivityList(null, profile)
                 for (activity in activityList) {
                     val pkg = activity.applicationInfo.packageName
-                    // Skip our own launcher package
                     if (pkg == context.packageName) continue
 
                     val label = activity.label?.toString() ?: pkg
@@ -185,7 +195,6 @@ class AppRepository(
             val component = if (activityName != null) ComponentName(packageName, activityName) else ComponentName(packageName, "")
             launcherApps.startAppDetailsActivity(component, targetUser, null, null)
         } catch (e: Exception) {
-            // Fallback
             try {
                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                     data = Uri.parse("package:$packageName")
@@ -218,5 +227,19 @@ class AppRepository(
             emptyList()
         }
     }
-}
 
+    companion object {
+        @Volatile
+        private var instance: AppRepository? = null
+
+        fun getInstance(context: Context): AppRepository =
+            instance ?: synchronized(this) {
+                val appContext = context.applicationContext
+                instance ?: AppRepository(
+                    context = appContext,
+                    scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+                    settingsRepository = SettingsRepository.getInstance(appContext)
+                ).also { instance = it }
+            }
+    }
+}

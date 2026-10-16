@@ -12,13 +12,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -27,19 +27,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import com.pallas.launcher.domain.model.EdgeScrubPosition
 import com.pallas.launcher.domain.model.EdgeScrubReleaseAction
 import com.pallas.launcher.domain.model.GestureAction
-import com.pallas.launcher.ui.MainViewModel
 import com.pallas.launcher.ui.screens.AppPickerSheet
+import com.pallas.launcher.ui.settings.SettingsViewModel
+import com.pallas.launcher.ui.settings.components.SettingsGroup
+import com.pallas.launcher.ui.settings.components.SettingsLargeTopBar
+import com.pallas.launcher.ui.settings.components.SettingsNavRow
 import com.pallas.launcher.ui.settings.components.SettingsSectionHeader
 import com.pallas.launcher.ui.settings.components.SettingsSegmentedRow
-import com.pallas.launcher.ui.settings.components.SettingsTopBar
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GesturesSettingsPage(
-    viewModel: MainViewModel,
+    viewModel: SettingsViewModel,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -69,20 +73,24 @@ fun GesturesSettingsPage(
     }
 
     val standardGestureOptions = listOf(
-        GestureAction.OpenCamera to "Open Camera",
-        GestureAction.OpenDialer to "Open Dialer",
+        GestureAction.OpenAppDrawer to "Open App List",
         GestureAction.OpenSearch to "Open Search",
         GestureAction.OpenNotifications to "Open Notifications",
         GestureAction.OpenQuickSettings to "Open Quick Settings",
-        GestureAction.OpenAppDrawer to "Open App List",
+        GestureAction.OpenCamera to "Open Camera",
+        GestureAction.OpenDialer to "Open Dialer",
         GestureAction.None to "None"
     )
 
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
     Scaffold(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
-            SettingsTopBar(title = "Gestures", onBack = onBack)
+            SettingsLargeTopBar(title = "Gestures", scrollBehavior = scrollBehavior, onBack = onBack)
         }
     ) { innerPadding ->
         LazyColumn(
@@ -92,132 +100,90 @@ fun GesturesSettingsPage(
         ) {
             item {
                 SettingsSectionHeader("Vertical Swipes")
-                SettingsSegmentedRow(
-                    title = "Swipe Up",
-                    options = listOf(GestureAction.OpenAppDrawer, GestureAction.OpenSearch, GestureAction.None),
-                    selected = settings.swipeUpAction,
-                    onSelected = { viewModel.updateGestureActions(swipeUp = it) },
-                    label = { when (it) {
-                        GestureAction.OpenAppDrawer -> "Apps"
-                        GestureAction.OpenSearch -> "Search"
-                        else -> "None"
-                    } }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-
-                SettingsSegmentedRow(
-                    title = "Swipe Down",
-                    options = listOf(GestureAction.OpenNotifications, GestureAction.OpenQuickSettings, GestureAction.None),
-                    selected = settings.swipeDownAction,
-                    onSelected = { viewModel.updateGestureActions(swipeDown = it) },
-                    label = {
-                        when (it) {
-                            GestureAction.OpenNotifications -> "Notifications"
-                            GestureAction.OpenQuickSettings -> "Quick Settings"
-                            else -> "None"
+                SettingsGroup {
+                    SettingsNavRow(
+                        title = "Swipe Up",
+                        subtitle = getActionLabel(settings.swipeUpAction),
+                        onClick = {
+                            pickerGestureTitle = "Swipe Up Action"
+                            currentSelectedAction = settings.swipeUpAction
+                            onActionSelectedCallback = { action ->
+                                viewModel.updateSettings { copy(swipeUpAction = action) }
+                            }
                         }
-                    }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-            }
+                    )
 
-            item {
+                    SettingsNavRow(
+                        title = "Swipe Down",
+                        subtitle = getActionLabel(settings.swipeDownAction),
+                        onClick = {
+                            pickerGestureTitle = "Swipe Down Action"
+                            currentSelectedAction = settings.swipeDownAction
+                            onActionSelectedCallback = { action ->
+                                viewModel.updateSettings { copy(swipeDownAction = action) }
+                            }
+                        }
+                    )
+                }
+
                 SettingsSectionHeader("Horizontal Swipes")
-
-                Surface(
-                    color = colorScheme.surface,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
+                SettingsGroup {
+                    SettingsNavRow(
+                        title = "Short Swipe Left",
+                        subtitle = getActionLabel(settings.shortSwipeLeftAction),
+                        onClick = {
                             pickerGestureTitle = "Short Swipe Left Action"
                             currentSelectedAction = settings.shortSwipeLeftAction
                             onActionSelectedCallback = { action ->
-                                viewModel.updateGestureActions(swipeLeft = action)
+                                viewModel.updateSettings { copy(shortSwipeLeftAction = action) }
                             }
                         }
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("Short Swipe Left", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                text = getActionLabel(settings.shortSwipeLeftAction),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+                    )
 
-                Surface(
-                    color = colorScheme.surface,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
+                    SettingsNavRow(
+                        title = "Short Swipe Right",
+                        subtitle = getActionLabel(settings.shortSwipeRightAction),
+                        onClick = {
                             pickerGestureTitle = "Short Swipe Right Action"
                             currentSelectedAction = settings.shortSwipeRightAction
                             onActionSelectedCallback = { action ->
-                                viewModel.updateGestureActions(swipeRight = action)
+                                viewModel.updateSettings { copy(shortSwipeRightAction = action) }
                             }
                         }
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("Short Swipe Right", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                text = getActionLabel(settings.shortSwipeRightAction),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                    )
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-            }
 
-            item {
                 SettingsSectionHeader("Alphabet Edge Scrub")
+                SettingsGroup {
+                    SettingsSegmentedRow(
+                        title = "Edge Rail Position",
+                        options = EdgeScrubPosition.entries,
+                        selected = settings.edgeScrubPosition,
+                        onSelected = { viewModel.updateSettings { copy(edgeScrubPosition = it) } },
+                        label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
+                    )
 
-                SettingsSegmentedRow(
-                    title = "Edge Rail Position",
-                    options = EdgeScrubPosition.entries,
-                    selected = settings.edgeScrubPosition,
-                    onSelected = { viewModel.updateEdgeScrubPosition(it) },
-                    label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-
-                SettingsSegmentedRow(
-                    title = "Action On Touch Release",
-                    options = EdgeScrubReleaseAction.entries,
-                    selected = settings.edgeScrubReleaseAction,
-                    onSelected = { viewModel.updateEdgeScrubReleaseAction(it) },
-                    label = {
-                        when (it) {
-                            EdgeScrubReleaseAction.STAY_OPEN -> "Stay Open"
-                            EdgeScrubReleaseAction.LAUNCH_TOP -> "Launch Top"
+                    SettingsSegmentedRow(
+                        title = "Action On Touch Release",
+                        options = EdgeScrubReleaseAction.entries,
+                        selected = settings.edgeScrubReleaseAction,
+                        onSelected = { viewModel.updateSettings { copy(edgeScrubReleaseAction = it) } },
+                        label = {
+                            when (it) {
+                                EdgeScrubReleaseAction.STAY_OPEN -> "Stay Open"
+                                EdgeScrubReleaseAction.LAUNCH_TOP -> "Launch Top"
+                            }
                         }
-                    }
-                )
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(28.dp))
             }
         }
     }
 
-    // Action Picker Dialog
     pickerGestureTitle?.let { title ->
+        val isCustomAppSelected = currentSelectedAction is GestureAction.LaunchApp
         AlertDialog(
             onDismissRequest = { pickerGestureTitle = null },
             shape = RoundedCornerShape(24.dp),
@@ -247,12 +213,11 @@ fun GesturesSettingsPage(
                                 text = label,
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = colorScheme.onSurface,
-                                modifier = Modifier.padding(start = 12.dp)
+                                modifier = Modifier.padding(start = 8.dp)
                             )
                         }
                     }
 
-                    // App picker option for LaunchApp
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -265,20 +230,20 @@ fun GesturesSettingsPage(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
-                            selected = currentSelectedAction is GestureAction.LaunchApp,
+                            selected = isCustomAppSelected,
                             onClick = {
                                 val callback = onActionSelectedCallback
                                 pickerGestureTitle = null
                                 isAppPickerOpenForGesture = callback
                             }
                         )
-                        Column(modifier = Modifier.padding(start = 12.dp)) {
+                        Column(modifier = Modifier.padding(start = 8.dp)) {
                             Text(
-                                text = "Launch Specific App...",
+                                text = "Launch Custom App…",
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = colorScheme.onSurface
                             )
-                            if (currentSelectedAction is GestureAction.LaunchApp) {
+                            if (isCustomAppSelected) {
                                 Text(
                                     text = getActionLabel(currentSelectedAction),
                                     style = MaterialTheme.typography.bodySmall,
@@ -289,16 +254,14 @@ fun GesturesSettingsPage(
                     }
                 }
             },
-            confirmButton = {},
-            dismissButton = {
+            confirmButton = {
                 TextButton(onClick = { pickerGestureTitle = null }) {
-                    Text("Cancel", color = colorScheme.onSurfaceVariant)
+                    Text("Cancel")
                 }
             }
         )
     }
 
-    // App Picker Sheet for selecting an app target
     isAppPickerOpenForGesture?.let { callback ->
         AppPickerSheet(
             installedApps = installedApps,
@@ -306,9 +269,7 @@ fun GesturesSettingsPage(
                 callback(GestureAction.LaunchApp(app.packageName))
                 isAppPickerOpenForGesture = null
             },
-            onDismiss = {
-                isAppPickerOpenForGesture = null
-            }
+            onDismiss = { isAppPickerOpenForGesture = null }
         )
     }
 }

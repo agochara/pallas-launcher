@@ -161,20 +161,20 @@ class SmartCommandsAndContactsTests {
         )
 
         // Exact match
-        val resultsMom = SmartCommandEngine.evaluateCommands("call Mom", contacts)
+        val resultsMom = SmartCommandEngine.evaluateCommands("call Mom", contacts).immediateResults
         assertEquals(1, resultsMom.size)
         val momResult = resultsMom.first() as LauncherSearchResult.ContactCall
         assertEquals("Mom", momResult.nickname)
         assertEquals("+1234567890", momResult.phoneNumber)
 
         // Case insensitive match
-        val resultsMomLower = SmartCommandEngine.evaluateCommands("call mom", contacts)
+        val resultsMomLower = SmartCommandEngine.evaluateCommands("call mom", contacts).immediateResults
         assertEquals(1, resultsMomLower.size)
         val momResultLower = resultsMomLower.first() as LauncherSearchResult.ContactCall
         assertEquals("Mom", momResultLower.nickname)
 
         // Contact not in settings -> NO results
-        val resultsBob = SmartCommandEngine.evaluateCommands("call Bob", contacts)
+        val resultsBob = SmartCommandEngine.evaluateCommands("call Bob", contacts).immediateResults
         assertTrue("Contact not in settings must not produce call result", resultsBob.isEmpty())
     }
 
@@ -196,7 +196,7 @@ class SmartCommandsAndContactsTests {
         )
 
         // Alarm query
-        val alarmResults = searchEngine.searchAll("al 530", contacts)
+        val (alarmResults, _) = searchEngine.searchAll("al 530", contacts)
         assertTrue(alarmResults.isNotEmpty())
         val topAlarm = alarmResults.first()
         assertTrue(topAlarm is LauncherSearchResult.Command)
@@ -204,7 +204,7 @@ class SmartCommandsAndContactsTests {
         assertEquals("Set alarm for 5:30 AM", topAlarm.title)
 
         // Timer query
-        val timerResults = searchEngine.searchAll("timer 1:05", contacts)
+        val (timerResults, _) = searchEngine.searchAll("timer 1:05", contacts)
         assertTrue(timerResults.isNotEmpty())
         val topTimer = timerResults.first()
         assertTrue(topTimer is LauncherSearchResult.Command)
@@ -212,7 +212,7 @@ class SmartCommandsAndContactsTests {
         assertEquals("Set timer for 1 hr 5 mins", topTimer.title)
 
         // Call query
-        val callResults = searchEngine.searchAll("call Mom", contacts)
+        val (callResults, _) = searchEngine.searchAll("call Mom", contacts)
         assertTrue(callResults.isNotEmpty())
         val topCall = callResults.first()
         assertTrue(topCall is LauncherSearchResult.ContactCall)

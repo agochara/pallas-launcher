@@ -23,6 +23,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+        insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
         setContent {
             val settings by viewModel.settings.collectAsState()
@@ -34,20 +36,36 @@ class MainActivity : ComponentActivity() {
             }
             
             androidx.compose.runtime.LaunchedEffect(isDark) {
-                val style = if (isDark) androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT) else androidx.activity.SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
-                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+                val controller = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+                controller.isAppearanceLightStatusBars = !isDark
+                controller.isAppearanceLightNavigationBars = !isDark
             }
 
             androidx.compose.runtime.LaunchedEffect(settings.hideStatusBar) {
-                val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+                val controller = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
                 if (settings.hideStatusBar) {
-                    insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+                    controller.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
                 } else {
-                    insetsController.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+                    controller.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
                 }
             }
 
-            PallasLauncherTheme(themeMode = settings.themeMode) {
+            val onWindowBlurChange = androidx.compose.runtime.remember {
+                { radiusPx: Int ->
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        try {
+                            window.setBackgroundBlurRadius(radiusPx.coerceAtLeast(0))
+                        } catch (_: Throwable) {
+                            // Silently fall back to scrim if cross-window blur is unsupported
+                        }
+                    }
+                }
+            }
+
+            PallasLauncherTheme(
+                themeMode = settings.themeMode,
+                onWindowBlurChange = onWindowBlurChange
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = Color.Transparent
@@ -60,13 +78,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Home button pressed
-        viewModel.resetToHomeScreen()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
-        insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        setIntent(intent)
+        // The system delivers HOME intents for many reasons. Only act on a genuine "go home" request, and only reset
+        // what makes sense: see MainViewModel.onHomeIntent. Never wipe the screen the user was on.
+        val isHome = intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_HOME)
+        if (isHome) {
+            // onNewIntent runs BEFORE onResume when we come back from another app, so "RESUMED" here means the launcher
+            // was already on screen (user pressed Home while looking at it).
+            val wasVisible = lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+            viewModel.onHomeIntent(wasVisible)
+        }
     }
 }

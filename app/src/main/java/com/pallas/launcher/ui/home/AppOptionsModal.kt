@@ -5,43 +5,46 @@ import android.os.UserHandle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.RemoveCircleOutline
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.pallas.launcher.domain.model.ScreenApp
 import com.pallas.launcher.ui.apps.AppIconImage
-import com.pallas.launcher.ui.theme.AccentGold
-import com.pallas.launcher.ui.theme.AccentRed
 import com.pallas.launcher.ui.theme.LauncherTypography
-import com.pallas.launcher.ui.theme.LocalLauncherColors
-import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppOptionsModal(
     app: ScreenApp,
@@ -59,194 +62,165 @@ fun AppOptionsModal(
     onOpenSettings: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val colors = LocalLauncherColors.current
     val colorScheme = MaterialTheme.colorScheme
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val coroutineScope = rememberCoroutineScope()
 
-    val runAndDismiss: (() -> Unit) -> Unit = { action ->
-        coroutineScope.launch {
-            try {
-                sheetState.hide()
-            } finally {
-                action()
-                onDismiss()
-            }
-        }
+    val runAndClose: (() -> Unit) -> Unit = { action ->
+        action()
+        onDismiss()
     }
 
-    val surfaceContainer = colorScheme.surfaceContainer
-    val cardTonal = colorScheme.surfaceContainerHigh
-
-    ModalBottomSheet(
-        onDismissRequest = { runAndDismiss {} },
-        sheetState = sheetState,
-        containerColor = surfaceContainer,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 12.dp)
-                    .size(width = 36.dp, height = 4.dp)
-                    .clip(CircleShape)
-                    .background(colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-            )
-        }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Column(
+        Surface(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .fillMaxWidth(0.88f)
+                .padding(vertical = 24.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = colorScheme.surfaceContainer,
+            tonalElevation = 8.dp
         ) {
-            // Hero Header: App Icon + Title
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                AppIconImage(
-                    app = app,
-                    size = 54.dp,
-                    shapeRadius = 14.dp
-                )
+                // 1. Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AppIconImage(app = app, size = 48.dp, shapeRadius = 14.dp)
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = app.displayLabel,
+                            style = LauncherTypography.modalTitle,
+                            color = colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = app.packageName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(
+                        onClick = { runAndClose(onOpenSettings) },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Launcher Settings",
+                            tint = colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
 
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = app.displayLabel,
-                        style = LauncherTypography.appLabel.copy(
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                // 2. Quick 4-Icon Action Bar (Rename, Alias, Info, Uninstall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuickIconAction(
+                        icon = Icons.Default.Edit,
+                        label = "Rename",
+                        onClick = { runAndClose(onRenameApp) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    QuickIconAction(
+                        icon = Icons.Default.Tag,
+                        label = "Alias",
+                        onClick = { runAndClose(onSetAlias) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    QuickIconAction(
+                        icon = Icons.Default.Info,
+                        label = "Info",
+                        onClick = { runAndClose(onOpenAppInfo) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    QuickIconAction(
+                        icon = Icons.Default.DeleteOutline,
+                        label = "Uninstall",
+                        tint = colorScheme.error,
+                        onClick = { runAndClose(onUninstall) },
+                        modifier = Modifier.weight(1f)
                     )
                 }
-            }
 
-            // Shortcuts Section (if any)
-            if (shortcuts.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "App Shortcuts",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colorScheme.onSurfaceVariant
-                    )
-
-                    shortcuts.take(4).forEach { shortcut ->
-                        val label = shortcut.shortLabel?.toString()
-                            ?: shortcut.longLabel?.toString()
-                            ?: shortcut.id
-
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = cardTonal,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    runAndDismiss { onLaunchShortcut(shortcut.id, shortcut.userHandle) }
+                // 3. Compact Inline Shortcut Pills (if any)
+                if (shortcuts.isNotEmpty()) {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        shortcuts.take(4).forEach { shortcut ->
+                            val label = shortcut.shortLabel?.toString()
+                                ?: shortcut.longLabel?.toString()
+                                ?: shortcut.id
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = colorScheme.surfaceContainerHigh,
+                                modifier = Modifier.clickable {
+                                    runAndClose { onLaunchShortcut(shortcut.id, shortcut.userHandle) }
                                 }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = label,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium,
+                                    text = "↗ $label",
+                                    style = LauncherTypography.chip,
                                     color = colorScheme.onSurface,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                                 )
                             }
                         }
                     }
                 }
-            }
 
-            // Actions Group
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(cardTonal)
-            ) {
-                if (!isOnHomeScreen) {
-                    AppOptionTile(
-                        title = "Add to Screen",
-                        onClick = { runAndDismiss(onAddToScreen) }
-                    )
-                    Divider(surfaceContainer)
-                }
+                // 4. Contextual Screen & Visibility Chips (2-Column Grid)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (isOnHomeScreen) {
+                            CompactChipTile(
+                                icon = Icons.Default.RemoveCircleOutline,
+                                label = "Unpin Screen",
+                                tint = colorScheme.error,
+                                onClick = { runAndClose(onRemoveFromScreen) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        } else {
+                            CompactChipTile(
+                                icon = Icons.Default.Add,
+                                label = "Pin to Screen",
+                                tint = colorScheme.primary,
+                                onClick = { runAndClose(onAddToScreen) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
 
-                AppOptionTile(
-                    title = "Set Search Alias",
-                    onClick = { runAndDismiss(onSetAlias) }
-                )
+                        CompactChipTile(
+                            icon = Icons.Default.VisibilityOff,
+                            label = "Hide in List",
+                            onClick = { runAndClose(onHideFromAppList) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
 
-                Divider(surfaceContainer)
-
-                AppOptionTile(
-                    title = "Rename Display Label",
-                    onClick = { runAndDismiss(onRenameApp) }
-                )
-
-                Divider(surfaceContainer)
-
-                AppOptionTile(
-                    title = "Hide from App List",
-                    onClick = { runAndDismiss(onHideFromAppList) }
-                )
-
-                Divider(surfaceContainer)
-
-                AppOptionTile(
-                    title = "Hide App",
-                    onClick = { runAndDismiss(onHideApp) }
-                )
-
-                Divider(surfaceContainer)
-
-                AppOptionTile(
-                    title = "App Info & Permissions",
-                    onClick = { runAndDismiss(onOpenAppInfo) }
-                )
-
-                if (isOnHomeScreen) {
-                    Divider(surfaceContainer)
-
-                    AppOptionTile(
-                        title = "Remove from this Screen",
-                        titleColor = colorScheme.error,
-                        onClick = { runAndDismiss(onRemoveFromScreen) }
-                    )
-                }
-
-                Divider(surfaceContainer)
-
-                AppOptionTile(
-                    title = "Uninstall",
-                    titleColor = colorScheme.error,
-                    onClick = { runAndDismiss(onUninstall) }
-                )
-            }
-
-            // Bottom Settings Shortcut
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                TextButton(onClick = { runAndDismiss(onOpenSettings) }) {
-                    Text(
-                        text = "Launcher Settings",
-                        color = colorScheme.primary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
+                    CompactChipTile(
+                        icon = Icons.Default.VisibilityOff,
+                        label = "Hide Completely (Drawer & Search)",
+                        onClick = { runAndClose(onHideApp) },
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
@@ -255,36 +229,59 @@ fun AppOptionsModal(
 }
 
 @Composable
-private fun Divider(color: Color) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .background(color.copy(alpha = 0.5f))
-    )
+private fun QuickIconAction(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tint: Color = MaterialTheme.colorScheme.onSurface
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(colorScheme.surfaceContainerHigh)
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(imageVector = icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = tint,
+            maxLines = 1
+        )
+    }
 }
 
 @Composable
-private fun AppOptionTile(
-    title: String,
+private fun CompactChipTile(
+    icon: ImageVector,
+    label: String,
     onClick: () -> Unit,
-    titleColor: Color? = null
+    modifier: Modifier = Modifier,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant
 ) {
     val colorScheme = MaterialTheme.colorScheme
-
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(colorScheme.surfaceContainerHigh.copy(alpha = 0.7f))
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
     ) {
+        Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = title,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = titleColor ?: colorScheme.onSurface,
-            modifier = Modifier.weight(1f)
+            text = label,
+            style = LauncherTypography.chip,
+            color = tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
