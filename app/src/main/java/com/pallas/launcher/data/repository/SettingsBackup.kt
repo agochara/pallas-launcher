@@ -127,6 +127,7 @@ object SettingsBackup {
         put("swipeRightAction", GestureAction.toString(s.shortSwipeRightAction))
         put("swipeUpAction", GestureAction.toString(s.swipeUpAction))
         put("swipeDownAction", GestureAction.toString(s.swipeDownAction))
+        put("doubleTapAction", GestureAction.toString(s.doubleTapAction))
         put("edgeScrubPosition", s.edgeScrubPosition.name)
         put("edgeScrubReleaseAction", s.edgeScrubReleaseAction.name)
 
@@ -148,6 +149,9 @@ object SettingsBackup {
         })
         put("defaultWeatherCity", s.defaultWeatherCity)
         put("autoLaunchSingleMatch", s.autoLaunchSingleMatch)
+        put("stockDefaultRange", s.stockDefaultRange)
+        put("stockDefaultInterval", s.stockDefaultInterval)
+        put("stockShowSparkline", s.stockShowSparkline)
     }
 
     fun settingsFromJson(o: JSONObject, base: LauncherSettings = LauncherSettings()): LauncherSettings {
@@ -179,14 +183,26 @@ object SettingsBackup {
         val commandConfigs = run {
             val obj = o.optJSONObject("commandConfigs") ?: return@run base.commandConfigs
             val merged = CommandConfig.DEFAULTS.toMutableMap()
+            val usedPrefixes = mutableSetOf<String>()
             obj.keys().forEach { id ->
                 val c = obj.optJSONObject(id) ?: return@forEach
                 val def = CommandConfig.DEFAULTS[id]
+                val enabled = c.optBoolean("enabled", def?.enabled ?: true)
+                var prefix = c.optString("prefix", def?.prefix ?: id).trim()
+                if (prefix.isBlank() || prefix.contains("\\s".toRegex())) {
+                    prefix = def?.prefix ?: id
+                }
+                if (enabled) {
+                    if (prefix in usedPrefixes) {
+                        prefix = def?.prefix ?: id
+                    }
+                    usedPrefixes.add(prefix)
+                }
                 merged[id] = CommandConfig(
                     id = id,
                     label = def?.label ?: id,
-                    enabled = c.optBoolean("enabled", def?.enabled ?: true),
-                    prefix = c.optString("prefix", def?.prefix ?: id)
+                    enabled = enabled,
+                    prefix = prefix
                 )
             }
             merged
@@ -226,6 +242,7 @@ object SettingsBackup {
             shortSwipeRightAction = o.optString("swipeRightAction").takeIf { it.isNotBlank() }?.let(GestureAction::fromString) ?: base.shortSwipeRightAction,
             swipeUpAction = o.optString("swipeUpAction").takeIf { it.isNotBlank() }?.let(GestureAction::fromString) ?: base.swipeUpAction,
             swipeDownAction = o.optString("swipeDownAction").takeIf { it.isNotBlank() }?.let(GestureAction::fromString) ?: base.swipeDownAction,
+            doubleTapAction = o.optString("doubleTapAction").takeIf { it.isNotBlank() }?.let(GestureAction::fromString) ?: base.doubleTapAction,
             edgeScrubPosition = enumOf("edgeScrubPosition", base.edgeScrubPosition, EdgeScrubPosition.entries.toTypedArray()),
             edgeScrubReleaseAction = enumOf("edgeScrubReleaseAction", base.edgeScrubReleaseAction, EdgeScrubReleaseAction.entries.toTypedArray()),
 
@@ -237,7 +254,10 @@ object SettingsBackup {
             preferredBrowserPackage = o.optString("preferredBrowserPackage").takeIf { it.isNotBlank() },
             commandConfigs = commandConfigs,
             defaultWeatherCity = o.optString("defaultWeatherCity", base.defaultWeatherCity),
-            autoLaunchSingleMatch = o.optBoolean("autoLaunchSingleMatch", base.autoLaunchSingleMatch)
+            autoLaunchSingleMatch = o.optBoolean("autoLaunchSingleMatch", base.autoLaunchSingleMatch),
+            stockDefaultRange = o.optString("stockDefaultRange", base.stockDefaultRange),
+            stockDefaultInterval = o.optString("stockDefaultInterval", base.stockDefaultInterval),
+            stockShowSparkline = o.optBoolean("stockShowSparkline", base.stockShowSparkline)
         )
     }
 }

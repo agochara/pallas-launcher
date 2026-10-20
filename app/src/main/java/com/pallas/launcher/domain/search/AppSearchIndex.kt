@@ -23,7 +23,8 @@ class AppSearchIndex(
         val normalizedWords: List<String>,
         val wordStarts: List<Int>,
         val initials: String,
-        val isCustomLabel: Boolean
+        val isCustomLabel: Boolean,
+        val normToRaw: IntArray
     )
 
     data class AliasEntry(
@@ -69,8 +70,21 @@ class AppSearchIndex(
     }
 
     private fun makeEntry(app: AppItem, label: String, isCustom: Boolean): IndexedApp {
-        val normLabel = SearchRanking.normalize(label)
-        val words = SearchRanking.extractWords(label).map { SearchRanking.normalize(it) }.filter { it.isNotEmpty() }
+        // Track exact 1:many/many:1 mapping between normalized chars and raw label positions
+        val normBuilder = StringBuilder(label.length)
+        val normToRawList = ArrayList<Int>(label.length)
+        for (rawIdx in label.indices) {
+            val normPart = SearchRanking.normalize(label[rawIdx].toString())
+            for (c in normPart) {
+                normBuilder.append(c)
+                normToRawList.add(rawIdx)
+            }
+        }
+        val normLabel = normBuilder.toString()
+        val normToRaw = normToRawList.toIntArray()
+
+        val rawWords = SearchRanking.extractWords(label)
+        val words = rawWords.map { SearchRanking.normalize(it) }.filter { it.isNotEmpty() }
 
         val starts = ArrayList<Int>(words.size)
         val keptWords = ArrayList<String>(words.size)
@@ -92,11 +106,25 @@ class AppSearchIndex(
             normalizedWords = keptWords,
             wordStarts = starts,
             initials = initials.toString(),
-            isCustomLabel = isCustom
+            isCustomLabel = isCustom,
+            normToRaw = normToRaw
         )
     }
 
-    fun search(rawQuery: String): List<AppSearchResult> {
+    private fun mapRangesToRaw(ranges: List<IntRange>, normToRaw: IntArray): List<IntRange> {
+        if (ranges.isEmpty() || normToRaw.isEmpty()) return emptyList()
+        val rawIndices = mutableListOf<Int>()
+        for (r in ranges) {
+            val start = r.first.coerceIn(0, normToRaw.lastIndex)
+            val end = r.last.coerceIn(0, normToRaw.lastIndex)
+            for (i in start..end) {
+                rawIndices.add(normToRaw[i])
+            }
+        }
+        return consolidate(rawIndices.distinct().sorted())
+    }
+
+    fun search(rawQuery: String, limit: Int = 8): List<AppSearchResult> {
         val trimmed = rawQuery.trim()
         if (trimmed.isEmpty()) return emptyList()
         val q = SearchRanking.normalize(trimmed)
@@ -163,8 +191,9 @@ class AppSearchIndex(
             val frecency = appUsageTracker?.getUsageBonus(item.app.uniqueKey) ?: 0.0
             val lengthPenalty = label.length * 0.5
             val score = tier.baseScore + sub + frecency - lengthPenalty
-            val canHighlight = !item.isCustomLabel && item.rawLabel.length == item.normalizedLabel.length
-            offer(item.app, score, if (canHighlight) ranges else emptyList())
+            val canHighlight = !item.isCustomLabel
+            val mappedRanges = if (canHighlight) mapRangesToRaw(ranges, item.normToRaw) else emptyList()
+            offer(item.app, score, mappedRanges)
         }
 
         return candidates.values
@@ -172,7 +201,7 @@ class AppSearchIndex(
                 compareByDescending<AppSearchResult> { it.score }
                     .thenBy { it.app.label.lowercase(Locale.getDefault()) }
             )
-            .take(8)
+            .take(limit)
     }
 
     private fun fuzzyRanges(q: String, target: String, wordStarts: List<Int>): List<IntRange>? {

@@ -97,6 +97,7 @@ data class LauncherSettings(
     val shortSwipeRightAction: GestureAction = GestureAction.OpenDialer,
     val swipeUpAction: GestureAction = GestureAction.OpenAppDrawer,
     val swipeDownAction: GestureAction = GestureAction.OpenNotifications,
+    val doubleTapAction: GestureAction = GestureAction.LockScreen,
     val customAliases: Map<String, String> = emptyMap(),
     val searchContacts: List<SearchContact> = emptyList(),
     /** Scales the home screen clock and date/battery line (ClockHeader). */
@@ -124,7 +125,14 @@ data class LauncherSettings(
     val preferredBrowserPackage: String? = null,
     val webSearchEngine: WebSearchEngine = WebSearchEngine.GOOGLE,
     val commandConfigs: Map<String, CommandConfig> = CommandConfig.DEFAULTS,
-    val defaultWeatherCity: String = "Raipur",
+    val defaultWeatherCity: String = DEFAULT_WEATHER_CITY,
     val wolframAppId: String = "",
-    val autoLaunchSingleMatch: Boolean = false
-)
+    val autoLaunchSingleMatch: Boolean = false,
+    val stockDefaultRange: String = "5d",
+    val stockDefaultInterval: String = "1d",
+    val stockShowSparkline: Boolean = true
+) {
+    companion object {
+        const val DEFAULT_WEATHER_CITY = "London"
+    }
+}

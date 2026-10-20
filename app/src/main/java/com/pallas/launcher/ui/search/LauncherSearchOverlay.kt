@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.search.LauncherSearchResult
 import com.pallas.launcher.domain.search.isEnterEligible
 import com.pallas.launcher.ui.theme.LauncherTypography
@@ -62,6 +63,7 @@ fun LauncherSearchOverlay(
     onQueryChange: (String) -> Unit,
     onResultClick: (LauncherSearchResult) -> Unit,
     onDismiss: () -> Unit,
+    onAppLongPress: ((AppItem) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val focusRequester = remember { FocusRequester() }
@@ -70,10 +72,18 @@ fun LauncherSearchOverlay(
     val latestDismiss by rememberUpdatedState(onDismiss)
 
     LaunchedEffect(Unit) {
-        // requestFocus() throws if the BasicTextField isn't attached yet (happens during the fade-in)
-        delay(60)
-        runCatching { focusRequester.requestFocus() }
-        keyboardController?.show()
+        var requested = false
+        for (attempt in 1..5) {
+            delay(if (attempt == 1) 50L else 80L)
+            try {
+                focusRequester.requestFocus()
+                requested = true
+                break
+            } catch (_: Exception) {}
+        }
+        if (requested) {
+            keyboardController?.show()
+        }
     }
 
     LaunchedEffect(listState) {
@@ -132,13 +142,18 @@ fun LauncherSearchOverlay(
                 item { Spacer(modifier = Modifier.height(8.dp)) }
 
                 if (query.isNotEmpty() && results.isEmpty()) {
-                    item {
-                        Text(
-                            text = "No apps match \"$query\"",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp)
-                        )
+                    val trimmed = query.trim()
+                    val isCommandLike = trimmed.startsWith("=") || trimmed.startsWith("?") ||
+                        trimmed.startsWith("!") || trimmed.startsWith("/") || trimmed.startsWith(":")
+                    if (!isCommandLike) {
+                        item {
+                            Text(
+                                text = "No apps match \"$query\"",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp)
+                            )
+                        }
                     }
                 } else {
                     itemsIndexed(items = results, key = { _, item -> item.id }) { index, result ->
@@ -148,7 +163,13 @@ fun LauncherSearchOverlay(
                             onClick = {
                                 keyboardController?.hide()
                                 onResultClick(result)
-                            }
+                            },
+                            onLongClick = if (result is LauncherSearchResult.App && onAppLongPress != null) {
+                                {
+                                    keyboardController?.hide()
+                                    onAppLongPress(result.app)
+                                }
+                            } else null
                         )
                     }
                 }

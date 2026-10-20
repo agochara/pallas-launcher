@@ -7,7 +7,11 @@ sealed interface GestureAction {
     data object OpenQuickSettings : GestureAction
     data object OpenCamera : GestureAction
     data object OpenDialer : GestureAction
-    data class LaunchApp(val packageName: String) : GestureAction
+    data object LockScreen : GestureAction
+    data class LaunchApp(val uniqueKey: String) : GestureAction {
+        val packageName: String
+            get() = uniqueKey.substringBefore('/')
+    }
     data object None : GestureAction
 
     companion object {
@@ -18,6 +22,7 @@ sealed interface GestureAction {
             value == "quick_settings" -> OpenQuickSettings
             value == "camera" -> OpenCamera
             value == "dialer" -> OpenDialer
+            value == "lock_screen" || value == "lock" -> LockScreen
             value.startsWith("app:") -> LaunchApp(value.removePrefix("app:"))
             else -> None
         }
@@ -29,7 +34,8 @@ sealed interface GestureAction {
             is OpenQuickSettings -> "quick_settings"
             is OpenCamera -> "camera"
             is OpenDialer -> "dialer"
-            is LaunchApp -> "app:${action.packageName}"
+            is LockScreen -> "lock_screen"
+            is LaunchApp -> "app:${action.uniqueKey}"
             is None -> "none"
         }
     }

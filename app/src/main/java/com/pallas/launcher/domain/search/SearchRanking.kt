@@ -57,11 +57,14 @@ object SearchRanking {
         val acronymBuilder = StringBuilder()
         val wordStartIndices = mutableListOf<Int>()
 
+        var searchCursor = 0
         for (word in words) {
-            val startIdx = t.indexOf(normalize(word))
+            val normWord = normalize(word)
+            val startIdx = t.indexOf(normWord, searchCursor)
             if (startIdx != -1) {
                 acronymBuilder.append(word.first().lowercaseChar())
                 wordStartIndices.add(startIdx)
+                searchCursor = startIdx + normWord.length
             }
         }
         val acronym = acronymBuilder.toString()
@@ -77,16 +80,21 @@ object SearchRanking {
 
         // 4. Word-level Prefix Match
         // e.g. "calc" matches "Quick Calculator", "play" matches "Google Play"
+        var wordSearchCursor = 0
         for (word in words) {
             val wordNorm = normalize(word)
-            if (wordNorm.startsWith(q)) {
-                val startIdx = t.indexOf(wordNorm)
-                if (startIdx != -1) {
-                    val ranges = listOf(startIdx until (startIdx + q.length))
-                    val positionPenalty = startIdx * 2.0
-                    val score = 1100.0 - positionPenalty + (q.length.toDouble() / wordNorm.length.toDouble() * 50.0)
-                    return MatchResult(maxOf(score, 600.0), ranges)
-                }
+            val startIdx = t.indexOf(wordNorm, wordSearchCursor)
+            val effectiveStart = if (startIdx != -1) {
+                wordSearchCursor = startIdx + wordNorm.length
+                startIdx
+            } else {
+                t.indexOf(wordNorm)
+            }
+            if (wordNorm.startsWith(q) && effectiveStart != -1) {
+                val ranges = listOf(effectiveStart until (effectiveStart + q.length))
+                val positionPenalty = effectiveStart * 2.0
+                val score = 1100.0 - positionPenalty + (q.length.toDouble() / wordNorm.length.toDouble() * 50.0)
+                return MatchResult(maxOf(score, 600.0), ranges)
             }
         }
 

@@ -3,6 +3,7 @@ package com.pallas.launcher.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.UserManager
+import android.util.Log
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.model.HomeScreen
 import com.pallas.launcher.domain.model.NameLengthSortOrder
@@ -15,6 +16,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+private const val TAG = "ScreenRepository"
+
 class ScreenRepository(
     private val context: Context
 ) {
@@ -26,7 +29,54 @@ class ScreenRepository(
     private val _screens = MutableStateFlow<List<HomeScreen>>(loadScreens())
     val screens: StateFlow<List<HomeScreen>> = _screens.asStateFlow()
 
+    private val _customAppLabels = MutableStateFlow<Map<String, String>>(loadCustomAppLabels())
+    val customAppLabels: StateFlow<Map<String, String>> = _customAppLabels.asStateFlow()
+
     private fun loadScreens(): List<HomeScreen> = parseScreens(prefs.getString(KEY_SCREENS, null))
+
+    private fun loadCustomAppLabels(): Map<String, String> {
+        val raw = prefs.getString(KEY_CUSTOM_APP_LABELS, null) ?: return emptyMap()
+        return try {
+            val obj = JSONObject(raw)
+            buildMap {
+                obj.keys().forEach { k ->
+                    val v = obj.optString(k).trim()
+                    if (v.isNotEmpty()) put(k, v)
+                }
+            }
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    private val lock = Any()
+
+    private fun mutateScreens(block: (List<HomeScreen>) -> List<HomeScreen>) {
+        val updated = synchronized(lock) {
+            val res = block(_screens.value)
+            try {
+                prefs.edit().putString(KEY_SCREENS, serializeScreens(res).toString()).commit()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save screens to SharedPreferences", e)
+            }
+            res
+        }
+        _screens.value = updated
+    }
+
+    private fun mutateCustomAppLabels(block: (Map<String, String>) -> Map<String, String>) {
+        val updated = synchronized(lock) {
+            val res = block(_customAppLabels.value)
+            try {
+                val obj = JSONObject()
+                res.forEach { (k, v) -> if (v.isNotBlank()) obj.put(k, v) }
+                prefs.edit().putString(KEY_CUSTOM_APP_LABELS, obj.toString()).commit()
+            } catch (_: Exception) {
+            }
+            res
+        }
+        _customAppLabels.value = updated
+    }
 
     /** Parses the persisted/exported screens JSON. Never throws; falls back to a single empty "Home" screen. */
     fun parseScreens(rawJson: String?): List<HomeScreen> {
@@ -40,28 +90,29 @@ class ScreenRepository(
         try {
             val jsonArray = JSONArray(rawJson)
             for (i in 0 until jsonArray.length()) {
-                val screenObj = jsonArray.getJSONObject(i)
-                val id = screenObj.optString("id").ifBlank { UUID.randomUUID().toString() }
-                val name = screenObj.optString("name", "Screen ${i + 1}")
-                val rawTag = if (screenObj.has("contextTag") && !screenObj.isNull("contextTag")) screenObj.getString("contextTag") else null
-                val contextTag = rawTag?.trim()?.ifBlank { null }?.takeUnless { it.equals("General", ignoreCase = true) }
-                val appsArray = screenObj.optJSONArray("apps") ?: JSONArray()
-                val apps = mutableListOf<ScreenApp>()
-                for (j in 0 until appsArray.length()) {
-                    val appObj = appsArray.getJSONObject(j)
-                    val pkg = appObj.optString("packageName")
-                    val activity = appObj.optString("activityName")
-                    val serial = appObj.optLong("userSerialNumber", 0L)
-                    val uniqueKey = appObj.optString("uniqueKey").ifBlank { "$pkg/$activity#$serial" }
-                    val customLabel = if (appObj.has("customLabel") && !appObj.isNull("customLabel")) appObj.getString("customLabel") else null
-                    val defaultLabel = appObj.optString("defaultLabel", "")
-                    val handle = if (serial == mySerial || (serial == 0L && mySerial == 0L)) {
-                        myHandle
-                    } else {
-                        try { userManager?.getUserForSerialNumber(serial) } catch (_: Exception) { null }
-                    }
+                val screenObj = jsonArray.optJSONObject(i) ?: continue
+                try {
+                    val id = screenObj.optString("id").ifBlank { UUID.randomUUID().toString() }
+                    val name = screenObj.optString("name", "Screen ${i + 1}")
+                    val rawTag = if (screenObj.has("contextTag") && !screenObj.isNull("contextTag")) screenObj.optString("contextTag") else null
+                    val contextTag = rawTag?.trim()?.ifBlank { null }?.takeUnless { it.equals("General", ignoreCase = true) }
+                    val appsArray = screenObj.optJSONArray("apps") ?: JSONArray()
+                    val apps = mutableListOf<ScreenApp>()
+                    for (j in 0 until appsArray.length()) {
+                        val appObj = appsArray.optJSONObject(j) ?: continue
+                        val pkg = appObj.optString("packageName")
+                        if (pkg.isBlank()) continue
+                        val activity = appObj.optString("activityName")
+                        val serial = appObj.optLong("userSerialNumber", 0L)
+                        val uniqueKey = appObj.optString("uniqueKey").ifBlank { "$pkg/$activity#$serial" }
+                        val customLabel = if (appObj.has("customLabel") && !appObj.isNull("customLabel")) appObj.optString("customLabel") else null
+                        val defaultLabel = appObj.optString("defaultLabel", "")
+                        val handle = if (serial == mySerial || (serial == 0L && mySerial == 0L)) {
+                            myHandle
+                        } else {
+                            try { userManager?.getUserForSerialNumber(serial) } catch (_: Exception) { null }
+                        }
 
-                    if (pkg.isNotBlank()) {
                         apps.add(
                             ScreenApp(
                                 uniqueKey = uniqueKey,
@@ -74,11 +125,13 @@ class ScreenRepository(
                             )
                         )
                     }
+                    result.add(HomeScreen(id = id, name = name, contextTag = contextTag, apps = apps))
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to parse single screen entry from JSON", e)
                 }
-                result.add(HomeScreen(id = id, name = name, contextTag = contextTag, apps = apps))
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Failed to parse screens JSON array", e)
         }
 
         return result.ifEmpty { fallback }
@@ -109,12 +162,7 @@ class ScreenRepository(
     }
 
     private fun saveScreens(screenList: List<HomeScreen>) {
-        try {
-            prefs.edit().putString(KEY_SCREENS, serializeScreens(screenList).toString()).apply()
-            _screens.value = screenList
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        mutateScreens { screenList }
     }
 
     /** Import: replace every screen with an already-parsed list. */
@@ -124,44 +172,49 @@ class ScreenRepository(
     }
 
     fun addScreen(name: String, contextTag: String? = null) {
-        val current = _screens.value.toMutableList()
-        current.add(
-            HomeScreen(
+        mutateScreens { current ->
+            current + HomeScreen(
                 id = UUID.randomUUID().toString(),
                 name = name.trim(),
                 contextTag = contextTag?.trim()?.ifBlank { null },
                 apps = emptyList()
             )
-        )
-        saveScreens(current)
+        }
     }
 
     fun renameScreen(screenId: String, newName: String, newContextTag: String? = null) {
-        val current = _screens.value.toMutableList()
-        val index = current.indexOfFirst { it.id == screenId }
-        if (index != -1) {
-            current[index] = current[index].copy(
-                name = newName.trim(),
-                contextTag = newContextTag?.trim()?.ifBlank { null }
-            )
-            saveScreens(current)
+        mutateScreens { current ->
+            current.map { screen ->
+                if (screen.id == screenId) {
+                    screen.copy(
+                        name = newName.trim(),
+                        contextTag = newContextTag?.trim()?.ifBlank { null }
+                    )
+                } else {
+                    screen
+                }
+            }
         }
     }
 
     fun moveScreen(fromIndex: Int, toIndex: Int) {
-        val current = _screens.value.toMutableList()
-        if (fromIndex in current.indices && toIndex in current.indices && fromIndex != toIndex) {
-            val item = current.removeAt(fromIndex)
-            current.add(toIndex, item)
-            saveScreens(current)
+        mutateScreens { current ->
+            if (fromIndex in current.indices && toIndex in current.indices && fromIndex != toIndex) {
+                val list = current.toMutableList()
+                val item = list.removeAt(fromIndex)
+                list.add(toIndex, item)
+                list
+            } else {
+                current
+            }
         }
     }
 
     fun removeScreen(screenId: String) {
-        val current = _screens.value.toMutableList()
-        if (current.size <= 1) return
-        current.removeAll { it.id == screenId }
-        saveScreens(current)
+        mutateScreens { current ->
+            if (current.size <= 1) current
+            else current.filterNot { it.id == screenId }
+        }
     }
 
     init {
@@ -175,11 +228,16 @@ class ScreenRepository(
      * result is fully deterministic. Used both for display-time sorting and (legacy) persisted sorting.
      */
     fun sortAppsByNameLength(apps: List<ScreenApp>, order: NameLengthSortOrder): List<ScreenApp> {
-        if (order == NameLengthSortOrder.OFF) return apps
+        if (order == NameLengthSortOrder.OFF || apps.size <= 1) return apps
+        val widths = apps.associateWith { measureVisualWidth(it.displayLabel) }
         val collator = java.text.Collator.getInstance().apply { strength = java.text.Collator.PRIMARY }
-        val byWidth = compareBy<ScreenApp> { measureVisualWidth(it.displayLabel) }
-        val primary = if (order == NameLengthSortOrder.ASCENDING) byWidth else byWidth.reversed()
-        return apps.sortedWith(primary.thenComparing { a, b -> collator.compare(a.displayLabel, b.displayLabel) })
+        val comparator = Comparator<ScreenApp> { a, b ->
+            val wA = widths[a] ?: 0f
+            val wB = widths[b] ?: 0f
+            val cmp = if (order == NameLengthSortOrder.ASCENDING) wA.compareTo(wB) else wB.compareTo(wA)
+            if (cmp != 0) cmp else collator.compare(a.displayLabel, b.displayLabel)
+        }
+        return apps.sortedWith(comparator)
     }
 
     fun addAppToScreen(
@@ -197,48 +255,65 @@ class ScreenRepository(
         sortOrder: NameLengthSortOrder = NameLengthSortOrder.OFF,
         customLabel: String? = null
     ) {
-        val current = _screens.value.toMutableList()
-        val index = current.indexOfFirst { it.id == screenId }
-        if (index != -1) {
-            val screen = current[index]
-            val existingKeys = screen.apps.map { it.uniqueKey }.toSet()
-            val newApps = appItems
-                .filterNot { existingKeys.contains(it.uniqueKey) }
-                .map { appItem ->
-                    ScreenApp(
-                        uniqueKey = appItem.uniqueKey,
-                        packageName = appItem.packageName,
-                        activityName = appItem.activityName,
-                        customLabel = customLabel,
-                        defaultLabel = appItem.label,
-                        userSerialNumber = appItem.userSerialNumber,
-                        userHandle = appItem.userHandle
-                    )
+        mutateScreens { current ->
+            current.map { screen ->
+                if (screen.id == screenId) {
+                    val existingKeys = screen.apps.map { it.uniqueKey }.toSet()
+                    val newApps = appItems
+                        .filterNot { existingKeys.contains(it.uniqueKey) }
+                        .map { appItem ->
+                            val resolvedCustom = customLabel?.ifBlank { null }
+                                ?: _customAppLabels.value[appItem.uniqueKey]
+                            ScreenApp(
+                                uniqueKey = appItem.uniqueKey,
+                                packageName = appItem.packageName,
+                                activityName = appItem.activityName,
+                                customLabel = resolvedCustom,
+                                defaultLabel = appItem.label,
+                                userSerialNumber = appItem.userSerialNumber,
+                                userHandle = appItem.userHandle
+                            )
+                        }
+                    if (newApps.isNotEmpty()) {
+                        val combined = screen.apps + newApps
+                        val finalApps = sortAppsByNameLength(combined, sortOrder)
+                        screen.copy(apps = finalApps)
+                    } else {
+                        screen
+                    }
+                } else {
+                    screen
                 }
-            if (newApps.isNotEmpty()) {
-                val combined = screen.apps + newApps
-                val finalApps = sortAppsByNameLength(combined, sortOrder)
-                current[index] = screen.copy(apps = finalApps)
-                saveScreens(current)
             }
         }
     }
 
     fun sortAllScreensByNameLength(sortOrder: NameLengthSortOrder) {
         if (sortOrder == NameLengthSortOrder.OFF) return
-        val current = _screens.value.map { screen ->
-            screen.copy(apps = sortAppsByNameLength(screen.apps, sortOrder))
+        mutateScreens { current ->
+            current.map { screen ->
+                screen.copy(apps = sortAppsByNameLength(screen.apps, sortOrder))
+            }
         }
-        saveScreens(current)
     }
 
     fun removeAppFromScreen(screenId: String, uniqueKey: String) {
-        val current = _screens.value.toMutableList()
-        val index = current.indexOfFirst { it.id == screenId }
-        if (index != -1) {
-            val screen = current[index]
-            current[index] = screen.copy(apps = screen.apps.filterNot { it.uniqueKey == uniqueKey })
-            saveScreens(current)
+        mutateScreens { current ->
+            current.map { screen ->
+                if (screen.id == screenId) {
+                    screen.copy(apps = screen.apps.filterNot { it.uniqueKey == uniqueKey })
+                } else {
+                    screen
+                }
+            }
+        }
+    }
+
+    fun removeAppFromAllScreens(uniqueKey: String) {
+        mutateScreens { current ->
+            current.map { screen ->
+                screen.copy(apps = screen.apps.filterNot { it.uniqueKey == uniqueKey })
+            }
         }
     }
 
@@ -247,18 +322,30 @@ class ScreenRepository(
         newLabel: String,
         sortOrder: NameLengthSortOrder = NameLengthSortOrder.OFF
     ) {
-        val current = _screens.value.map { screen ->
-            val updatedApps = screen.apps.map { app ->
-                if (app.uniqueKey == uniqueKey) {
-                    app.copy(customLabel = newLabel.ifBlank { null })
-                } else {
-                    app
-                }
+        val clean = newLabel.trim()
+        mutateCustomAppLabels { current ->
+            val updated = current.toMutableMap()
+            if (clean.isEmpty()) {
+                updated.remove(uniqueKey)
+            } else {
+                updated[uniqueKey] = clean
             }
-            val finalApps = sortAppsByNameLength(updatedApps, sortOrder)
-            screen.copy(apps = finalApps)
+            updated
         }
-        saveScreens(current)
+
+        mutateScreens { current ->
+            current.map { screen ->
+                val updatedApps = screen.apps.map { app ->
+                    if (app.uniqueKey == uniqueKey) {
+                        app.copy(customLabel = clean.ifBlank { null })
+                    } else {
+                        app
+                    }
+                }
+                val finalApps = sortAppsByNameLength(updatedApps, sortOrder)
+                screen.copy(apps = finalApps)
+            }
+        }
     }
 
     fun updateAppLabel(
@@ -267,34 +354,40 @@ class ScreenRepository(
         newLabel: String,
         sortOrder: NameLengthSortOrder = NameLengthSortOrder.OFF
     ) {
-        val current = _screens.value.toMutableList()
-        val index = current.indexOfFirst { it.id == screenId }
-        if (index != -1) {
-            val screen = current[index]
-            val updatedApps = screen.apps.map { app ->
-                if (app.uniqueKey == uniqueKey) {
-                    app.copy(customLabel = newLabel.ifBlank { null })
+        mutateScreens { current ->
+            current.map { screen ->
+                if (screen.id == screenId) {
+                    val updatedApps = screen.apps.map { app ->
+                        if (app.uniqueKey == uniqueKey) {
+                            app.copy(customLabel = newLabel.ifBlank { null })
+                        } else {
+                            app
+                        }
+                    }
+                    val finalApps = sortAppsByNameLength(updatedApps, sortOrder)
+                    screen.copy(apps = finalApps)
                 } else {
-                    app
+                    screen
                 }
             }
-            val finalApps = sortAppsByNameLength(updatedApps, sortOrder)
-            current[index] = screen.copy(apps = finalApps)
-            saveScreens(current)
         }
     }
 
     fun reorderApps(screenId: String, reordered: List<ScreenApp>) {
-        val current = _screens.value.toMutableList()
-        val index = current.indexOfFirst { it.id == screenId }
-        if (index != -1) {
-            current[index] = current[index].copy(apps = reordered)
-            saveScreens(current)
+        mutateScreens { current ->
+            current.map { screen ->
+                if (screen.id == screenId) {
+                    screen.copy(apps = reordered)
+                } else {
+                    screen
+                }
+            }
         }
     }
 
     companion object {
         private const val KEY_SCREENS = "key_screens_json"
+        private const val KEY_CUSTOM_APP_LABELS = "key_custom_app_labels_json"
 
         @Volatile
         private var instance: ScreenRepository? = null

@@ -20,12 +20,9 @@ class AppUsageTracker(context: Context? = null) {
     private val scoreStamps = ConcurrentHashMap<String, Long>()
 
     private val _recentAppKeys = MutableStateFlow<List<String>>(emptyList())
-    private val _launchCountsFlow = MutableStateFlow<Map<String, Int>>(emptyMap())
     private val _usageScoresFlow = MutableStateFlow<Map<String, Double>>(emptyMap())
 
     val recentAppKeys: StateFlow<List<String>> = _recentAppKeys.asStateFlow()
-    val recentPackages: StateFlow<List<String>> = _recentAppKeys.asStateFlow()
-    val launchCountsSnapshot: StateFlow<Map<String, Int>> = _launchCountsFlow.asStateFlow()
     val usageScoresSnapshot: StateFlow<Map<String, Double>> = _usageScoresFlow.asStateFlow()
 
     init {
@@ -45,8 +42,11 @@ class AppUsageTracker(context: Context? = null) {
         val now = System.currentTimeMillis()
         for ((k, count) in launchCounts) {
             if (!scores.containsKey(k)) {
-                scores[k] = count.toDouble()
-                scoreStamps[k] = lastUsedMap[k] ?: now
+                val stamp = lastUsedMap[k] ?: now
+                val elapsedMs = (now - stamp).coerceAtLeast(0L).toDouble()
+                val decayed = count.toDouble() * 0.5.pow(elapsedMs / SCORE_HALF_LIFE_MS)
+                scores[k] = decayed
+                scoreStamps[k] = stamp
             }
         }
     }
@@ -101,7 +101,6 @@ class AppUsageTracker(context: Context? = null) {
 
     private fun publish() {
         _recentAppKeys.value = getRecentApps(RECENT_LIMIT)
-        _launchCountsFlow.value = HashMap(launchCounts)
         val now = System.currentTimeMillis()
         _usageScoresFlow.value = scores.keys.associateWith { getDecayedScore(it, now) }
     }
@@ -121,7 +120,7 @@ class AppUsageTracker(context: Context? = null) {
             ?.putLong("${uniqueKey}_last_used", now)
             ?.putFloat("${uniqueKey}_score", newScore.toFloat())
             ?.putLong("${uniqueKey}_score_ts", now)
-            ?.apply()
+            ?.commit()
 
         publish()
     }
@@ -164,16 +163,9 @@ class AppUsageTracker(context: Context? = null) {
     }
 
     fun getUsageBonus(key: String): Double {
-        val count = getAppLaunchCount(key)
-        if (count == 0) return 0.0
-
-        val lastUsed = getLastUsed(key)
-        if (lastUsed == 0L) return minOf(count * 10.0, 50.0)
-
-        val hoursSinceUse = (System.currentTimeMillis() - lastUsed) / (1000.0 * 3600.0)
-        val recencyFactor = 0.5.pow(hoursSinceUse / 48.0)
-        val bonus = minOf(count * 15.0, 100.0) * recencyFactor + (if (hoursSinceUse < 24.0) 50.0 else 0.0)
-        return minOf(bonus, 150.0)
+        val score = getDecayedScore(key)
+        if (score <= 0.0) return 0.0
+        return (score * 15.0).coerceAtMost(150.0)
     }
 
     fun getRecentApps(limit: Int = 6): List<String> =

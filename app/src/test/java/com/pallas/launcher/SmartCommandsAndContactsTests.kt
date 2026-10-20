@@ -84,6 +84,8 @@ class SmartCommandsAndContactsTests {
     fun testInvalidAlarmReturnsNull() {
         assertNull(SmartCommandEngine.parseAlarm("al 2500"))
         assertNull(SmartCommandEngine.parseAlarm("al 1260"))
+        assertNull(SmartCommandEngine.parseAlarm("al 14pm"))
+        assertNull(SmartCommandEngine.parseAlarm("al 13am"))
         assertNull(SmartCommandEngine.parseAlarm("al abc"))
         assertNull(SmartCommandEngine.parseAlarm("notanalarm 5"))
     }
@@ -327,5 +329,32 @@ class SmartCommandsAndContactsTests {
         val searchResults = searchEngine.search("Secret")
         assertEquals(1, searchResults.size)
         assertEquals("com.app.secret", searchResults.first().app.packageName)
+    }
+
+    @Test
+    fun testStockCommandRoutingWithParameters() {
+        val eval = SmartCommandEngine.evaluateCommands("st nvda 1mo", emptyList())
+        assertEquals(1, eval.immediateResults.size)
+        val async = eval.asyncRequest
+        assertNotNull(async)
+        assertTrue(async is com.pallas.launcher.domain.search.AsyncCommandRequest.Finance)
+        assertEquals("nvda 1mo", (async as com.pallas.launcher.domain.search.AsyncCommandRequest.Finance).query)
+    }
+
+    @Test
+    fun testCommandPrefixSanitizationAndDeduplication() {
+        val json = org.json.JSONObject().apply {
+            put("commandConfigs", org.json.JSONObject().apply {
+                put("weather", org.json.JSONObject().put("enabled", true).put("prefix", "w"))
+                // Malformed prefix with spaces -> should fallback to default prefix ("st")
+                put("stock", org.json.JSONObject().put("enabled", true).put("prefix", "s t"))
+                // Duplicate prefix matching weather ("w") -> should fallback to default prefix ("wa")
+                put("wolfram", org.json.JSONObject().put("enabled", true).put("prefix", "w"))
+            })
+        }
+        val settings = com.pallas.launcher.data.repository.SettingsBackup.settingsFromJson(json)
+        assertEquals("w", settings.commandConfigs["weather"]?.prefix)
+        assertEquals("st", settings.commandConfigs["stock"]?.prefix)
+        assertEquals("wa", settings.commandConfigs["wolfram"]?.prefix)
     }
 }

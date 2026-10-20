@@ -45,6 +45,12 @@ object LiveCommandService {
     private val responseCache = LruCache<String, Pair<Long, String>>(64)
     private const val CACHE_TTL_MS = 60_000L
 
+    fun clearCache() {
+        synchronized(responseCache) {
+            responseCache.evictAll()
+        }
+    }
+
     private fun httpGetDetailed(urlStr: String, attempts: Int = 2): HttpOutcome {
         responseCache.get(urlStr)?.let { (stamp, body) ->
             if (System.currentTimeMillis() - stamp < CACHE_TTL_MS) return HttpOutcome(body, null)
@@ -84,14 +90,35 @@ object LiveCommandService {
 
     private fun httpGet(urlStr: String): String? = httpGetDetailed(urlStr).body
 
-    suspend fun fetchMarketQuote(rawQuery: String): LauncherSearchResult.RichCard = withContext(Dispatchers.IO) {
+    suspend fun fetchMarketQuote(
+        rawQuery: String,
+        range: String = "5d",
+        interval: String = "1d",
+        showSparkline: Boolean = true
+    ): LauncherSearchResult.RichCard = withContext(Dispatchers.IO) {
         val clean = rawQuery.trim()
-        val key = clean.lowercase(Locale.ROOT).replace("\\s+".toRegex(), "")
-        val resolvedSymbol = MARKET_ALIASES[key] ?: resolveYahooSymbol(clean) ?: clean.uppercase(Locale.ROOT)
+        val parts = clean.split("\\s+".toRegex())
+        val supportedRanges = setOf("1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "max")
+        val (symbolQuery, effectiveRange) = if (parts.size >= 2 && parts.last().lowercase(Locale.ROOT) in supportedRanges) {
+            Pair(parts.dropLast(1).joinToString(" "), parts.last().lowercase(Locale.ROOT))
+        } else {
+            Pair(clean, range.ifBlank { "5d" })
+        }
+
+        val effectiveInterval = when (effectiveRange) {
+            "1d" -> if (interval == "1d") "15m" else interval
+            "5d" -> interval.ifBlank { "1d" }
+            "1mo", "3mo", "6mo" -> "1d"
+            "1y", "2y", "5y", "max" -> "1wk"
+            else -> interval.ifBlank { "1d" }
+        }
+
+        val key = symbolQuery.lowercase(Locale.ROOT).replace("\\s+".toRegex(), "")
+        val resolvedSymbol = MARKET_ALIASES[key] ?: resolveYahooSymbol(symbolQuery) ?: symbolQuery.uppercase(Locale.ROOT)
         val encoded = Uri.encode(resolvedSymbol)
 
-        val primaryUrl = "https://query1.finance.yahoo.com/v8/finance/chart/$encoded?interval=1d&range=5d"
-        val fallbackUrl = "https://query2.finance.yahoo.com/v8/finance/chart/$encoded?interval=1d&range=5d"
+        val primaryUrl = "https://query1.finance.yahoo.com/v8/finance/chart/$encoded?interval=$effectiveInterval&range=$effectiveRange"
+        val fallbackUrl = "https://query2.finance.yahoo.com/v8/finance/chart/$encoded?interval=$effectiveInterval&range=$effectiveRange"
 
         val outcome = httpGetDetailed(primaryUrl, attempts = 1).let { first ->
             if (first.body != null) first else httpGetDetailed(fallbackUrl, attempts = 1)
@@ -144,8 +171,8 @@ object LiveCommandService {
                 primaryValue = if (price.isNaN()) "—" else "$curSymbol${String.format(Locale.US, "%,.2f", price)}",
                 badgeText = badge,
                 isBadgePositive = change >= 0,
-                subtitle = "$symbol • $exchange • Tap to open chart",
-                sparkline = closes,
+                subtitle = "$symbol • $exchange ($effectiveRange) • Tap to open chart",
+                sparkline = if (showSparkline) closes else emptyList(),
                 execute = { ctx ->
                     SystemActionsManager.openUrl(ctx, "https://finance.yahoo.com/quote/${Uri.encode(symbol)}")
                 }
@@ -185,24 +212,39 @@ object LiveCommandService {
             )
         }
 
-        val geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=${Uri.encode(city)}&count=1&language=en&format=json"
-        val geoOutcome = httpGetDetailed(geoUrl)
-        val loc = try {
-            JSONObject(geoOutcome.body ?: "").optJSONArray("results")?.optJSONObject(0)
-        } catch (_: Exception) {
+        val coordMatch = Regex("""^\s*([+-]?\d+(?:\.\d+)?)\s*[, ]\s*([+-]?\d+(?:\.\d+)?)\s*$""").matchEntire(city)
+        val locationData: Triple<Double, Double, String> = if (coordMatch != null) {
+            val cLat = coordMatch.groupValues[1].toDoubleOrNull()
+            val cLon = coordMatch.groupValues[2].toDoubleOrNull()
+            if (cLat != null && cLon != null && cLat in -90.0..90.0 && cLon in -180.0..180.0) {
+                Triple(cLat, cLon, "${String.format(Locale.US, "%.3f", cLat)}°, ${String.format(Locale.US, "%.3f", cLon)}°")
+            } else {
+                null
+            }
+        } else {
             null
-        } ?: return@withContext LauncherSearchResult.RichCard(
-            id = "weather_err_$city",
-            type = if (isSolarOnly) SmartCommandType.SOLAR else SmartCommandType.WEATHER,
-            title = city,
-            subtitle = if (geoOutcome.error != null) "Weather unreachable (${geoOutcome.error})" else "City not found • Check spelling"
-        )
+        } ?: run {
+            val geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=${Uri.encode(city)}&count=1&language=en&format=json"
+            val geoOutcome = httpGetDetailed(geoUrl)
+            val loc = try {
+                JSONObject(geoOutcome.body ?: "").optJSONArray("results")?.optJSONObject(0)
+            } catch (_: Exception) {
+                null
+            } ?: return@withContext LauncherSearchResult.RichCard(
+                id = "weather_err_$city",
+                type = if (isSolarOnly) SmartCommandType.SOLAR else SmartCommandType.WEATHER,
+                title = city,
+                subtitle = if (geoOutcome.error != null) "Weather unreachable (${geoOutcome.error})" else "City not found • Check spelling"
+            )
 
-        val lat = loc.optDouble("latitude")
-        val lon = loc.optDouble("longitude")
-        val name = loc.optString("name", city)
-        val country = loc.optString("country", "")
-        val placeLabel = if (country.isNotBlank()) "$name, $country" else name
+            val gLat = loc.optDouble("latitude")
+            val gLon = loc.optDouble("longitude")
+            val name = loc.optString("name", city)
+            val country = loc.optString("country", "")
+            val label = if (country.isNotBlank()) "$name, $country" else name
+            Triple(gLat, gLon, label)
+        }
+        val (lat, lon, placeLabel) = locationData
 
         val wxUrl = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
                 "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m" +
@@ -231,7 +273,7 @@ object LiveCommandService {
 
             if (isSolarOnly) {
                 LauncherSearchResult.RichCard(
-                    id = "solar_$name",
+                    id = "solar_${placeLabel.hashCode()}",
                     type = SmartCommandType.SOLAR,
                     title = placeLabel,
                     primaryValue = "↑ $sunriseRaw   ↓ $sunsetRaw",
@@ -241,7 +283,7 @@ object LiveCommandService {
                 )
             } else {
                 LauncherSearchResult.RichCard(
-                    id = "wx_$name",
+                    id = "wx_${placeLabel.hashCode()}",
                     type = SmartCommandType.WEATHER,
                     title = placeLabel,
                     primaryValue = String.format(Locale.US, "%.1f°C", temp),
@@ -252,10 +294,10 @@ object LiveCommandService {
             }
         } catch (_: Exception) {
             LauncherSearchResult.RichCard(
-                id = "weather_parse_$city",
-                type = SmartCommandType.WEATHER,
+                id = if (isSolarOnly) "solar_parse_$city" else "weather_parse_$city",
+                type = if (isSolarOnly) SmartCommandType.SOLAR else SmartCommandType.WEATHER,
                 title = placeLabel,
-                subtitle = "Unable to parse weather response"
+                subtitle = if (isSolarOnly) "Unable to parse solar response" else "Unable to parse weather response"
             )
         }
     }

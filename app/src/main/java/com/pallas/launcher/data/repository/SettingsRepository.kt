@@ -48,9 +48,9 @@ class SettingsRepository(context: Context) {
     fun replaceAll(new: LauncherSettings) = update { new.copy(wolframAppId = wolframAppId) }
 
     private fun persist(old: LauncherSettings, new: LauncherSettings) {
-        prefs.edit().putString(KEY_SETTINGS_JSON, SettingsBackup.settingsToJson(new).toString()).apply()
+        prefs.edit().putString(KEY_SETTINGS_JSON, SettingsBackup.settingsToJson(new).toString()).commit()
         if (new.wolframAppId != old.wolframAppId) {
-            secrets.edit().putString(KEY_WOLFRAM_APP_ID, new.wolframAppId).apply()
+            secrets.edit().putString(KEY_WOLFRAM_APP_ID, new.wolframAppId).commit()
         }
     }
 
@@ -59,7 +59,11 @@ class SettingsRepository(context: Context) {
         val base = if (blob != null) {
             try {
                 SettingsBackup.settingsFromJson(JSONObject(blob))
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsRepository", "Corrupt settings JSON detected. Preserving backup.", e)
+                try {
+                    prefs.edit().putString(KEY_SETTINGS_JSON + "_corrupt_backup", blob).commit()
+                } catch (_: Exception) {}
                 LauncherSettings()
             }
         } else {
@@ -145,6 +149,7 @@ class SettingsRepository(context: Context) {
             shortSwipeRightAction = gesture(KEY_SWIPE_RIGHT, "dialer"),
             swipeUpAction = gesture(KEY_SWIPE_UP, "search"),
             swipeDownAction = gesture(KEY_SWIPE_DOWN, "notifications"),
+            doubleTapAction = gesture(KEY_DOUBLE_TAP, "lock_screen"),
             customAliases = aliases,
             searchContacts = contacts,
             appFontScale = fontScale,
@@ -200,11 +205,11 @@ class SettingsRepository(context: Context) {
 
     fun hideApp(uniqueKey: String) = update { copy(hiddenApps = hiddenApps + uniqueKey) }
     fun unhideApp(uniqueKey: String) = update {
-        copy(hiddenApps = hiddenApps.filterNot { k -> k == uniqueKey || k == uniqueKey.substringBefore('/') }.toSet())
+        copy(hiddenApps = hiddenApps - uniqueKey)
     }
     fun hideFromAppList(uniqueKey: String) = update { copy(hiddenFromAppList = hiddenFromAppList + uniqueKey) }
     fun unhideFromAppList(uniqueKey: String) = update {
-        copy(hiddenFromAppList = hiddenFromAppList.filterNot { k -> k == uniqueKey || k == uniqueKey.substringBefore('/') }.toSet())
+        copy(hiddenFromAppList = hiddenFromAppList - uniqueKey)
     }
 
     /** Migrates legacy package-keyed hidden entries to uniqueKey-keyed entries */
@@ -275,6 +280,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_SWIPE_RIGHT = "key_swipe_right"
         private const val KEY_SWIPE_UP = "key_swipe_up"
         private const val KEY_SWIPE_DOWN = "key_swipe_down"
+        private const val KEY_DOUBLE_TAP = "key_double_tap"
         private const val KEY_ALIASES = "key_aliases"
         private const val KEY_SEARCH_CONTACTS = "key_search_contacts"
         private const val KEY_FONT_SCALE = "key_font_scale"

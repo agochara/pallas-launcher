@@ -61,8 +61,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -104,10 +106,10 @@ private val LETTER_ORDER: List<String> = ('A'..'Z').map { it.toString() } + "#"
 private const val HYSTERESIS_MARGIN = 0.5
 
 // Layout
-private const val RAIL_HEIGHT_FRACTION = 0.72f
+private const val RAIL_HEIGHT_FRACTION = 0.58f
 private const val LIST_TOP_FRACTION = 0.26f
 private val RAIL_MIN_SLOT = 14.dp
-private val RAIL_MAX_SLOT = 24.dp
+private val RAIL_MAX_SLOT = 18.dp
 private val RAIL_STRIP_WIDTH = 52.dp      // touch strip, flush with the screen edge (letters are centred in it)
 private val RAIL_ZONE_WIDTH = 120.dp      // room for the bubble
 private val RAIL_BOTTOM_MARGIN = 12.dp
@@ -164,7 +166,9 @@ fun AlphabeticalAppDrawer(
     onAppLongPress: (AppItem) -> Unit,
     onDismiss: () -> Unit,
     fontScale: Float = 1.0f,
-    modifier: Modifier = Modifier
+    scrubEnabled: Boolean = true,
+    modifier: Modifier = Modifier,
+    homeContent: @Composable () -> Unit = {}
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val haptic = LocalHapticFeedback.current
@@ -176,7 +180,7 @@ fun AlphabeticalAppDrawer(
     var frozenFavoriteApps by remember { mutableStateOf(favoriteApps) }
     var frozenUsageScores by remember { mutableStateOf(usageScores) }
 
-    LaunchedEffect(isOpen, installedApps) {
+    LaunchedEffect(isOpen) {
         if (isOpen || frozenInstalledApps.isEmpty()) {
             frozenInstalledApps = installedApps
             frozenFavoriteApps = favoriteApps
@@ -213,9 +217,12 @@ fun AlphabeticalAppDrawer(
                 activeFavorites.forEach { add(DrawerRow.App(it, RECENT_SLOT)) }
             }
             LETTER_ORDER.forEach { letter ->
-                val apps = buckets[letter] ?: return@forEach
+                val apps = buckets[letter]?.takeIf { it.isNotEmpty() } ?: return@forEach
                 add(DrawerRow.Header(letter, letter))
                 apps.forEach { add(DrawerRow.App(it, letter)) }
+            }
+            if (isEmpty()) {
+                add(DrawerRow.Empty)
             }
         }
     }
@@ -226,16 +233,17 @@ fun AlphabeticalAppDrawer(
         }
     }
 
-    // Fixed positions: Recent (only if there are favourites) + A-Z + #.
-    val railSlots: List<String> = remember(activeFavorites.isNotEmpty()) {
+    // Only render alphabets that actually have applications under them (plus Recent if favourites exist).
+    val railSlots: List<String> = remember(activeFavorites, buckets) {
         buildList {
             if (activeFavorites.isNotEmpty()) add(RECENT_SLOT)
-            addAll(LETTER_ORDER)
+            LETTER_ORDER.forEach { letter ->
+                if (!buckets[letter].isNullOrEmpty()) {
+                    add(letter)
+                }
+            }
         }
     }
-
-    fun hasAppsInSlot(slot: String): Boolean =
-        if (slot == RECENT_SLOT) activeFavorites.isNotEmpty() else !buckets[slot].isNullOrEmpty()
 
     /**
      * Maps a rail slot to the bucket that is actually shown/scrolled to/launched: the slot itself if it has apps,
@@ -273,7 +281,9 @@ fun AlphabeticalAppDrawer(
     val scrubListState = rememberLazyListState()
 
     LaunchedEffect(railSlots) {
-        if (activeSlot !in railSlots) activeSlot = railSlots.first()
+        if (railSlots.isNotEmpty() && activeSlot !in railSlots) {
+            activeSlot = railSlots.first()
+        }
     }
 
     // The preview list: header + the apps of the letter under the finger.
@@ -295,8 +305,9 @@ fun AlphabeticalAppDrawer(
 
     // Keep the rail highlight in sync with the full list while the user scrolls it by hand.
     val firstVisibleIndex by remember { derivedStateOf { fullListState.firstVisibleItemIndex } }
-    LaunchedEffect(firstVisibleIndex, isScrubbing, isOpen) {
-        if (isOpen && !isScrubbing) {
+    val isManualListScroll by remember { derivedStateOf { fullListState.isScrollInProgress } }
+    LaunchedEffect(firstVisibleIndex, isManualListScroll, isScrubbing, isOpen) {
+        if (isOpen && !isScrubbing && pendingScrollTo == null && isManualListScroll) {
             val slot = when (val row = fullRows.getOrNull(firstVisibleIndex)) {
                 is DrawerRow.Header -> row.slot
                 is DrawerRow.App -> row.section
@@ -326,6 +337,8 @@ fun AlphabeticalAppDrawer(
 
     // Values read from inside the long-lived pointerInput block must not be captured by value.
     val latestIsOpen by rememberUpdatedState(isOpen)
+    val latestScrubEnabled by rememberUpdatedState(scrubEnabled && edgeScrubPosition != EdgeScrubPosition.OFF)
+    val latestIsLeft by rememberUpdatedState(isLeft)
     val latestOnOpenChange by rememberUpdatedState(onOpenChange)
     val latestOnLaunch by rememberUpdatedState(onLaunchApp)
     val latestOnDismiss by rememberUpdatedState(onDismiss)
@@ -343,255 +356,358 @@ fun AlphabeticalAppDrawer(
         animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = 0.9f),
         label = "rail_touch_y"
     )
+    val railVisibilityAlpha by animateFloatAsState(
+        targetValue = if (isOpen) 1f else 0f,
+        animationSpec = if (isOpen) {
+            spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
+        } else {
+            tween(120)
+        },
+        label = "rail_visibility_alpha"
+    )
 
     val statusBarTop = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding()
     val navBarBottom = WindowInsets.navigationBarsIgnoringVisibility.asPaddingValues().calculateBottomPadding()
     val dismissDragPx = with(density) { 96.dp.toPx() }
     val slideOffsetPx = with(density) { 12.dp.roundToPx() }
+    val closedRailScrollSlopPx = with(density) { 18.dp.toPx() }
+    val railStripWidthPx = with(density) { RAIL_STRIP_WIDTH.toPx() }
+    val navBarBottomPx = with(density) { navBarBottom.toPx() }
+    val railBottomMarginPx = with(density) { RAIL_BOTTOM_MARGIN.toPx() }
+    val maxExclusionHeightPx = with(density) { 200.dp.toPx() }
 
     val launcherColors = LocalLauncherColors.current
     val contrast = LocalHomeContrastState.current
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val topInset = (maxHeight * LIST_TOP_FRACTION - statusBarTop).coerceAtLeast(72.dp)
+        val slotCount = railSlots.size.coerceAtLeast(1)
+        val maxRailHeight = (maxHeight - navBarBottom - statusBarTop - RAIL_BOTTOM_MARGIN - 16.dp)
+            .coerceAtLeast(RAIL_MIN_SLOT)
+        val idealSlot = (maxHeight * RAIL_HEIGHT_FRACTION / slotCount).coerceIn(RAIL_MIN_SLOT, RAIL_MAX_SLOT)
+        val railHeightDp = (idealSlot * slotCount).coerceAtMost(maxRailHeight)
+        val slotDp = railHeightDp / slotCount
+        val slotPx = with(density) { slotDp.toPx() }.coerceAtLeast(1f)
+        val railHeightPx = slotPx * slotCount
+        val containerWidthPx = constraints.maxWidth.toFloat()
+        val containerHeightPx = constraints.maxHeight.toFloat()
+        val railBottomPx = containerHeightPx - navBarBottomPx - railBottomMarginPx
+        val railTopPx = (railBottomPx - railHeightPx).coerceAtLeast(0f)
 
-        // ------------------------------------------------------------- list overlay
-        AnimatedVisibility(
-            visible = isOpen,
-            enter = fadeIn(spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)) +
-                    slideInVertically(
-                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
-                        initialOffsetY = { slideOffsetPx }
-                    ),
-            exit = fadeOut(tween(120))
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(launcherBackdropBrush())
-                    .padding(top = statusBarTop, bottom = navBarBottom)
-                    // tap on empty space dismisses (rows consume their own taps)
-                    .pointerInput(Unit) { detectTapGestures(onTap = { latestOnDismiss() }) }
-                    // a long horizontal drag away from the rail dismisses
-                    .pointerInput(isLeft) {
-                        var total = 0f
-                        detectHorizontalDragGestures(
-                            onDragStart = { total = 0f },
-                            onDragEnd = {
-                                if ((isLeft && total < -dismissDragPx) || (!isLeft && total > dismissDragPx)) {
-                                    latestOnDismiss()
-                                }
-                                total = 0f
-                            },
-                            onDragCancel = { total = 0f },
-                            onHorizontalDrag = { _, amount -> total += amount }
-                        )
-                    },
-                contentAlignment = Alignment.TopCenter
-            ) {
-                Crossfade(
-                    targetState = isScrubbing,
-                    animationSpec = tween(120),
-                    label = "scrub_crossfade"
-                ) { scrubbing ->
-                    DrawerList(
-                        rows = if (scrubbing) scrubRows else fullRows,
-                        state = if (scrubbing) scrubListState else fullListState,
-                        topInset = topInset,
-                        isLeft = isLeft,
-                        fontScale = fontScale,
-                        onLaunchApp = onLaunchApp,
-                        onAppLongPress = onAppLongPress
-                    )
-                }
-            }
-        }
+        val latestSlotPx by rememberUpdatedState(slotPx)
+        val latestRailHeightPx by rememberUpdatedState(railHeightPx)
+        val latestRailTopPx by rememberUpdatedState(railTopPx)
+        val latestRailBottomPx by rememberUpdatedState(railBottomPx)
+        val latestContainerWidthPx by rememberUpdatedState(containerWidthPx)
+        val latestRailStripWidthPx by rememberUpdatedState(railStripWidthPx)
 
-        // ------------------------------------------------------------- rail
-        if (edgeScrubPosition != EdgeScrubPosition.OFF && railSlots.isNotEmpty()) {
-            val slotCount = railSlots.size
-            val maxRailHeight = (maxHeight - navBarBottom - statusBarTop - RAIL_BOTTOM_MARGIN - 16.dp)
-                .coerceAtLeast(RAIL_MIN_SLOT)
-            val idealSlot = (maxHeight * RAIL_HEIGHT_FRACTION / slotCount).coerceIn(RAIL_MIN_SLOT, RAIL_MAX_SLOT)
-            val railHeightDp = (idealSlot * slotCount).coerceAtMost(maxRailHeight)
-            val slotDp = railHeightDp / slotCount
-            val slotPx = with(density) { slotDp.toPx() }.coerceAtLeast(1f)
-            val railHeightPx = slotPx * slotCount
-            val latestSlotPx by rememberUpdatedState(slotPx)
-            val latestRailHeightPx by rememberUpdatedState(railHeightPx)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    val touchSlop = viewConfiguration.touchSlop
+                    val triggerScrollPx = maxOf(touchSlop * 1.35f, closedRailScrollSlopPx)
+                    val longPressTimeoutMs = viewConfiguration.longPressTimeoutMillis
 
-            val fisheyeRadiusPx = with(density) { FISHEYE_RADIUS.toPx() }
-            val fisheyeShiftPx = with(density) { FISHEYE_SHIFT.toPx() }
-            val letterSizeSp = (slotDp.value * 0.55f).coerceIn(10f, 13f)
-            val railLetterStyle = LauncherTypography.railLetter.copy(
-                fontSize = letterSizeSp.sp,
-                lineHeight = (letterSizeSp + 3f).sp
-            )
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        val slots = latestRailSlots
+                        if (!latestScrubEnabled || slots.isEmpty()) return@awaitEachGesture
 
-            // On the open drawer the letters sit on the drawer backdrop; on the home screen they sit on the wallpaper,
-            // so they use the home contrast-aware ink instead.
-            val idleInk = if (isOpen) colorScheme.onSurface else contrast.resolveSecondaryText(launcherColors.textSecondary)
-
-            Box(
-                modifier = Modifier
-                    .align(if (isLeft) Alignment.BottomStart else Alignment.BottomEnd)
-                    .padding(bottom = navBarBottom + RAIL_BOTTOM_MARGIN)
-                    .width(RAIL_ZONE_WIDTH)
-                    .height(railHeightDp),
-                contentAlignment = if (isLeft) Alignment.CenterStart else Alignment.CenterEnd
-            ) {
-                // Floating bubble
-                if (isScrubbing || animatedBulge > 0.02f) {
-                    val bubbleRadiusPx = with(density) { (BUBBLE_SIZE / 2).toPx() }
-                    Box(
-                        modifier = Modifier
-                            .align(if (isLeft) Alignment.TopStart else Alignment.TopEnd)
-                            .padding(
-                                start = if (isLeft) BUBBLE_EDGE_PADDING else 0.dp,
-                                end = if (!isLeft) BUBBLE_EDGE_PADDING else 0.dp
-                            )
-                            .offset {
-                                val bubbleY = (animatedTouchY - bubbleRadiusPx)
-                                    .coerceIn(0f, (railHeightPx - bubbleRadiusPx * 2f).coerceAtLeast(0f))
-                                val bulge = fisheyeShiftPx * animatedBulge
-                                IntOffset(
-                                    x = if (isLeft) bulge.roundToInt() else -bulge.roundToInt(),
-                                    y = bubbleY.roundToInt()
-                                )
-                            }
-                            .graphicsLayer { alpha = animatedBulge.coerceIn(0f, 1f) }
-                            .clip(CircleShape)
-                            .background(colorScheme.primary)
-                            .size(BUBBLE_SIZE),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (activeSlot == RECENT_SLOT) {
-                            Icon(
-                                imageVector = Icons.Default.Schedule,
-                                contentDescription = null,
-                                tint = colorScheme.onPrimary,
-                                modifier = Modifier.size(24.dp)
-                            )
+                        val startX = down.position.x
+                        val startY = down.position.y
+                        val inHoriz = if (latestIsLeft) {
+                            startX in 0f..latestRailStripWidthPx
                         } else {
-                            Text(
-                                text = activeSlot,
-                                style = LauncherTypography.drawerRow.copy(
-                                    fontSize = 22.sp,
-                                    lineHeight = 26.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = colorScheme.onPrimary
-                            )
+                            startX in (latestContainerWidthPx - latestRailStripWidthPx)..latestContainerWidthPx
                         }
-                    }
-                }
+                        val inVert = startY in latestRailTopPx..latestRailBottomPx
+                        if (!inHoriz || !inVert) return@awaitEachGesture
 
-                // Touch strip + letters. Same height as the visible rail, so y / slotPx is exactly the slot index.
-                Box(
-                    modifier = Modifier
-                        .width(RAIL_STRIP_WIDTH)
-                        .fillMaxHeight()
-                        // Note: Android honours at most ~200dp of exclusion per edge.
-                        .systemGestureExclusion()
-                        .pointerInput(Unit) {
-                            awaitEachGesture {
-                                val down = awaitFirstDown()
-                                down.consume()
+                        fun slotFor(localY: Float): String {
+                            val currentSlots = latestRailSlots
+                            if (currentSlots.isEmpty()) return "A"
+                            val idx = (localY / latestSlotPx).toInt().coerceIn(0, currentSlots.lastIndex)
+                            return currentSlots[idx]
+                        }
 
-                                fun slotFor(y: Float): String {
-                                    val slots = latestRailSlots
-                                    val idx = (y / latestSlotPx).toInt().coerceIn(0, slots.lastIndex)
-                                    return slots[idx]
-                                }
-
-                                fun update(y: Float) {
-                                    touchYPx = y.coerceIn(0f, latestRailHeightPx)
-                                    val slot = slotFor(y)
-                                    if (slot != activeSlot) {
-                                        activeSlot = slot
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    }
-                                }
-
-                                isScrubbing = true
-                                if (!latestIsOpen) latestOnOpenChange(true)
-                                activeSlot = slotFor(down.position.y)
-                                touchYPx = down.position.y.coerceIn(0f, latestRailHeightPx)
+                        fun update(globalY: Float) {
+                            val localY = (globalY - latestRailTopPx).coerceIn(0f, latestRailHeightPx)
+                            touchYPx = localY
+                            val slot = slotFor(localY)
+                            if (slot != activeSlot) {
+                                activeSlot = slot
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                        }
 
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull() ?: break
-                                    change.consume()
-                                    if (!change.pressed) break
-                                    update(change.position.y)
+                        var scrubActive = false
+
+                        if (latestIsOpen) {
+                            // Drawer is already open & rail is visible: respond immediately to touch/scrub.
+                            down.consume()
+                            scrubActive = true
+                            isScrubbing = true
+                            val localStartY = (startY - latestRailTopPx).coerceIn(0f, latestRailHeightPx)
+                            activeSlot = slotFor(localStartY)
+                            touchYPx = localStartY
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        } else {
+                            // On home screens, rail is invisible: require a deliberate vertical scroll before
+                            // opening the drawer or consuming pointer events, so simple touches/taps, long-presses,
+                            // and horizontal swipes on the home screen pass through naturally.
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (!latestScrubEnabled) break
+                                val change = event.changes.firstOrNull { it.id == down.id }
+                                    ?: event.changes.firstOrNull()
+                                    ?: break
+                                if (!change.pressed) break
+
+                                val dx = change.position.x - startX
+                                val dy = change.position.y - startY
+
+                                if (abs(dx) > touchSlop && abs(dx) > abs(dy)) {
+                                    // Horizontal swipe on home screen: let GestureContainer handle it.
+                                    break
                                 }
 
-                                isScrubbing = false
-                                val slot = activeSlot
+                                if (change.uptimeMillis - down.uptimeMillis >= longPressTimeoutMs &&
+                                    abs(dx) < touchSlop && abs(dy) < touchSlop
+                                ) {
+                                    // Long press on home screen: let AppListView / GestureContainer handle it.
+                                    break
+                                }
 
-                                if (latestReleaseAction == EdgeScrubReleaseAction.LAUNCH_TOP) {
-                                    val top = latestAppsFor(slot).firstOrNull()
-                                    if (top != null) {
-                                        latestOnLaunch(top)
-                                        latestOnOpenChange(false)
-                                    } else {
-                                        pendingScrollTo = slot
-                                    }
+                                if (abs(dy) >= triggerScrollPx && abs(dy) > abs(dx)) {
+                                    change.consume()
+                                    scrubActive = true
+                                    isScrubbing = true
+                                    latestOnOpenChange(true)
+                                    val localY = (change.position.y - latestRailTopPx).coerceIn(0f, latestRailHeightPx)
+                                    activeSlot = slotFor(localY)
+                                    touchYPx = localY
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    break
+                                }
+                            }
+                        }
+
+                        if (scrubActive) {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id }
+                                    ?: event.changes.firstOrNull()
+                                    ?: break
+                                change.consume()
+                                if (!change.pressed) break
+                                update(change.position.y)
+                            }
+
+                            isScrubbing = false
+                            val slot = activeSlot
+
+                            if (latestReleaseAction == EdgeScrubReleaseAction.LAUNCH_TOP) {
+                                val top = latestAppsFor(slot).firstOrNull()
+                                if (top != null) {
+                                    latestOnLaunch(top)
+                                    latestOnOpenChange(false)
                                 } else {
                                     pendingScrollTo = slot
                                 }
+                            } else {
+                                pendingScrollTo = slot
                             }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        railSlots.forEachIndexed { index, slot ->
-                            val slotCenterPx = (index + 0.5f) * slotPx
-                            val isCurrent = (isOpen || isScrubbing) && slot == activeSlot
-                            val populated = hasAppsInSlot(slot)
-                            val ink = when {
-                                isCurrent -> colorScheme.primary
-                                populated -> idleInk.copy(alpha = if (isScrubbing) 0.85f else 0.72f)
-                                else -> idleInk.copy(alpha = 0.30f)
-                            }
+                        }
+                    }
+                }
+        ) {
+            homeContent()
 
-                            Box(
+            // ------------------------------------------------------------- list overlay
+            AnimatedVisibility(
+                visible = isOpen,
+                enter = fadeIn(spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)) +
+                        slideInVertically(
+                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
+                            initialOffsetY = { slideOffsetPx }
+                        ),
+                exit = fadeOut(tween(120))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(launcherBackdropBrush())
+                        .padding(top = statusBarTop, bottom = navBarBottom)
+                        // tap on empty space dismisses (rows consume their own taps)
+                        .pointerInput(Unit) { detectTapGestures(onTap = { latestOnDismiss() }) }
+                        // a long horizontal drag away from the rail dismisses
+                        .pointerInput(isLeft) {
+                            var total = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { total = 0f },
+                                onDragEnd = {
+                                    if ((isLeft && total < -dismissDragPx) || (!isLeft && total > dismissDragPx)) {
+                                        latestOnDismiss()
+                                    }
+                                    total = 0f
+                                },
+                                onDragCancel = { total = 0f },
+                                onHorizontalDrag = { _, amount -> total += amount }
+                            )
+                        },
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Crossfade(
+                        targetState = isScrubbing,
+                        animationSpec = tween(120),
+                        label = "scrub_crossfade"
+                    ) { scrubbing ->
+                        DrawerList(
+                            rows = if (scrubbing) scrubRows else fullRows,
+                            state = if (scrubbing) scrubListState else fullListState,
+                            topInset = topInset,
+                            isLeft = isLeft,
+                            fontScale = fontScale,
+                            onLaunchApp = onLaunchApp,
+                            onAppLongPress = onAppLongPress
+                        )
+                    }
+                }
+            }
+
+            // ------------------------------------------------------------- rail (visual only; invisible on screens)
+            if (edgeScrubPosition != EdgeScrubPosition.OFF && railSlots.isNotEmpty()) {
+                val fisheyeRadiusPx = with(density) { FISHEYE_RADIUS.toPx() }
+                val fisheyeShiftPx = with(density) { FISHEYE_SHIFT.toPx() }
+                val letterSizeSp = (slotDp.value * 0.55f).coerceIn(10f, 13f)
+                val railLetterStyle = LauncherTypography.railLetter.copy(
+                    fontSize = letterSizeSp.sp,
+                    lineHeight = (letterSizeSp + 3f).sp
+                )
+
+                val idleInk = if (isOpen) colorScheme.onSurface else contrast.resolveSecondaryText(launcherColors.textSecondary)
+
+                Box(
+                    modifier = Modifier
+                        .align(if (isLeft) Alignment.BottomStart else Alignment.BottomEnd)
+                        .padding(bottom = navBarBottom + RAIL_BOTTOM_MARGIN)
+                        .width(RAIL_ZONE_WIDTH)
+                        .height(railHeightDp),
+                    contentAlignment = if (isLeft) Alignment.CenterStart else Alignment.CenterEnd
+                ) {
+                    // Floating bubble (only shown when drawer is open and scrubbing)
+                    if (isOpen && (isScrubbing || animatedBulge > 0.02f)) {
+                        val bubbleRadiusPx = with(density) { (BUBBLE_SIZE / 2).toPx() }
+                        Box(
+                            modifier = Modifier
+                                .align(if (isLeft) Alignment.TopStart else Alignment.TopEnd)
+                                .padding(
+                                    start = if (isLeft) BUBBLE_EDGE_PADDING else 0.dp,
+                                    end = if (!isLeft) BUBBLE_EDGE_PADDING else 0.dp
+                                )
+                                .offset {
+                                    val bubbleY = (animatedTouchY - bubbleRadiusPx)
+                                        .coerceIn(0f, (railHeightPx - bubbleRadiusPx * 2f).coerceAtLeast(0f))
+                                    val bulge = fisheyeShiftPx * animatedBulge
+                                    IntOffset(
+                                        x = if (isLeft) bulge.roundToInt() else -bulge.roundToInt(),
+                                        y = bubbleY.roundToInt()
+                                    )
+                                }
+                                .graphicsLayer { alpha = (animatedBulge * railVisibilityAlpha).coerceIn(0f, 1f) }
+                                .clip(CircleShape)
+                                .background(colorScheme.primary)
+                                .size(BUBBLE_SIZE),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (activeSlot == RECENT_SLOT) {
+                                Icon(
+                                    imageVector = Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    tint = colorScheme.onPrimary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            } else {
+                                Text(
+                                    text = activeSlot,
+                                    style = LauncherTypography.drawerRow.copy(
+                                        fontSize = 22.sp,
+                                        lineHeight = 26.sp,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = colorScheme.onPrimary
+                                )
+                            }
+                        }
+                    }
+
+                    // Exclusion strip + letters (visible only when drawer is open).
+                    Box(
+                        modifier = Modifier
+                            .width(RAIL_STRIP_WIDTH)
+                            .fillMaxHeight()
+                            .systemGestureExclusion { layoutCoordinates ->
+                                Rect(
+                                    left = 0f,
+                                    top = 0f,
+                                    right = layoutCoordinates.size.width.toFloat(),
+                                    bottom = minOf(layoutCoordinates.size.height.toFloat(), maxExclusionHeightPx)
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (railVisibilityAlpha > 0.001f) {
+                            Column(
                                 modifier = Modifier
-                                    .height(slotDp)
-                                    .fillMaxWidth()
-                                    .graphicsLayer {
-                                        val dist = abs(slotCenterPx - animatedTouchY)
-                                        val f = if (dist < fisheyeRadiusPx) {
-                                            ((cos((dist / fisheyeRadiusPx) * Math.PI.toFloat()) + 1f) / 2f) * animatedBulge
-                                        } else 0f
-                                        translationX = if (isLeft) f * fisheyeShiftPx else -(f * fisheyeShiftPx)
-                                        val s = 1f + f * FISHEYE_SCALE
-                                        scaleX = s
-                                        scaleY = s
-                                    },
-                                contentAlignment = Alignment.Center
+                                    .fillMaxSize()
+                                    .graphicsLayer { alpha = railVisibilityAlpha },
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                if (slot == RECENT_SLOT) {
-                                    Icon(
-                                        imageVector = Icons.Default.Schedule,
-                                        contentDescription = null,
-                                        tint = ink,
-                                        modifier = Modifier.size((letterSizeSp + 1f).dp)
-                                    )
-                                } else {
-                                    Text(
-                                        text = slot,
-                                        style = if (isCurrent) {
-                                            railLetterStyle.copy(fontWeight = FontWeight.Bold)
+                                railSlots.forEachIndexed { index, slot ->
+                                    val slotCenterPx = (index + 0.5f) * slotPx
+                                    val isCurrent = (isOpen || isScrubbing) && slot == activeSlot
+                                    val ink = if (isCurrent) {
+                                        colorScheme.primary
+                                    } else {
+                                        idleInk.copy(alpha = if (isScrubbing) 0.85f else 0.72f)
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .height(slotDp)
+                                            .fillMaxWidth()
+                                            .graphicsLayer {
+                                                val dist = abs(slotCenterPx - animatedTouchY)
+                                                val f = if (dist < fisheyeRadiusPx) {
+                                                    ((cos((dist / fisheyeRadiusPx) * Math.PI.toFloat()) + 1f) / 2f) * animatedBulge
+                                                } else 0f
+                                                translationX = if (isLeft) f * fisheyeShiftPx else -(f * fisheyeShiftPx)
+                                                val s = 1f + f * FISHEYE_SCALE
+                                                scaleX = s
+                                                scaleY = s
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (slot == RECENT_SLOT) {
+                                            Icon(
+                                                imageVector = Icons.Default.Schedule,
+                                                contentDescription = null,
+                                                tint = ink,
+                                                modifier = Modifier.size((letterSizeSp + 1f).dp)
+                                            )
                                         } else {
-                                            railLetterStyle
-                                        },
-                                        color = ink
-                                    )
+                                            Text(
+                                                text = slot,
+                                                style = if (isCurrent) {
+                                                    railLetterStyle.copy(fontWeight = FontWeight.Bold)
+                                                } else {
+                                                    railLetterStyle
+                                                },
+                                                color = ink
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

@@ -10,12 +10,14 @@ import android.os.Process
 import android.os.UserHandle
 import android.os.UserManager
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.ui.apps.AppIconHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -124,19 +126,31 @@ class AppRepository(
     fun reloadApps(clearAllIcons: Boolean = true) {
         reloadJob?.cancel()
         reloadJob = scope.launch(Dispatchers.IO) {
-            if (clearAllIcons) AppIconHelper.clear()
-            val apps = queryInstalledApps()
-            _rawInstalledApps.value = apps
-            _isLoaded.value = true
+            var delayMs = 500L
+            for (attempt in 1..3) {
+                val apps = queryInstalledApps()
+                if (apps != null) {
+                    if (clearAllIcons) AppIconHelper.clear()
+                    _rawInstalledApps.value = apps
+                    _isLoaded.value = true
+                    return@launch
+                }
+                if (_rawInstalledApps.value.isNotEmpty()) {
+                    Log.w("AppRepository", "queryInstalledApps failed on attempt $attempt; retaining existing app list.")
+                    return@launch
+                }
+                delay(delayMs)
+                delayMs *= 2
+            }
         }
     }
 
-    private suspend fun queryInstalledApps(): List<AppItem> = withContext(Dispatchers.IO) {
+    private suspend fun queryInstalledApps(): List<AppItem>? = withContext(Dispatchers.IO) {
         val appList = mutableListOf<AppItem>()
         val collator = Collator.getInstance(Locale.getDefault())
 
         try {
-            val profiles = userManager.userProfiles
+            val profiles = userManager.userProfiles ?: listOf(Process.myUserHandle())
             for (profile in profiles) {
                 val activityList = launcherApps.getActivityList(null, profile)
                 for (activity in activityList) {
@@ -157,11 +171,11 @@ class AppRepository(
                 }
             }
             appList.sortWith(compareBy(collator) { it.label })
+            appList
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("AppRepository", "Error querying installed apps", e)
+            null
         }
-
-        appList
     }
 
     fun launchApp(packageName: String, activityName: String?, userHandle: UserHandle? = null) {
@@ -190,20 +204,30 @@ class AppRepository(
     }
 
     fun openAppInfo(packageName: String, activityName: String? = null, userHandle: UserHandle? = null) {
-        try {
-            val targetUser = userHandle ?: Process.myUserHandle()
-            val component = if (activityName != null) ComponentName(packageName, activityName) else ComponentName(packageName, "")
-            launcherApps.startAppDetailsActivity(component, targetUser, null, null)
-        } catch (e: Exception) {
+        val targetUser = userHandle ?: Process.myUserHandle()
+        val component = if (!activityName.isNullOrBlank()) {
+            ComponentName(packageName, activityName)
+        } else {
+            launcherApps.getActivityList(packageName, targetUser).firstOrNull()?.componentName
+        }
+
+        if (component != null) {
             try {
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = Uri.parse("package:$packageName")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(intent)
-            } catch (ex: Exception) {
-                Toast.makeText(context, "Cannot open app info", Toast.LENGTH_SHORT).show()
+                launcherApps.startAppDetailsActivity(component, targetUser, null, null)
+                return
+            } catch (_: Exception) {
+                // Fall through to system settings intent
             }
+        }
+
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (ex: Exception) {
+            Toast.makeText(context, "Cannot open app info", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -241,5 +265,12 @@ class AppRepository(
                     settingsRepository = SettingsRepository.getInstance(appContext)
                 ).also { instance = it }
             }
+
+        fun resetInstance() {
+            synchronized(this) {
+                instance?.unregister()
+                instance = null
+            }
+        }
     }
 }

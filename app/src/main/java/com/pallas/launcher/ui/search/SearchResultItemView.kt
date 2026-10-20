@@ -6,8 +6,10 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,17 +26,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Functions
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.WbSunny
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +55,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -62,25 +64,28 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 import com.pallas.launcher.domain.search.LauncherSearchResult
 import com.pallas.launcher.domain.search.MathStatsEngine
 import com.pallas.launcher.domain.search.SmartCommandType
 import com.pallas.launcher.ui.apps.AppIconImage
 import com.pallas.launcher.ui.theme.LauncherTypography
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SearchResultItemView(
     result: LauncherSearchResult,
     isFirst: Boolean,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colorScheme = MaterialTheme.colorScheme
-    var showMathManual by remember { mutableStateOf(false) }
-
-    if (showMathManual) {
-        MathManualDialog(onDismiss = { showMathManual = false })
-    }
+    val haptic = LocalHapticFeedback.current
 
     val titleStyle = if (isFirst) {
         LauncherTypography.searchResultTitle.copy(fontWeight = FontWeight.SemiBold)
@@ -91,16 +96,28 @@ fun SearchResultItemView(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 3.dp)
+            .padding(horizontal = 16.dp, vertical = if (result is LauncherSearchResult.RichCard) 5.dp else 3.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(if (isFirst) colorScheme.surfaceContainerHigh.copy(alpha = 0.78f) else Color.Transparent)
-            .clickable(
+            .background(
+                when {
+                    result is LauncherSearchResult.RichCard -> if (isFirst) colorScheme.surfaceContainerHigh else colorScheme.surfaceContainerLow
+                    isFirst -> colorScheme.surfaceContainerHigh.copy(alpha = 0.78f)
+                    else -> Color.Transparent
+                }
+            )
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = onClick
+                onClick = onClick,
+                onLongClick = onLongClick?.let {
+                    {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        it()
+                    }
+                }
             )
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 14.dp, vertical = if (result is LauncherSearchResult.RichCard) 12.dp else 10.dp),
+        verticalAlignment = if (result is LauncherSearchResult.RichCard) Alignment.Top else Alignment.CenterVertically
     ) {
         when (result) {
             is LauncherSearchResult.App -> {
@@ -158,16 +175,6 @@ fun SearchResultItemView(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                if (result.hasInfoManual) {
-                    IconButton(onClick = { showMathManual = true }, modifier = Modifier.size(30.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = "Distribution Manual",
-                            tint = colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
             }
 
             is LauncherSearchResult.RichCard -> {
@@ -195,7 +202,7 @@ fun SearchResultItemView(
                         )
                     }
                 } else {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -205,8 +212,7 @@ fun SearchResultItemView(
                                 text = result.title,
                                 style = MaterialTheme.typography.labelLarge,
                                 color = colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                                softWrap = true,
                                 modifier = Modifier.weight(1f, fill = false)
                             )
                             result.badgeText?.let { badge ->
@@ -236,22 +242,37 @@ fun SearchResultItemView(
                         }
 
                         if (result.primaryValue.isNotEmpty()) {
+                            val isMathOrWolfram = result.type == SmartCommandType.MATH_STATS || result.type == SmartCommandType.WOLFRAM
+                            val isLongOutput = isMathOrWolfram && result.primaryValue.length > 36
+                            val valueStyle = when {
+                                isLongOutput -> MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    lineHeight = 22.sp,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                )
+                                isMathOrWolfram -> MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                    lineHeight = 28.sp
+                                )
+                                else -> LauncherTypography.cardValue.copy(lineHeight = 28.sp)
+                            }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)
                             ) {
                                 Text(
                                     text = result.primaryValue,
-                                    style = LauncherTypography.cardValue,
+                                    style = valueStyle,
                                     color = colorScheme.onSurface,
+                                    softWrap = true,
                                     modifier = Modifier.weight(1f)
                                 )
                                 if (result.sparkline.size >= 2) {
                                     SparklineCanvas(
                                         points = result.sparkline,
                                         isPositive = result.isBadgePositive != false,
-                                        modifier = Modifier.width(64.dp).height(22.dp).padding(start = 8.dp)
+                                        modifier = Modifier.width(64.dp).height(24.dp).padding(start = 8.dp)
                                     )
                                 }
                             }
@@ -260,21 +281,9 @@ fun SearchResultItemView(
                         if (result.subtitle.isNotEmpty()) {
                             Text(
                                 text = result.subtitle,
-                                style = LauncherTypography.searchResultSubtitle,
+                                style = LauncherTypography.searchResultSubtitle.copy(lineHeight = 18.sp),
                                 color = colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    if (result.hasInfoManual) {
-                        IconButton(onClick = { showMathManual = true }, modifier = Modifier.size(30.dp)) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = "Distribution Manual",
-                                tint = colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
+                                softWrap = true
                             )
                         }
                     }
@@ -315,7 +324,7 @@ private fun CommandLeadingIcon(type: SmartCommandType) {
         SmartCommandType.CALL -> Icons.Default.Call
         SmartCommandType.WEB_SEARCH -> Icons.Default.Search
         SmartCommandType.MATH_STATS, SmartCommandType.WOLFRAM -> Icons.Default.Functions
-        SmartCommandType.FINANCE -> Icons.Default.ShowChart
+        SmartCommandType.FINANCE -> Icons.AutoMirrored.Filled.ShowChart
         SmartCommandType.WEATHER -> Icons.Default.Cloud
         SmartCommandType.SOLAR -> Icons.Default.WbSunny
         SmartCommandType.SETTINGS -> Icons.Default.Settings
@@ -359,76 +368,4 @@ private fun SparklineCanvas(
     }
 }
 
-@Composable
-private fun MathManualDialog(onDismiss: () -> Unit) {
-    val colorScheme = MaterialTheme.colorScheme
-    val signatureStyle = MaterialTheme.typography.bodyMedium.copy(
-        fontSize = 13.sp,
-        lineHeight = 18.sp,
-        fontWeight = FontWeight.SemiBold
-    )
-    val descriptionStyle = LauncherTypography.searchResultSubtitle
-    val exampleStyle = MaterialTheme.typography.bodySmall
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(26.dp),
-        containerColor = colorScheme.surfaceContainerHigh,
-        title = {
-            Text(
-                text = "Probability, Fat Tails & Math",
-                style = LauncherTypography.modalTitle,
-                color = colorScheme.onSurface
-            )
-        },
-        text = {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.height(380.dp)) {
-                items(MathStatsEngine.MANUAL_ENTRIES) { entry ->
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = colorScheme.surfaceContainer
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = entry.signature,
-                                    style = signatureStyle,
-                                    color = colorScheme.primary
-                                )
-                                Text(
-                                    text = entry.family,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Text(
-                                text = entry.description,
-                                style = descriptionStyle,
-                                color = colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Example: ${entry.example}",
-                                style = exampleStyle,
-                                color = colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(
-                    text = "Got it",
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
-                )
-            }
-        }
-    )
-}

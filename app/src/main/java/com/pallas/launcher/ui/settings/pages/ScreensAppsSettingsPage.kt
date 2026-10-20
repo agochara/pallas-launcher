@@ -542,9 +542,10 @@ fun ScreensAppsSettingsPage(
                             .padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        settings.hiddenFromAppList.forEach { pkg ->
-                            val appItem = installedApps.find { it.packageName == pkg }
-                            val appLabel = appItem?.label ?: pkg
+                        settings.hiddenFromAppList.forEach { key ->
+                            val appItem = installedApps.find { it.uniqueKey == key }
+                                ?: installedApps.find { it.packageName == key }
+                            val appLabel = appItem?.label ?: key
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -563,9 +564,9 @@ fun ScreensAppsSettingsPage(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    if (appLabel != pkg) {
+                                    if (appLabel != key) {
                                         Text(
-                                            text = pkg,
+                                            text = key,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = colorScheme.onSurfaceVariant,
                                             maxLines = 1,
@@ -573,7 +574,7 @@ fun ScreensAppsSettingsPage(
                                         )
                                     }
                                 }
-                                TextButton(onClick = { viewModel.unhideFromAppList(pkg) }) {
+                                TextButton(onClick = { viewModel.unhideFromAppList(key) }) {
                                     Text("Unhide", color = colorScheme.primary)
                                 }
                             }
@@ -599,9 +600,10 @@ fun ScreensAppsSettingsPage(
                             .padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        settings.hiddenApps.forEach { pkg ->
-                            val appItem = installedApps.find { it.packageName == pkg }
-                            val appLabel = appItem?.label ?: pkg
+                        settings.hiddenApps.forEach { key ->
+                            val appItem = installedApps.find { it.uniqueKey == key }
+                                ?: installedApps.find { it.packageName == key }
+                            val appLabel = appItem?.label ?: key
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -620,9 +622,9 @@ fun ScreensAppsSettingsPage(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    if (appLabel != pkg) {
+                                    if (appLabel != key) {
                                         Text(
-                                            text = pkg,
+                                            text = key,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = colorScheme.onSurfaceVariant,
                                             maxLines = 1,
@@ -630,7 +632,7 @@ fun ScreensAppsSettingsPage(
                                         )
                                     }
                                 }
-                                TextButton(onClick = { viewModel.unhideApp(pkg) }) {
+                                TextButton(onClick = { viewModel.unhideApp(key) }) {
                                     Text("Unhide", color = colorScheme.primary)
                                 }
                             }

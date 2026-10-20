@@ -4,6 +4,7 @@ import com.pallas.launcher.data.repository.AppUsageTracker
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.model.EdgeScrubPosition
 import com.pallas.launcher.domain.model.EdgeScrubReleaseAction
+import com.pallas.launcher.domain.model.GestureAction
 import com.pallas.launcher.domain.model.LauncherSettings
 import com.pallas.launcher.domain.search.AppSearchIndex
 import com.pallas.launcher.domain.search.AppSearchResult
@@ -251,5 +252,56 @@ class SearchTests {
         assertEquals(EdgeScrubReleaseAction.STAY_OPEN, defaultSettings.edgeScrubReleaseAction)
         assertFalse(defaultSettings.showWallpaperScrim)
         assertFalse(defaultSettings.hideStatusBar)
+        assertEquals("London", LauncherSettings.DEFAULT_WEATHER_CITY)
+        assertEquals("London", defaultSettings.defaultWeatherCity)
+    }
+
+    @Test
+    fun testDiacriticsHighlightingAndMapping() {
+        val app = createApp("com.isbank", "İş Bankası")
+        val index = AppSearchIndex()
+        index.buildIndex(listOf(app), emptyMap())
+
+        val results = index.search("is")
+        assertFalse("Should match 'İş Bankası' with query 'is'", results.isEmpty())
+        val match = results.first()
+        assertFalse("Should have matched ranges for highlighting", match.matchedRanges.isEmpty())
+        match.matchedRanges.forEach { range ->
+            assertTrue("Range start within rawLabel bounds", range.first in 0 until app.label.length)
+            assertTrue("Range end within rawLabel bounds", range.last in 0 until app.label.length)
+            val highlightedSub = app.label.substring(range.first, range.last + 1)
+            assertEquals("İş", highlightedSub)
+        }
+    }
+
+    @Test
+    fun testGestureActionUniqueKeyAndFallback() {
+        val actionWithProfile = GestureAction.LaunchApp("com.slack/com.slack.ui.MainActivity#10")
+        assertEquals("com.slack", actionWithProfile.packageName)
+        assertEquals("com.slack/com.slack.ui.MainActivity#10", actionWithProfile.uniqueKey)
+
+        val serialized = GestureAction.toString(actionWithProfile)
+        assertEquals("app:com.slack/com.slack.ui.MainActivity#10", serialized)
+
+        val deserialized = GestureAction.fromString(serialized)
+        assertEquals(actionWithProfile, deserialized)
+
+        // Legacy format without slash or profile
+        val legacy = GestureAction.fromString("app:com.twitter.android") as GestureAction.LaunchApp
+        assertEquals(GestureAction.LaunchApp("com.twitter.android"), legacy)
+        assertEquals("com.twitter.android", legacy.packageName)
+    }
+
+    @Test
+    fun testRepeatedWordsAcronymMatching() {
+        val match = SearchRanking.evaluateMatch("ccc", "Candy Crush Candy")
+        assertTrue(match.score > 0.0)
+        assertEquals(3, match.matchedRanges.size)
+        // First range is start of first "Candy"
+        assertEquals(0..0, match.matchedRanges[0])
+        // Second range is start of "Crush"
+        assertEquals(6..6, match.matchedRanges[1])
+        // Third range is start of second "Candy" (offset 12)
+        assertEquals(12..12, match.matchedRanges[2])
     }
 }

@@ -56,17 +56,15 @@ fun AppPickerSheet(
     var selectedKeys by remember { mutableStateOf(emptySet<String>()) }
     val colorScheme = MaterialTheme.colorScheme
 
-    val filteredApps = remember(installedApps, filterQuery) {
+    val searchIndex = remember(installedApps) {
+        com.pallas.launcher.domain.search.AppSearchIndex().apply { buildIndex(installedApps, emptyMap()) }
+    }
+
+    val filteredApps = remember(searchIndex, filterQuery, installedApps) {
         if (filterQuery.isBlank()) {
             installedApps.sortedBy { it.label.lowercase() }
         } else {
-            installedApps
-                .mapNotNull { app ->
-                    val score = SearchRanking.calculateMatchScore(filterQuery, app.label)
-                    if (score > 0.0) Pair(app, score) else null
-                }
-                .sortedByDescending { it.second }
-                .map { it.first }
+            searchIndex.search(filterQuery, limit = 500).map { it.app }
         }
     }
 

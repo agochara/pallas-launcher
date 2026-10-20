@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -47,8 +48,15 @@ enum class AppIconShape {
 }
 
 object AppIconHelper {
-    private const val CACHE_CAPACITY = 400
-    private val iconCache = LruCache<String, ImageBitmap>(CACHE_CAPACITY)
+    private val maxMemoryBytes = Runtime.getRuntime().maxMemory()
+    private val cacheSizeBytes = (maxMemoryBytes / 8).toInt().coerceIn(16 * 1024 * 1024, 64 * 1024 * 1024)
+    private val iconCache = object : LruCache<String, ImageBitmap>(cacheSizeBytes) {
+        override fun sizeOf(key: String, value: ImageBitmap): Int {
+            return value.width * value.height * 4
+        }
+    }
+    private val _generation = kotlinx.coroutines.flow.MutableStateFlow(0)
+    val generation: kotlinx.coroutines.flow.StateFlow<Int> = _generation
 
     fun cacheKey(
         packageName: String,
@@ -68,13 +76,21 @@ object AppIconHelper {
     fun invalidate(packageName: String) {
         val snapshot = iconCache.snapshot()
         for (key in snapshot.keys) {
-            if (key.startsWith(packageName) || key.contains("/$packageName") || key.contains("$packageName/")) {
+            val isMatch = key == packageName ||
+                key.startsWith("$packageName/") ||
+                key.startsWith("$packageName#") ||
+                key.startsWith("$packageName:")
+            if (isMatch) {
                 iconCache.remove(key)
             }
         }
+        _generation.value++
     }
 
-    fun clear() = iconCache.evictAll()
+    fun clear() {
+        iconCache.evictAll()
+        _generation.value++
+    }
 
     fun getAppIcon(
         context: Context,
@@ -198,9 +214,13 @@ private fun rememberAppIcon(
     shape: AppIconShape = AppIconShape.CIRCLE
 ): ImageBitmap? {
     val context = LocalContext.current.applicationContext
+    val gen = AppIconHelper.generation.collectAsState().value
     val key = AppIconHelper.cacheKey(packageName, activityName, userSerialNumber, uniqueKey, iconStyle, shape)
-    val state = produceState(initialValue = AppIconHelper.peek(key), key1 = key) {
-        if (value == null) {
+    val state = produceState(initialValue = AppIconHelper.peek(key), key1 = key, key2 = gen) {
+        val cached = AppIconHelper.peek(key)
+        if (cached != null) {
+            value = cached
+        } else {
             value = withContext(Dispatchers.Default) {
                 AppIconHelper.getAppIcon(
                     context, packageName, activityName, userHandle, userSerialNumber, uniqueKey,

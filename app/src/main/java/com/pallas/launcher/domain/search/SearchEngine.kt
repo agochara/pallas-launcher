@@ -41,16 +41,13 @@ class SearchEngine(
         if (trimmed.isEmpty()) return emptyList<LauncherSearchResult>() to null
 
         val eval = SmartCommandEngine.evaluateCommands(trimmed, contacts, webSearch, configs, defaultWeatherCity)
-        val appResults = searchIndex.search(trimmed).map { LauncherSearchResult.App(it) }
+        val mathCfg = configs["math"] ?: CommandConfig.DEFAULTS.getValue("math")
+        val isMathPrefix = mathCfg.enabled && mathCfg.prefix.isNotEmpty() && trimmed.startsWith(mathCfg.prefix)
+        val appResults = if (isMathPrefix) emptyList() else searchIndex.search(trimmed).map { LauncherSearchResult.App(it) }
 
         val trailing = eval.immediateResults.filter { it.id == SETTINGS_COMMAND_ID }
         val commandRows = eval.immediateResults.filter { it.id != SETTINGS_COMMAND_ID }
 
         return (commandRows + appResults + trailing) to eval.asyncRequest
-    }
-
-    private companion object {
-        /** Typing these in full is an unambiguous command, even though they equal a configured prefix. */
-        val FULL_WORD_COMMANDS = setOf("weather", "sunrise", "sunset", "alarm", "timer", "call", "query", "settings", "pallas")
     }
 }

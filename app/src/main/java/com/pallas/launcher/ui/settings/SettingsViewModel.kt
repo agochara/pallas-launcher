@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 
@@ -28,32 +29,38 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val context = application.applicationContext
     val settingsRepository = SettingsRepository.getInstance(context)
     val screenRepository = ScreenRepository.getInstance(context)
-    val appRepository = AppRepository(context, viewModelScope, settingsRepository)
-    private val uiPrefs = context.getSharedPreferences("ui_state", Context.MODE_PRIVATE)
+    val appRepository = AppRepository.getInstance(context)
+    private val uiPrefs = context.getSharedPreferences("pallas_ui_state", Context.MODE_PRIVATE)
 
     val settings: StateFlow<LauncherSettings> = settingsRepository.settings
     val screens: StateFlow<List<HomeScreen>> = screenRepository.screens
     val installedApps: StateFlow<List<AppItem>> = appRepository.installedApps
+    val allInstalledApps: StateFlow<List<AppItem>> = appRepository.rawInstalledApps
 
     val currentScreenIndex: StateFlow<Int> = combine(
         screenRepository.screens,
         settingsRepository.settings
     ) { screenList, _ ->
-        val id = uiPrefs.getString("current_screen_id", null)
+        val id = withContext(Dispatchers.IO) { uiPrefs.getString("current_screen_id", null) }
         val idx = if (id != null) screenList.indexOfFirst { it.id == id } else 0
         if (screenList.isEmpty()) 0 else idx.coerceIn(0, screenList.size - 1)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+    }.flowOn(Dispatchers.IO)
+     .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     fun setScreenIndex(index: Int) {
         val id = screens.value.getOrNull(index)?.id ?: return
         uiPrefs.edit().putString("current_screen_id", id).apply()
     }
 
+    fun reloadAppsAndIcons() {
+        appRepository.reloadApps(clearAllIcons = true)
+    }
+
     fun updateSettings(transform: LauncherSettings.() -> LauncherSettings) =
         settingsRepository.update(transform)
 
-    fun addScreen(name: String, contextTag: String?) = screenRepository.addScreen(name, contextTag)
-    fun renameScreen(id: String, name: String, contextTag: String?) = screenRepository.renameScreen(id, name, contextTag)
+    fun addScreen(name: String, contextTag: String?) = screenRepository.addScreen(name, contextTag?.trim()?.ifBlank { null })
+    fun renameScreen(id: String, name: String, contextTag: String?) = screenRepository.renameScreen(id, name, contextTag?.trim()?.ifBlank { null })
     fun removeScreen(id: String) = screenRepository.removeScreen(id)
     fun moveScreen(fromIndex: Int, toIndex: Int) = screenRepository.moveScreen(fromIndex, toIndex)
     fun reorderApps(screenId: String, apps: List<ScreenApp>) = screenRepository.reorderApps(screenId, apps)
@@ -75,10 +82,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun removeSearchContact(id: String) = settingsRepository.removeSearchContact(id)
 
     fun updateCommandConfig(id: String, enabled: Boolean, prefix: String) {
+        val cleanPrefix = prefix.trim()
+        if (cleanPrefix.isEmpty() || cleanPrefix.contains("\\s".toRegex())) return
         updateSettings {
+            val conflict = commandConfigs.values.firstOrNull { it.id != id && it.enabled && it.prefix.equals(cleanPrefix, ignoreCase = true) }
+            if (conflict != null && enabled) return@updateSettings this
             val existing = commandConfigs[id] ?: CommandConfig.DEFAULTS[id]
-                ?: CommandConfig(id, id, enabled, prefix)
-            copy(commandConfigs = commandConfigs + (id to existing.copy(enabled = enabled, prefix = prefix.trim())))
+                ?: CommandConfig(id, id, enabled, cleanPrefix)
+            copy(commandConfigs = commandConfigs + (id to existing.copy(enabled = enabled, prefix = cleanPrefix)))
         }
     }
 
@@ -105,10 +116,5 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 ImportOutcome.Success(parsed.screenCount, parsed.appCount)
             }
         }
-    }
-
-    override fun onCleared() {
-        appRepository.unregister()
-        super.onCleared()
     }
 }

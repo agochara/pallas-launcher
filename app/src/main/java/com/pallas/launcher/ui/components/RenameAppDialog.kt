@@ -48,10 +48,8 @@ fun RenameAppDialog(
 
     val submit = {
         val trimmed = newLabelText.trim()
-        if (trimmed.isNotBlank()) {
-            onConfirm(trimmed)
-            onDismiss()
-        }
+        onConfirm(trimmed)
+        onDismiss()
     }
 
     AlertDialog(
@@ -73,6 +71,7 @@ fun RenameAppDialog(
                     onValueChange = { newLabelText = it },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = colorScheme.onSurface),
                     singleLine = true,
+                    placeholder = { Text("Leave empty to restore default", color = colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { submit() }),
                     modifier = Modifier
@@ -88,8 +87,18 @@ fun RenameAppDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(text = "Cancel", color = colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
+            androidx.compose.foundation.layout.Row {
+                if (initialLabel.isNotBlank()) {
+                    TextButton(onClick = {
+                        onConfirm("")
+                        onDismiss()
+                    }) {
+                        Text(text = "Reset", color = colorScheme.error, style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(text = "Cancel", color = colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
     )

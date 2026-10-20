@@ -1,9 +1,11 @@
 package com.pallas.launcher.ui.settings.pages
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -16,22 +18,27 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContactPhone
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -43,17 +50,24 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Locale
 import com.pallas.launcher.domain.model.CommandConfig
 import com.pallas.launcher.domain.model.WebSearchEngine
 import com.pallas.launcher.platform.BrowserHelper
 import com.pallas.launcher.platform.BrowserInfo
+import com.pallas.launcher.platform.LocationHelper
 import com.pallas.launcher.ui.settings.SettingsViewModel
 import com.pallas.launcher.ui.settings.components.SettingsGroup
 import com.pallas.launcher.ui.settings.components.SettingsLargeTopBar
@@ -67,7 +81,8 @@ import com.pallas.launcher.ui.settings.components.SettingsSwitchRow
 fun SearchSettingsPage(
     viewModel: SettingsViewModel,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToMathManual: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
@@ -107,6 +122,45 @@ fun SearchSettingsPage(
     var wolframInput by remember { mutableStateOf("") }
     var editingConfig by remember { mutableStateOf<CommandConfig?>(null) }
     var editPrefixInput by remember { mutableStateOf("") }
+    var showStockSettingsDialog by remember { mutableStateOf(false) }
+    var selectedStockRange by remember(settings.stockDefaultRange) { mutableStateOf(settings.stockDefaultRange) }
+    var selectedStockSparkline by remember(settings.stockShowSparkline) { mutableStateOf(settings.stockShowSparkline) }
+
+    val scope = rememberCoroutineScope()
+    var isLocating by remember { mutableStateOf(false) }
+
+    fun fetchCurrentLocation() {
+        scope.launch {
+            isLocating = true
+            try {
+                val loc = LocationHelper.getCurrentLocation(context)
+                if (loc != null) {
+                    val city = LocationHelper.reverseGeocode(context, loc.first, loc.second)
+                    val targetLocation = if (!city.isNullOrBlank()) city else String.format(Locale.US, "%.4f, %.4f", loc.first, loc.second)
+                    weatherCityInput = targetLocation
+                    viewModel.updateSettings { copy(defaultWeatherCity = targetLocation) }
+                    Toast.makeText(context, "Location set: $targetLocation", Toast.LENGTH_SHORT).show()
+                    showWeatherCityDialog = false
+                } else {
+                    Toast.makeText(context, "Could not acquire current location", Toast.LENGTH_SHORT).show()
+                }
+            } finally {
+                isLocating = false
+            }
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (granted) {
+            fetchCurrentLocation()
+        } else {
+            Toast.makeText(context, "Location permission is required to detect coordinates", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Contacts state
     var showAddContactDialog by remember { mutableStateOf(false) }
@@ -120,26 +174,32 @@ fun SearchSettingsPage(
         if (result.resultCode == Activity.RESULT_OK) {
             val contactUri: Uri? = result.data?.data
             if (contactUri != null) {
-                try {
-                    val projection = arrayOf(
-                        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-                        ContactsContract.CommonDataKinds.Phone.NUMBER
-                    )
-                    context.contentResolver.query(contactUri, projection, null, null, null)?.use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            val nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
-                            val numIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
-                            val name = if (nameIdx != -1) cursor.getString(nameIdx) ?: "" else ""
-                            val number = if (numIdx != -1) cursor.getString(numIdx) ?: "" else ""
-                            contactName = name
-                            contactNumber = number
-                            // Suggest first word or name as initial nickname
-                            contactNickname = name.trim().split("\\s+".toRegex()).firstOrNull() ?: name
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val projection = arrayOf(
+                            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                            ContactsContract.CommonDataKinds.Phone.NUMBER
+                        )
+                        context.contentResolver.query(contactUri, projection, null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                                val numIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                                val name = if (nameIdx != -1) cursor.getString(nameIdx) ?: "" else ""
+                                val number = if (numIdx != -1) cursor.getString(numIdx) ?: "" else ""
+                                withContext(Dispatchers.Main) {
+                                    contactName = name
+                                    contactNumber = number
+                                    // Suggest first word or name as initial nickname
+                                    contactNickname = name.trim().split("\\s+".toRegex()).firstOrNull() ?: name
+                                    showAddContactDialog = true
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {
+                        withContext(Dispatchers.Main) {
                             showAddContactDialog = true
                         }
                     }
-                } catch (_: Exception) {
-                    showAddContactDialog = true
                 }
             }
         }
@@ -205,8 +265,8 @@ fun SearchSettingsPage(
                 SettingsSectionHeader("Smart Commands")
                 SettingsGroup {
                     SettingsNavRow(
-                        title = "Default Weather & Solar City",
-                        subtitle = settings.defaultWeatherCity.ifBlank { "Not set (pass city inline)" },
+                        title = "Default Weather & Solar Location",
+                        subtitle = settings.defaultWeatherCity.ifBlank { "Not set (pass city or lat,lon inline)" },
                         onClick = {
                             weatherCityInput = settings.defaultWeatherCity
                             showWeatherCityDialog = true
@@ -218,6 +278,20 @@ fun SearchSettingsPage(
                         onClick = {
                             wolframInput = settings.wolframAppId
                             showWolframDialog = true
+                        }
+                    )
+                    SettingsNavRow(
+                        title = "Math & Computational Engine Guide",
+                        subtitle = "Wolfram-inspired functions, statistics & distributions",
+                        onClick = onNavigateToMathManual
+                    )
+                    SettingsNavRow(
+                        title = "Markets & Finance Defaults",
+                        subtitle = "Range: ${settings.stockDefaultRange} • Sparkline: ${if (settings.stockShowSparkline) "Enabled" else "Disabled"}",
+                        onClick = {
+                            selectedStockRange = settings.stockDefaultRange
+                            selectedStockSparkline = settings.stockShowSparkline
+                            showStockSettingsDialog = true
                         }
                     )
 
@@ -642,23 +716,82 @@ fun SearchSettingsPage(
         )
     }
 
-    // Default Weather & Solar City Dialog
+    // Default Weather & Solar Location Dialog
     if (showWeatherCityDialog) {
         AlertDialog(
             onDismissRequest = { showWeatherCityDialog = false },
             shape = RoundedCornerShape(24.dp),
             containerColor = colorScheme.surfaceContainerHigh,
-            title = { Text(text = "Default Weather & Solar City", style = MaterialTheme.typography.titleLarge) },
+            title = { Text(text = "Default Weather Location", style = MaterialTheme.typography.titleLarge) },
             text = {
-                OutlinedTextField(
-                    value = weatherCityInput,
-                    onValueChange = { weatherCityInput = it },
-                    label = { Text("City name (e.g. London)") },
-                    supportingText = { Text("Used when typing weather or solar command without a city") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = weatherCityInput,
+                        onValueChange = { weatherCityInput = it },
+                        label = { Text("City or Lat, Lon (e.g. London)") },
+                        supportingText = { Text("Used for weather/solar commands when no city is given") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        trailingIcon = {
+                            IconButton(
+                                onClick = {
+                                    if (LocationHelper.hasLocationPermission(context)) {
+                                        fetchCurrentLocation()
+                                    } else {
+                                        locationPermissionLauncher.launch(
+                                            arrayOf(
+                                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                                Manifest.permission.ACCESS_COARSE_LOCATION
+                                            )
+                                        )
+                                    }
+                                },
+                                enabled = !isLocating
+                            ) {
+                                if (isLocating) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                        color = colorScheme.primary
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.MyLocation,
+                                        contentDescription = "Get Current Location",
+                                        tint = colorScheme.primary
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedButton(
+                        onClick = {
+                            if (LocationHelper.hasLocationPermission(context)) {
+                                fetchCurrentLocation()
+                            } else {
+                                locationPermissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    )
+                                )
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLocating
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (isLocating) "Detecting location…" else "Get Current Location")
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -712,6 +845,19 @@ fun SearchSettingsPage(
 
     // Edit Command Prefix Dialog
     editingConfig?.let { targetCfg ->
+        val candidate = editPrefixInput.trim()
+        val isEmpty = candidate.isEmpty()
+        val hasWhitespace = candidate.any { it.isWhitespace() }
+        val conflict = settings.commandConfigs.values.firstOrNull {
+            it.id != targetCfg.id && it.enabled && it.prefix.equals(candidate, ignoreCase = true)
+        }
+        val errorMessage = when {
+            isEmpty -> "Prefix cannot be blank"
+            hasWhitespace -> "Prefix cannot contain spaces"
+            conflict != null -> "Prefix '$candidate' is already used by ${conflict.label}"
+            else -> null
+        }
+
         AlertDialog(
             onDismissRequest = { editingConfig = null },
             shape = RoundedCornerShape(24.dp),
@@ -722,25 +868,140 @@ fun SearchSettingsPage(
                     value = editPrefixInput,
                     onValueChange = { editPrefixInput = it },
                     label = { Text("Command prefix") },
-                    supportingText = { Text("Default was '${CommandConfig.DEFAULTS[targetCfg.id]?.prefix ?: targetCfg.prefix}'") },
+                    isError = errorMessage != null,
+                    supportingText = {
+                        Text(
+                            text = errorMessage ?: "Default was '${CommandConfig.DEFAULTS[targetCfg.id]?.prefix ?: targetCfg.prefix}'",
+                            color = if (errorMessage != null) colorScheme.error else colorScheme.onSurfaceVariant
+                        )
+                    },
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val newPrefix = editPrefixInput.trim()
-                    if (newPrefix.isNotEmpty()) {
-                        viewModel.updateCommandConfig(targetCfg.id, targetCfg.enabled, newPrefix)
-                        editingConfig = null
+                TextButton(
+                    enabled = errorMessage == null,
+                    onClick = {
+                        if (errorMessage == null) {
+                            viewModel.updateCommandConfig(targetCfg.id, targetCfg.enabled, candidate)
+                            editingConfig = null
+                        }
                     }
+                ) {
+                    Text(
+                        text = "Save",
+                        color = if (errorMessage == null) colorScheme.primary else colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingConfig = null }) {
+                    Text("Cancel", color = colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
+
+    // Markets & Finance Defaults Dialog
+    if (showStockSettingsDialog) {
+        val ranges = listOf(
+            "1d" to "1 Day",
+            "5d" to "5 Days (Default)",
+            "1mo" to "1 Month",
+            "3mo" to "3 Months",
+            "6mo" to "6 Months",
+            "1y" to "1 Year",
+            "5y" to "5 Years",
+            "max" to "All Time"
+        )
+        AlertDialog(
+            onDismissRequest = { showStockSettingsDialog = false },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = colorScheme.surfaceContainerHigh,
+            title = { Text(text = "Markets & Finance Defaults", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Default time range and sparkline display for the 'st' market command.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Default Chart Range",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        ranges.forEach { (rangeKey, rangeLabel) ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { selectedStockRange = rangeKey }
+                                    .padding(vertical = 4.dp, horizontal = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = selectedStockRange == rangeKey,
+                                    onClick = { selectedStockRange = rangeKey }
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = rangeLabel,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { selectedStockSparkline = !selectedStockSparkline }
+                            .padding(vertical = 4.dp, horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Show Sparkline",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Render trend graph in market cards",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = selectedStockSparkline,
+                            onCheckedChange = { selectedStockSparkline = it }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateSettings {
+                        copy(
+                            stockDefaultRange = selectedStockRange,
+                            stockShowSparkline = selectedStockSparkline
+                        )
+                    }
+                    showStockSettingsDialog = false
                 }) {
                     Text("Save", color = colorScheme.primary, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { editingConfig = null }) {
+                TextButton(onClick = { showStockSettingsDialog = false }) {
                     Text("Cancel", color = colorScheme.onSurfaceVariant)
                 }
             }

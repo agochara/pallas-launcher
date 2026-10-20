@@ -46,7 +46,8 @@ enum class SettingsSubpage {
     SCREENS_APPS,
     GESTURES,
     SEARCH,
-    BACKUP
+    BACKUP,
+    MATH_MANUAL
 }
 
 @Composable
@@ -70,7 +71,9 @@ fun SettingsScreen(
                 backSwipeEdge = backEvent.swipeEdge
                 animProgress.snapTo(backEvent.progress)
             }
-            if (currentSubpage != SettingsSubpage.MAIN) {
+            if (currentSubpage == SettingsSubpage.MATH_MANUAL) {
+                currentSubpage = SettingsSubpage.SEARCH
+            } else if (currentSubpage != SettingsSubpage.MAIN) {
                 currentSubpage = SettingsSubpage.MAIN
             } else {
                 onDismiss()
@@ -162,7 +165,13 @@ fun SettingsScreen(
                 SettingsSubpage.SEARCH -> {
                     SearchSettingsPage(
                         viewModel = viewModel,
-                        onBack = { currentSubpage = SettingsSubpage.MAIN }
+                        onBack = { currentSubpage = SettingsSubpage.MAIN },
+                        onNavigateToMathManual = { currentSubpage = SettingsSubpage.MATH_MANUAL }
+                    )
+                }
+                SettingsSubpage.MATH_MANUAL -> {
+                    com.pallas.launcher.ui.settings.pages.MathManualPage(
+                        onBack = { currentSubpage = SettingsSubpage.SEARCH }
                     )
                 }
             }

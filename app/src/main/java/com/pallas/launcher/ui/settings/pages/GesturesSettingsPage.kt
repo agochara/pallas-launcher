@@ -64,8 +64,10 @@ fun GesturesSettingsPage(
             is GestureAction.OpenNotifications -> "Open Notifications"
             is GestureAction.OpenQuickSettings -> "Open Quick Settings"
             is GestureAction.OpenAppDrawer -> "Open App List"
+            is GestureAction.LockScreen -> "Lock Screen"
             is GestureAction.LaunchApp -> {
-                val app = installedApps.find { it.packageName == action.packageName }
+                val app = installedApps.find { it.uniqueKey == action.uniqueKey }
+                    ?: installedApps.find { it.packageName == action.packageName }
                 if (app != null) "Launch ${app.label}" else "Launch App (${action.packageName})"
             }
             is GestureAction.None -> "None"
@@ -79,6 +81,7 @@ fun GesturesSettingsPage(
         GestureAction.OpenQuickSettings to "Open Quick Settings",
         GestureAction.OpenCamera to "Open Camera",
         GestureAction.OpenDialer to "Open Dialer",
+        GestureAction.LockScreen to "Lock Screen",
         GestureAction.None to "None"
     )
 
@@ -148,6 +151,21 @@ fun GesturesSettingsPage(
                             currentSelectedAction = settings.shortSwipeRightAction
                             onActionSelectedCallback = { action ->
                                 viewModel.updateSettings { copy(shortSwipeRightAction = action) }
+                            }
+                        }
+                    )
+                }
+
+                SettingsSectionHeader("Tap Gestures")
+                SettingsGroup {
+                    SettingsNavRow(
+                        title = "Double Tap Empty Space",
+                        subtitle = getActionLabel(settings.doubleTapAction),
+                        onClick = {
+                            pickerGestureTitle = "Double Tap Action"
+                            currentSelectedAction = settings.doubleTapAction
+                            onActionSelectedCallback = { action ->
+                                viewModel.updateSettings { copy(doubleTapAction = action) }
                             }
                         }
                     )
@@ -266,7 +284,7 @@ fun GesturesSettingsPage(
         AppPickerSheet(
             installedApps = installedApps,
             onAppSelected = { app ->
-                callback(GestureAction.LaunchApp(app.packageName))
+                callback(GestureAction.LaunchApp(app.uniqueKey))
                 isAppPickerOpenForGesture = null
             },
             onDismiss = { isAppPickerOpenForGesture = null }

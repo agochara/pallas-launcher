@@ -21,8 +21,6 @@ import java.lang.reflect.Method
 
 object SystemActionsManager {
 
-    private var isTorchOn = false
-
     fun openClock(context: Context) {
         val intents = listOf(
             Intent(AlarmClock.ACTION_SHOW_ALARMS),
@@ -74,16 +72,6 @@ object SystemActionsManager {
         }
     }
 
-    fun dialPhoneNumber(context: Context, phoneNumber: String) {
-        val intent = Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", phoneNumber, null))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        try {
-            context.startActivity(intent)
-        } catch (_: Exception) {
-            Toast.makeText(context, "Could not dial number", Toast.LENGTH_SHORT).show()
-        }
-    }
-
     fun callPhoneNumber(context: Context, phoneNumber: String) {
         val uri = Uri.fromParts("tel", phoneNumber, null)
         val intent = Intent(Intent.ACTION_DIAL, uri)
@@ -116,19 +104,50 @@ object SystemActionsManager {
         }
     }
 
+    private var isTorchOn = false
+    private var torchCallbackRegistered = false
+
+    private fun registerTorchCallbackIfNeeded(context: Context, cameraManager: CameraManager) {
+        if (!torchCallbackRegistered) {
+            try {
+                cameraManager.registerTorchCallback(context.mainExecutor, object : CameraManager.TorchCallback() {
+                    override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
+                        isTorchOn = enabled
+                    }
+
+                    override fun onTorchModeUnavailable(cameraId: String) {
+                        isTorchOn = false
+                    }
+                })
+                torchCallbackRegistered = true
+            } catch (_: Exception) {}
+        }
+    }
+
     fun toggleTorch(context: Context): Boolean {
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return false
+        registerTorchCallbackIfNeeded(context, cameraManager)
         return try {
             val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
                 cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
             } ?: return false
-            isTorchOn = !isTorchOn
-            cameraManager.setTorchMode(cameraId, isTorchOn)
-            Toast.makeText(context, if (isTorchOn) "Flashlight ON" else "Flashlight OFF", Toast.LENGTH_SHORT).show()
+            val newState = !isTorchOn
+            cameraManager.setTorchMode(cameraId, newState)
+            isTorchOn = newState
+            Toast.makeText(context, if (newState) "Flashlight ON" else "Flashlight OFF", Toast.LENGTH_SHORT).show()
             true
         } catch (e: Exception) {
             Toast.makeText(context, "Flashlight unavailable", Toast.LENGTH_SHORT).show()
             false
+        }
+    }
+
+    fun lockScreen(context: Context) {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? android.app.admin.DevicePolicyManager
+        try {
+            dpm?.lockNow()
+        } catch (_: SecurityException) {
+            Toast.makeText(context, "Device admin permission required to lock screen", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -139,7 +158,7 @@ object SystemActionsManager {
             val expand: Method = statusBarManager.getMethod("expandNotificationsPanel")
             expand.invoke(statusBarService)
         } catch (e: Exception) {
-            Toast.makeText(context, "Couldn't open notifications", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Notification panel expansion not supported on this device", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -177,10 +196,6 @@ object SystemActionsManager {
         } catch (_: Exception) {
             Toast.makeText(context, "Timer app not available", Toast.LENGTH_SHORT).show()
         }
-    }
-
-    fun setTimer(context: Context, durationMinutes: Int) {
-        setTimer(context, durationMinutes * 60, null)
     }
 
     fun setAlarm(context: Context, hour: Int, minute: Int) {

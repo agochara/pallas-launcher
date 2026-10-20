@@ -54,9 +54,9 @@ sealed interface LauncherOverlay {
     data object Search : LauncherOverlay
     data object Settings : LauncherOverlay
     data object AppPicker : LauncherOverlay
-    data class AppOptions(val app: ScreenApp) : LauncherOverlay
-    data class SetAlias(val app: ScreenApp) : LauncherOverlay
-    data class RenameApp(val app: ScreenApp) : LauncherOverlay
+    data class AppOptions(val app: ScreenApp, val returnToDrawer: Boolean = false) : LauncherOverlay
+    data class SetAlias(val app: ScreenApp, val returnToDrawer: Boolean = false) : LauncherOverlay
+    data class RenameApp(val app: ScreenApp, val returnToDrawer: Boolean = false) : LauncherOverlay
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -70,10 +70,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val uiPrefs = context.getSharedPreferences("pallas_ui_state", Context.MODE_PRIVATE)
 
-    val installedApps: StateFlow<List<AppItem>> = appRepository.installedApps
-    val isAppsLoaded: StateFlow<Boolean> = appRepository.isLoaded
     val screens: StateFlow<List<HomeScreen>> = screenRepository.screens
+    val customAppLabels: StateFlow<Map<String, String>> = screenRepository.customAppLabels
     val settings: StateFlow<LauncherSettings> = settingsRepository.settings
+
+    val installedApps: StateFlow<List<AppItem>> =
+        combine(appRepository.installedApps, screenRepository.customAppLabels, screenRepository.screens) { apps, globalCustom, screenList ->
+            val screenCustom = screenList.flatMap { it.apps }
+                .filter { !it.customLabel.isNullOrBlank() }
+                .associate { it.uniqueKey to it.customLabel!! }
+            val mergedCustom = screenCustom + globalCustom
+            if (mergedCustom.isEmpty()) {
+                apps
+            } else {
+                apps.map { app ->
+                    val custom = mergedCustom[app.uniqueKey]
+                    if (!custom.isNullOrBlank()) app.copy(label = custom) else app
+                }
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, appRepository.installedApps.value)
+
+    val isAppsLoaded: StateFlow<Boolean> = appRepository.isLoaded
 
     val favoriteApps: StateFlow<List<AppItem>> =
         combine(installedApps, appUsageTracker.recentAppKeys, settings) { apps, recents, s ->
@@ -88,7 +105,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .toList()
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val appUsageCounts: StateFlow<Map<String, Int>> = appUsageTracker.launchCountsSnapshot
     val appUsageScores: StateFlow<Map<String, Double>> = appUsageTracker.usageScoresSnapshot
 
     val displayScreens: StateFlow<List<HomeScreen>> =
@@ -222,11 +238,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            combine(installedApps, settings, screens) { apps, s, screenList ->
-                val custom = screenList.flatMap { it.apps }
+            combine(appRepository.installedApps, settings, screens, customAppLabels) { apps, s, screenList, globalCustom ->
+                val screenCustom = screenList.flatMap { it.apps }
                     .filter { !it.customLabel.isNullOrBlank() }
                     .associate { it.uniqueKey to it.customLabel!! }
-                Triple(apps, s.customAliases, custom)
+                Triple(apps, s.customAliases, screenCustom + globalCustom)
             }.distinctUntilChanged().collect { (apps, aliases, custom) -> searchEngine.updateIndex(apps, aliases, custom) }
         }
 
@@ -322,21 +338,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun showAppOptions(app: ScreenApp) {
-        _overlay.value = LauncherOverlay.AppOptions(app)
+    fun showAppOptions(app: ScreenApp, returnToDrawer: Boolean = _overlay.value is LauncherOverlay.Drawer) {
+        _overlay.value = LauncherOverlay.AppOptions(app, returnToDrawer = returnToDrawer)
     }
 
     fun openSetAlias(app: ScreenApp) {
-        _overlay.value = LauncherOverlay.SetAlias(app)
+        val fromDrawer = (_overlay.value as? LauncherOverlay.AppOptions)?.returnToDrawer
+            ?: (_overlay.value is LauncherOverlay.Drawer)
+        _overlay.value = LauncherOverlay.SetAlias(app, returnToDrawer = fromDrawer)
     }
 
     fun openRenameApp(app: ScreenApp) {
-        _overlay.value = LauncherOverlay.RenameApp(app)
+        val fromDrawer = (_overlay.value as? LauncherOverlay.AppOptions)?.returnToDrawer
+            ?: (_overlay.value is LauncherOverlay.Drawer)
+        _overlay.value = LauncherOverlay.RenameApp(app, returnToDrawer = fromDrawer)
     }
 
-    fun dismissAppOptions() {
-        if (_overlay.value is LauncherOverlay.AppOptions) {
-            _overlay.value = LauncherOverlay.None
+    fun dismissAppOptions(forceCloseAll: Boolean = false) {
+        val current = _overlay.value
+        if (current is LauncherOverlay.AppOptions) {
+            _overlay.value = if (!forceCloseAll && current.returnToDrawer) LauncherOverlay.Drawer else LauncherOverlay.None
         }
     }
 
@@ -345,13 +366,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun dismissOverlay() {
-        if (_overlay.value is LauncherOverlay.Search) {
-            liveCommandJob?.cancel()
-            liveCommandJob = null
-            _searchQuery.value = ""
-            _searchResults.value = emptyList()
+        when (val current = _overlay.value) {
+            is LauncherOverlay.Search -> {
+                liveCommandJob?.cancel()
+                liveCommandJob = null
+                _searchQuery.value = ""
+                _searchResults.value = emptyList()
+                _overlay.value = LauncherOverlay.None
+            }
+            is LauncherOverlay.AppOptions -> {
+                _overlay.value = if (current.returnToDrawer) LauncherOverlay.Drawer else LauncherOverlay.None
+            }
+            is LauncherOverlay.SetAlias -> {
+                _overlay.value = if (current.returnToDrawer) LauncherOverlay.Drawer else LauncherOverlay.None
+            }
+            is LauncherOverlay.RenameApp -> {
+                _overlay.value = if (current.returnToDrawer) LauncherOverlay.Drawer else LauncherOverlay.None
+            }
+            else -> {
+                _overlay.value = LauncherOverlay.None
+            }
         }
-        _overlay.value = LauncherOverlay.None
     }
 
     fun onSearchQueryChanged(query: String) {
@@ -393,7 +428,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun resolveLiveCommand(request: AsyncCommandRequest): LauncherSearchResult.RichCard =
         when (request) {
-            is AsyncCommandRequest.Finance -> LiveCommandService.fetchMarketQuote(request.query)
+            is AsyncCommandRequest.Finance -> LiveCommandService.fetchMarketQuote(
+                rawQuery = request.query,
+                range = settings.value.stockDefaultRange,
+                interval = settings.value.stockDefaultInterval,
+                showSparkline = settings.value.stockShowSparkline
+            )
             is AsyncCommandRequest.Weather -> LiveCommandService.fetchWeatherOrSolar(request.city, request.isSolarOnly)
             is AsyncCommandRequest.Wolfram -> LiveCommandService.fetchWolframShortAnswer(request.query, settings.value.wolframAppId)
         }
@@ -429,7 +469,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             is GestureAction.OpenQuickSettings -> SystemActionsManager.expandQuickSettings(context)
             is GestureAction.OpenCamera -> SystemActionsManager.openCamera(context)
             is GestureAction.OpenDialer -> SystemActionsManager.openDialer(context)
-            is GestureAction.LaunchApp -> launchApp(action.packageName)
+            is GestureAction.LockScreen -> SystemActionsManager.lockScreen(context)
+            is GestureAction.LaunchApp -> {
+                val app = installedApps.value.firstOrNull { it.uniqueKey == action.uniqueKey }
+                    ?: installedApps.value.firstOrNull { it.packageName == action.packageName }
+                if (app != null) {
+                    launchApp(app.packageName, app.activityName, app.userHandle)
+                } else {
+                    launchApp(action.packageName)
+                }
+            }
             is GestureAction.None -> Unit
         }
     }
@@ -449,8 +498,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     (activityName == null || it.activityName == activityName) &&
                     (it.userHandle == null || it.userHandle == targetUser)
         }
-        val key = app?.uniqueKey ?: "$packageName/${activityName.orEmpty()}#0"
-        appUsageTracker.recordAppLaunch(key)
+        app?.uniqueKey?.let { appUsageTracker.recordAppLaunch(it) }
         appRepository.launchApp(packageName, activityName, targetUser)
     }
 
@@ -464,6 +512,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun launchShortcut(packageName: String, shortcutId: String, userHandle: UserHandle? = null) {
         val handle = userHandle ?: Process.myUserHandle()
         SystemActionsManager.launchShortcut(context, packageName, shortcutId, handle)
+    }
+
+    fun onResume() {
+        if (_overlay.value is LauncherOverlay.Search && _searchQuery.value.isNotBlank()) {
+            dismissOverlay()
+        }
     }
 
     fun onHomeIntent(launcherWasVisible: Boolean) {
@@ -518,6 +572,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun addAppsToScreen(screenId: String, appItems: List<AppItem>) =
         screenRepository.addAppsToScreen(screenId, appItems, NameLengthSortOrder.OFF)
     fun removeAppFromScreen(screenId: String, uniqueKey: String) = screenRepository.removeAppFromScreen(screenId, uniqueKey)
+    fun removeAppFromAllScreens(uniqueKey: String) = screenRepository.removeAppFromAllScreens(uniqueKey)
     fun updateAppLabelAcrossScreens(uniqueKey: String, newLabel: String) =
         screenRepository.updateAppLabelAcrossScreens(uniqueKey, newLabel, NameLengthSortOrder.OFF)
     fun updateAppLabel(screenId: String, uniqueKey: String, newLabel: String) =
