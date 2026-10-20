@@ -43,7 +43,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
@@ -368,13 +367,12 @@ fun AlphabeticalAppDrawer(
 
     val statusBarTop = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding()
     val navBarBottom = WindowInsets.navigationBarsIgnoringVisibility.asPaddingValues().calculateBottomPadding()
-    val dismissDragPx = with(density) { 96.dp.toPx() }
+    val dismissDragPx = with(density) { 48.dp.toPx() }
     val slideOffsetPx = with(density) { 12.dp.roundToPx() }
     val closedRailScrollSlopPx = with(density) { 18.dp.toPx() }
     val railStripWidthPx = with(density) { RAIL_STRIP_WIDTH.toPx() }
     val navBarBottomPx = with(density) { navBarBottom.toPx() }
     val railBottomMarginPx = with(density) { RAIL_BOTTOM_MARGIN.toPx() }
-    val maxExclusionHeightPx = with(density) { 200.dp.toPx() }
 
     val launcherColors = LocalLauncherColors.current
     val contrast = LocalHomeContrastState.current
@@ -494,29 +492,43 @@ fun AlphabeticalAppDrawer(
                         }
 
                         if (scrubActive) {
+                            var dismissedViaSwipe = false
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
                                 val change = event.changes.firstOrNull { it.id == down.id }
                                     ?: event.changes.firstOrNull()
                                     ?: break
-                                change.consume()
                                 if (!change.pressed) break
+
+                                val dx = change.position.x - startX
+                                val dy = change.position.y - startY
+                                if (((latestIsLeft && dx > dismissDragPx) || (!latestIsLeft && dx < -dismissDragPx)) && abs(dx) > abs(dy)) {
+                                    change.consume()
+                                    dismissedViaSwipe = true
+                                    break
+                                }
+
+                                change.consume()
                                 update(change.position.y)
                             }
 
                             isScrubbing = false
-                            val slot = activeSlot
+                            if (dismissedViaSwipe) {
+                                latestOnDismiss()
+                            } else {
+                                val slot = activeSlot
 
-                            if (latestReleaseAction == EdgeScrubReleaseAction.LAUNCH_TOP) {
-                                val top = latestAppsFor(slot).firstOrNull()
-                                if (top != null) {
-                                    latestOnLaunch(top)
-                                    latestOnOpenChange(false)
+                                if (latestReleaseAction == EdgeScrubReleaseAction.LAUNCH_TOP) {
+                                    val top = latestAppsFor(slot).firstOrNull()
+                                    if (top != null) {
+                                        latestOnLaunch(top)
+                                        latestOnOpenChange(false)
+                                    } else {
+                                        pendingScrollTo = slot
+                                    }
                                 } else {
                                     pendingScrollTo = slot
                                 }
-                            } else {
-                                pendingScrollTo = slot
                             }
                         }
                     }
@@ -547,7 +559,7 @@ fun AlphabeticalAppDrawer(
                             detectHorizontalDragGestures(
                                 onDragStart = { total = 0f },
                                 onDragEnd = {
-                                    if ((isLeft && total < -dismissDragPx) || (!isLeft && total > dismissDragPx)) {
+                                    if ((isLeft && total > dismissDragPx) || (!isLeft && total < -dismissDragPx)) {
                                         latestOnDismiss()
                                     }
                                     total = 0f
@@ -642,19 +654,11 @@ fun AlphabeticalAppDrawer(
                         }
                     }
 
-                    // Exclusion strip + letters (visible only when drawer is open).
+                    // Rail touch strip + letters (visible only when drawer is open).
                     Box(
                         modifier = Modifier
                             .width(RAIL_STRIP_WIDTH)
-                            .fillMaxHeight()
-                            .systemGestureExclusion { layoutCoordinates ->
-                                Rect(
-                                    left = 0f,
-                                    top = 0f,
-                                    right = layoutCoordinates.size.width.toFloat(),
-                                    bottom = minOf(layoutCoordinates.size.height.toFloat(), maxExclusionHeightPx)
-                                )
-                            },
+                            .fillMaxHeight(),
                         contentAlignment = Alignment.Center
                     ) {
                         if (railVisibilityAlpha > 0.001f) {
