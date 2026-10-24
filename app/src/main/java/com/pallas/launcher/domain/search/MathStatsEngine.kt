@@ -92,6 +92,21 @@ object MathStatsEngine {
         ManualEntry("RandomSample[list, [n]]", "Random Generation", "Randomly permutes or samples without replacement from a list.", "= RandomSample[Range[10], 4]"),
         ManualEntry("RandomVariate[dist, [n]]", "Random Generation", "Generates pseudo-random variate(s) from any distribution.", "= Mean[RandomVariate[NormalDistribution[0, 1], 1000]]"),
 
+        // Wolfram Operators & Control Flow
+        ManualEntry("f @ x (Prefix)", "Wolfram Language", "Prefix function application f @ x, equivalent to f[x].", "= Sqrt @ 256"),
+        ManualEntry("x // f (Postfix)", "Wolfram Language", "Postfix pipeline application x // f, equivalent to f[x].", "= {1, 2, 3} // Total"),
+        ManualEntry("f /@ list (Map)", "Wolfram Language", "Maps f over each element of list, equivalent to Map[f, list].", "= Sqrt /@ {4, 9, 16, 25}"),
+        ManualEntry("f @@ expr (Apply)", "Wolfram Language", "Replaces head of expr with f, equivalent to Apply[f, expr].", "= Plus @@ {1, 2, 3, 4}"),
+        ManualEntry("expr /. rule (ReplaceAll)", "Wolfram Language", "Substitutes variables using rules (e.g. x -> 5).", "= x^2 + 2*x + 1 /. x -> 3"),
+        ManualEntry("expr & / # (Pure Function)", "Wolfram Language", "Anonymous pure function with slot # or #1, #2.", "= (#^2) & /@ {1, 2, 3, 4}"),
+        ManualEntry("If[cond, then, [else]]", "Wolfram Language", "Evaluates condition and executes corresponding branch.", "= If[10 > 5, 42, 0]"),
+        ManualEntry("Which[c1, v1, c2, v2, ...]", "Wolfram Language", "Evaluates conditions sequentially, returning first true branch.", "= Which[2 < 0, -1, 2 == 0, 0, 2 > 0, 1]"),
+        ManualEntry("While[test, body]", "Wolfram Language", "Loops while condition is true. Protected with strict timeout safety.", "= s = 0; i = 1; While[i <= 5, s += i; i++]; s"),
+        ManualEntry("For[start, test, incr, body]", "Wolfram Language", "Loops from start while test is true, advancing with incr.", "= s = 0; For[i = 1, i <= 4, i++, s += i^2]; s"),
+        ManualEntry("Do[expr, {i, max}]", "Wolfram Language", "Evaluates expression repeatedly for iterator i.", "= s = 0; Do[s += i, {i, 10}]; s"),
+        ManualEntry("Select[list, crit]", "Wolfram Language", "Filters elements in list satisfying criteria predicate.", "= Select[Range[10], EvenQ]"),
+        ManualEntry("Part[list, i] / list[[i]]", "Wolfram Language", "Extracts i-th element (1-indexed, negative from end).", "= {10, 20, 30}[[2]]"),
+
         // Launcher Smart Commands
         ManualEntry("= <expression>", "Launcher Commands", "Evaluates mathematical expressions, statistics, vectors, and distributions.", "= Mean[{12, 18, 25, 40}]"),
         ManualEntry("w <city | lat, lon>", "Launcher Commands", "Live weather forecast with temperatures, condition, wind, and sunrise/sunset.", "w london"),
@@ -128,7 +143,10 @@ object MathStatsEngine {
         "sinh", "cosh", "tanh", "exp", "log", "log2", "log10", "ln",
         "expectation", "moment", "centralmoment", "inversecdf",
         "hillestimator", "expectedshortfall", "cvar", "maxdrawdown",
-        "standardize", "movingaverage", "table", "fold", "nest"
+        "standardize", "movingaverage", "table", "fold", "nest",
+        "if", "which", "while", "for", "do", "select", "map", "apply", "part",
+        "evenq", "oddq", "integerq", "positive", "negative", "zeroq",
+        "nestlist", "foldlist", "break", "continue", "return"
     )
 
     @Synchronized
@@ -148,10 +166,13 @@ object MathStatsEngine {
 
     private fun looksLikeMathOrDist(s: String): Boolean {
         val lower = s.lowercase(Locale.ROOT)
-        if (KNOWN_FUNCS.any { lower.startsWith("$it[") }) return true
+        if (KNOWN_FUNCS.any { lower.startsWith("$it[") || lower.startsWith("$it ") || lower == it }) return true
         if (s.contains('{') && s.contains('}')) return true
         if (s.contains('%')) return true
-        val hasOp = s.any { it in "+-*/^%!" }
+        if (s.contains("/@") || s.contains("@@") || s.contains("//") || s.contains("@") ||
+            s.contains("/.") || s.contains("->") || s.contains("→") || s.contains('&') ||
+            s.contains('#') || s.contains(';') || s.contains("[[")) return true
+        val hasOp = s.any { it in "+-*/^%!<>=&|;" }
         val hasDigit = s.any { it.isDigit() }
         return hasDigit && hasOp && s.none { it.isLetter() && it !in "eEpiPI" }
     }
@@ -164,7 +185,13 @@ object MathStatsEngine {
             val parser = WolframParser(tokens)
             val ast = parser.parse() ?: return null
 
-            val result = ast.eval()
+            val ctx = ExecutionContext(maxSteps = 10_000, timeoutMs = 150L)
+            lastEvaluatedValue?.let {
+                ctx.env["%"] = it
+                ctx.env["out"] = it
+            }
+
+            val result = ast.eval(ctx)
             lastEvaluatedValue = result
             when (result) {
                 is MathValue.NumberVal -> {
@@ -235,7 +262,43 @@ object MathStatsEngine {
                         copyText = result.name
                     )
                 }
+                is MathValue.NullVal -> {
+                    MathEvalOutcome(
+                        title = expr,
+                        primaryValue = "= Null",
+                        badge = "Done",
+                        subtitle = "Evaluation completed",
+                        copyText = "Null"
+                    )
+                }
+                is MathValue.FunctionVal -> {
+                    MathEvalOutcome(
+                        title = expr,
+                        primaryValue = "Function[...]",
+                        badge = "Function",
+                        subtitle = "Pure anonymous function",
+                        copyText = expr
+                    )
+                }
+                is MathValue.RuleVal -> {
+                    val display = result.toDisplayString()
+                    MathEvalOutcome(
+                        title = expr,
+                        primaryValue = "= $display",
+                        badge = "Rule",
+                        subtitle = "Replacement rule • Tap to copy",
+                        copyText = display
+                    )
+                }
             }
+        } catch (e: ComputationLimitException) {
+            MathEvalOutcome(
+                title = expr,
+                primaryValue = "Computation timed out",
+                badge = "Timeout",
+                subtitle = "Calculation exceeded search time limit",
+                copyText = ""
+            )
         } catch (_: Throwable) {
             null
         }

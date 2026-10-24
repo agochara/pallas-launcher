@@ -30,6 +30,15 @@ object LocationHelper {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    fun isLocationEnabled(context: Context): Boolean {
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            lm.isLocationEnabled
+        } else {
+            lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }
+    }
+
     @SuppressLint("MissingPermission")
     suspend fun getCurrentLocation(context: Context): Pair<Double, Double>? = withContext(Dispatchers.IO) {
         if (!hasLocationPermission(context)) return@withContext null
@@ -42,9 +51,9 @@ object LocationHelper {
             Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
-        // 1. Check last known locations across all enabled providers
+        // 1. Check last known locations across all providers
         var bestLocation: Location? = null
-        val providers = lm.getProviders(true)
+        val providers = try { lm.allProviders } catch (_: Exception) { lm.getProviders(true) }
         for (provider in providers) {
             val loc = try {
                 lm.getLastKnownLocation(provider)
@@ -57,14 +66,14 @@ object LocationHelper {
             }
         }
 
-        // If last known location is fresh (< 15 minutes old), return it immediately
+        // If last known location is fresh (< 3 minutes old), return it immediately
         val now = System.currentTimeMillis()
-        if (bestLocation != null && (now - bestLocation.time) < 15 * 60 * 1000L) {
+        if (bestLocation != null && (now - bestLocation.time) < 3 * 60 * 1000L) {
             return@withContext Pair(bestLocation.latitude, bestLocation.longitude)
         }
 
-        // 2. Request a fresh single location update with a timeout
-        val freshLocation = withTimeoutOrNull(6000L) {
+        // 2. Request a fresh single location update with a strict timeout
+        val freshLocation = withTimeoutOrNull(4500L) {
             suspendCancellableCoroutine { continuation ->
                 val cancellationSignal = CancellationSignal()
                 continuation.invokeOnCancellation { cancellationSignal.cancel() }
@@ -74,7 +83,7 @@ object LocationHelper {
                         lm.isProviderEnabled(LocationManager.FUSED_PROVIDER) -> LocationManager.FUSED_PROVIDER
                     lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
                     hasFine && lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-                    else -> LocationManager.PASSIVE_PROVIDER
+                    else -> lm.getProviders(true).firstOrNull() ?: LocationManager.PASSIVE_PROVIDER
                 }
                 try {
                     lm.getCurrentLocation(provider, cancellationSignal, context.mainExecutor) { location ->
@@ -91,39 +100,41 @@ object LocationHelper {
     }
 
     suspend fun reverseGeocode(context: Context, lat: Double, lon: Double): String? = withContext(Dispatchers.IO) {
-        try {
-            if (Geocoder.isPresent()) {
-                val geocoder = Geocoder(context, Locale.getDefault())
-                val addresses: List<Address>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    suspendCancellableCoroutine { cont ->
-                        try {
-                            geocoder.getFromLocation(lat, lon, 1, object : Geocoder.GeocodeListener {
-                                override fun onGeocode(addresses: MutableList<Address>) {
-                                    if (cont.isActive) cont.resume(addresses)
-                                }
-                                override fun onError(errorMessage: String?) {
-                                    if (cont.isActive) cont.resume(null)
-                                }
-                            })
-                        } catch (e: Exception) {
-                            if (cont.isActive) cont.resume(null)
+        withTimeoutOrNull(3000L) {
+            try {
+                if (Geocoder.isPresent()) {
+                    val geocoder = Geocoder(context, Locale.getDefault())
+                    val addresses: List<Address>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        suspendCancellableCoroutine { cont ->
+                            try {
+                                geocoder.getFromLocation(lat, lon, 1, object : Geocoder.GeocodeListener {
+                                    override fun onGeocode(addresses: MutableList<Address>) {
+                                        if (cont.isActive) cont.resume(addresses)
+                                    }
+                                    override fun onError(errorMessage: String?) {
+                                        if (cont.isActive) cont.resume(null)
+                                    }
+                                })
+                            } catch (e: Exception) {
+                                if (cont.isActive) cont.resume(null)
+                            }
+                        }
+                    } else {
+                        @Suppress("DEPRECATION")
+                        geocoder.getFromLocation(lat, lon, 1)
+                    }
+
+                    if (!addresses.isNullOrEmpty()) {
+                        val addr = addresses[0]
+                        val locality = addr.locality ?: addr.subAdminArea ?: addr.adminArea
+                        val country = addr.countryName
+                        if (!locality.isNullOrBlank()) {
+                            return@withTimeoutOrNull if (!country.isNullOrBlank()) "$locality, $country" else locality
                         }
                     }
-                } else {
-                    @Suppress("DEPRECATION")
-                    geocoder.getFromLocation(lat, lon, 1)
                 }
-
-                if (!addresses.isNullOrEmpty()) {
-                    val addr = addresses[0]
-                    val locality = addr.locality ?: addr.subAdminArea ?: addr.adminArea
-                    val country = addr.countryName
-                    if (!locality.isNullOrBlank()) {
-                        return@withContext if (!country.isNullOrBlank()) "$locality, $country" else locality
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-        null
+            } catch (_: Exception) {}
+            null
+        }
     }
 }

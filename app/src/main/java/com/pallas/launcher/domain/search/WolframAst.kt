@@ -9,10 +9,43 @@ import kotlin.math.*
 
 internal enum class TokenType {
     NUMBER, IDENT, LBRACKET, RBRACKET, LBRACE, RBRACE, LPAREN, RPAREN,
-    COMMA, PLUS, MINUS, STAR, SLASH, CARET, PERCENT, EXCLAMATION, EOF
+    COMMA, PLUS, MINUS, STAR, SLASH, CARET, PERCENT, EXCLAMATION,
+    AT, // @
+    POSTFIX, // //
+    MAP, // /@
+    APPLY, // @@
+    APPLY_LEVEL, // @@@
+    RIGHT_COMPOSITION, // /*
+    ARROW, // -> or →
+    REPLACE_ALL, // /.
+    REPLACE_REPEATED, // //.
+    AMP, // &
+    SLOT, // #, #1, #2...
+    SEMICOLON, // ;
+    EQUAL, // =
+    PLUS_EQUAL, // +=
+    MINUS_EQUAL, // -=
+    STAR_EQUAL, // *=
+    SLASH_EQUAL, // /=
+    PLUS_PLUS, // ++
+    MINUS_MINUS, // --
+    EQUAL_EQUAL, // ==
+    NOT_EQUAL, // != or ≠
+    LESS, // <
+    LESS_EQUAL, // <= or ≤
+    GREATER, // >
+    GREATER_EQUAL, // >= or ≥
+    AND, // &&
+    OR, // ||
+    EOF
 }
 
-internal data class Token(val type: TokenType, val text: String, val value: Double = 0.0)
+internal data class Token(
+    val type: TokenType,
+    val text: String,
+    val value: Double = 0.0,
+    val intVal: Int = 0
+)
 
 internal class Tokenizer(private val input: String) {
     private var pos = 0
@@ -35,13 +68,146 @@ internal class Tokenizer(private val input: String) {
                     val num = str.toDoubleOrNull() ?: 0.0
                     tokens.add(Token(TokenType.NUMBER, str, num))
                 }
-                c.isLetter() || c == 'π' || c == '∞' -> {
-                    val start = pos
-                    while (pos < input.length && (input[pos].isLetter() || input[pos].isDigit() || input[pos] == '_' || input[pos] == 'π' || input[pos] == '∞')) {
+                c == '@' -> {
+                    if (input.startsWith("@@@", pos)) {
+                        tokens.add(Token(TokenType.APPLY_LEVEL, "@@@"))
+                        pos += 3
+                    } else if (input.startsWith("@@", pos)) {
+                        tokens.add(Token(TokenType.APPLY, "@@"))
+                        pos += 2
+                    } else {
+                        tokens.add(Token(TokenType.AT, "@"))
+                        pos += 1
+                    }
+                }
+                c == '/' || c == '÷' -> {
+                    if (input.startsWith("//.", pos)) {
+                        tokens.add(Token(TokenType.REPLACE_REPEATED, "//."))
+                        pos += 3
+                    } else if (input.startsWith("//", pos)) {
+                        tokens.add(Token(TokenType.POSTFIX, "//"))
+                        pos += 2
+                    } else if (input.startsWith("/@", pos)) {
+                        tokens.add(Token(TokenType.MAP, "/@"))
+                        pos += 2
+                    } else if (input.startsWith("/.", pos)) {
+                        tokens.add(Token(TokenType.REPLACE_ALL, "/."))
+                        pos += 2
+                    } else if (input.startsWith("/*", pos)) {
+                        tokens.add(Token(TokenType.RIGHT_COMPOSITION, "/*"))
+                        pos += 2
+                    } else if (input.startsWith("/=", pos)) {
+                        tokens.add(Token(TokenType.SLASH_EQUAL, "/="))
+                        pos += 2
+                    } else {
+                        tokens.add(Token(TokenType.SLASH, "/"))
+                        pos += 1
+                    }
+                }
+                c == '-' -> {
+                    if (input.startsWith("->", pos)) {
+                        tokens.add(Token(TokenType.ARROW, "->"))
+                        pos += 2
+                    } else if (input.startsWith("-=", pos)) {
+                        tokens.add(Token(TokenType.MINUS_EQUAL, "-="))
+                        pos += 2
+                    } else if (input.startsWith("--", pos)) {
+                        tokens.add(Token(TokenType.MINUS_MINUS, "--"))
+                        pos += 2
+                    } else {
+                        tokens.add(Token(TokenType.MINUS, "-"))
+                        pos += 1
+                    }
+                }
+                c == '→' -> {
+                    tokens.add(Token(TokenType.ARROW, "→"))
+                    pos += 1
+                }
+                c == '+' -> {
+                    if (input.startsWith("+=", pos)) {
+                        tokens.add(Token(TokenType.PLUS_EQUAL, "+="))
+                        pos += 2
+                    } else if (input.startsWith("++", pos)) {
+                        tokens.add(Token(TokenType.PLUS_PLUS, "++"))
+                        pos += 2
+                    } else {
+                        tokens.add(Token(TokenType.PLUS, "+"))
+                        pos += 1
+                    }
+                }
+                c == '*' || c == '×' -> {
+                    if (input.startsWith("*=", pos)) {
+                        tokens.add(Token(TokenType.STAR_EQUAL, "*="))
+                        pos += 2
+                    } else {
+                        tokens.add(Token(TokenType.STAR, "*"))
+                        pos += 1
+                    }
+                }
+                c == '&' -> {
+                    if (input.startsWith("&&", pos)) {
+                        tokens.add(Token(TokenType.AND, "&&"))
+                        pos += 2
+                    } else {
+                        tokens.add(Token(TokenType.AMP, "&"))
+                        pos += 1
+                    }
+                }
+                c == '|' -> {
+                    if (input.startsWith("||", pos)) {
+                        tokens.add(Token(TokenType.OR, "||"))
+                        pos += 2
+                    } else {
                         pos++
                     }
-                    val str = input.substring(start, pos)
-                    tokens.add(Token(TokenType.IDENT, str))
+                }
+                c == '=' -> {
+                    if (input.startsWith("==", pos)) {
+                        tokens.add(Token(TokenType.EQUAL_EQUAL, "=="))
+                        pos += 2
+                    } else {
+                        tokens.add(Token(TokenType.EQUAL, "="))
+                        pos += 1
+                    }
+                }
+                c == '!' -> {
+                    if (input.startsWith("!=", pos)) {
+                        tokens.add(Token(TokenType.NOT_EQUAL, "!="))
+                        pos += 2
+                    } else {
+                        tokens.add(Token(TokenType.EXCLAMATION, "!"))
+                        pos += 1
+                    }
+                }
+                c == '≠' -> {
+                    tokens.add(Token(TokenType.NOT_EQUAL, "≠"))
+                    pos += 1
+                }
+                c == '<' -> {
+                    if (input.startsWith("<=", pos)) {
+                        tokens.add(Token(TokenType.LESS_EQUAL, "<="))
+                        pos += 2
+                    } else {
+                        tokens.add(Token(TokenType.LESS, "<"))
+                        pos += 1
+                    }
+                }
+                c == '≤' -> {
+                    tokens.add(Token(TokenType.LESS_EQUAL, "≤"))
+                    pos += 1
+                }
+                c == '>' -> {
+                    if (input.startsWith(">=", pos)) {
+                        tokens.add(Token(TokenType.GREATER_EQUAL, ">="))
+                        pos += 2
+                    } else {
+                        tokens.add(Token(TokenType.GREATER, ">"))
+                        pos += 1
+                    }
+                }
+                c == '≥' -> {
+                    tokens.add(Token(TokenType.GREATER_EQUAL, "≥"))
+                    pos += 1
                 }
                 c == '[' -> { tokens.add(Token(TokenType.LBRACKET, "[")); pos++ }
                 c == ']' -> { tokens.add(Token(TokenType.RBRACKET, "]")); pos++ }
@@ -50,13 +216,24 @@ internal class Tokenizer(private val input: String) {
                 c == '(' -> { tokens.add(Token(TokenType.LPAREN, "(")); pos++ }
                 c == ')' -> { tokens.add(Token(TokenType.RPAREN, ")")); pos++ }
                 c == ',' -> { tokens.add(Token(TokenType.COMMA, ",")); pos++ }
-                c == '+' -> { tokens.add(Token(TokenType.PLUS, "+")); pos++ }
-                c == '-' -> { tokens.add(Token(TokenType.MINUS, "-")); pos++ }
-                c == '*' || c == '×' -> { tokens.add(Token(TokenType.STAR, "*")); pos++ }
-                c == '/' || c == '÷' -> { tokens.add(Token(TokenType.SLASH, "/")); pos++ }
+                c == ';' -> { tokens.add(Token(TokenType.SEMICOLON, ";")); pos++ }
                 c == '^' -> { tokens.add(Token(TokenType.CARET, "^")); pos++ }
                 c == '%' -> { tokens.add(Token(TokenType.PERCENT, "%")); pos++ }
-                c == '!' -> { tokens.add(Token(TokenType.EXCLAMATION, "!")); pos++ }
+                c == '#' -> {
+                    pos++
+                    val start = pos
+                    while (pos < input.length && input[pos].isDigit()) pos++
+                    val slotNum = if (pos > start) input.substring(start, pos).toIntOrNull() ?: 1 else 1
+                    tokens.add(Token(TokenType.SLOT, input.substring(start - 1, pos), intVal = slotNum))
+                }
+                c.isLetter() || c == 'π' || c == '∞' || c == '_' -> {
+                    val start = pos
+                    while (pos < input.length && (input[pos].isLetter() || input[pos].isDigit() || input[pos] == '_' || input[pos] == 'π' || input[pos] == '∞')) {
+                        pos++
+                    }
+                    val str = input.substring(start, pos)
+                    tokens.add(Token(TokenType.IDENT, str))
+                }
                 else -> pos++
             }
         }
@@ -65,60 +242,324 @@ internal class Tokenizer(private val input: String) {
     }
 }
 
+// Execution Exceptions for Control Flow and Safety
+class ComputationLimitException(message: String) : RuntimeException(message)
+internal class BreakException : RuntimeException()
+internal class ContinueException : RuntimeException()
+internal class ReturnException(val value: MathValue) : RuntimeException()
+
+class ExecutionContext(
+    val maxSteps: Int = 10_000,
+    val timeoutMs: Long = 150L,
+    val env: MutableMap<String, MathValue> = mutableMapOf()
+) {
+    val startTime = System.currentTimeMillis()
+    var steps = 0
+
+    fun tick() {
+        steps++
+        if (steps > maxSteps) {
+            throw ComputationLimitException("Computation exceeded step limit ($maxSteps steps)")
+        }
+        if ((steps and 63) == 0) {
+            if (System.currentTimeMillis() - startTime > timeoutMs) {
+                throw ComputationLimitException("Computation timed out (> ${timeoutMs}ms)")
+            }
+        }
+    }
+}
+
 sealed interface MathNode {
-    fun eval(env: Map<String, MathValue> = emptyMap()): MathValue
+    fun eval(ctx: ExecutionContext): MathValue
+
+    fun eval(env: Map<String, MathValue> = emptyMap()): MathValue {
+        val ctx = ExecutionContext(env = env.toMutableMap())
+        return eval(ctx)
+    }
 
     data class NumberNode(val value: Double) : MathNode {
-        override fun eval(env: Map<String, MathValue>): MathValue = MathValue.NumberVal(value)
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            return MathValue.NumberVal(value)
+        }
     }
 
     data class BooleanNode(val value: Boolean) : MathNode {
-        override fun eval(env: Map<String, MathValue>): MathValue = MathValue.BooleanVal(value)
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            return MathValue.BooleanVal(value)
+        }
     }
 
     data class ConstantValueNode(val value: MathValue) : MathNode {
-        override fun eval(env: Map<String, MathValue>): MathValue = value
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            return value
+        }
+    }
+
+    object NullNode : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            return MathValue.NullVal
+        }
     }
 
     object OutNode : MathNode {
-        override fun eval(env: Map<String, MathValue>): MathValue =
-            env["%"] ?: env["out"] ?: MathStatsEngine.lastEvaluatedValue ?: MathValue.NumberVal(0.0)
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            return ctx.env["%"] ?: ctx.env["out"] ?: MathStatsEngine.lastEvaluatedValue ?: MathValue.NumberVal(0.0)
+        }
+    }
+
+    data class SlotNode(val index: Int = 1) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            return ctx.env["#$index"] ?: if (index == 1) ctx.env["#"] ?: MathValue.NumberVal(0.0) else MathValue.NumberVal(0.0)
+        }
     }
 
     data class IdentNode(val name: String) : MathNode {
-        override fun eval(env: Map<String, MathValue>): MathValue {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
             val lower = name.lowercase(Locale.ROOT)
-            env[lower]?.let { return it }
+            ctx.env[lower]?.let { return it }
             return when (lower) {
                 "pi", "π" -> MathValue.NumberVal(PI)
                 "e" -> MathValue.NumberVal(E)
                 "infinity", "inf", "∞" -> MathValue.NumberVal(Double.POSITIVE_INFINITY)
                 "true" -> MathValue.BooleanVal(true)
                 "false" -> MathValue.BooleanVal(false)
-                "%", "out" -> env["%"] ?: env["out"] ?: MathStatsEngine.lastEvaluatedValue ?: MathValue.NumberVal(0.0)
+                "null" -> MathValue.NullVal
+                "%", "out" -> ctx.env["%"] ?: ctx.env["out"] ?: MathStatsEngine.lastEvaluatedValue ?: MathValue.NumberVal(0.0)
                 else -> MathValue.SymbolVal(name)
             }
         }
     }
 
     data class ListNode(val items: List<MathNode>) : MathNode {
-        override fun eval(env: Map<String, MathValue>): MathValue {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
             val list = mutableListOf<Double>()
             items.forEach { node ->
-                when (val v = node.eval(env)) {
+                when (val v = node.eval(ctx)) {
                     is MathValue.NumberVal -> list.add(v.value)
                     is MathValue.ListVal -> list.addAll(v.elements)
                     is MathValue.BooleanVal -> list.add(if (v.value) 1.0 else 0.0)
-                    is MathValue.DistVal, is MathValue.ExprVal, is MathValue.SymbolVal -> {}
+                    else -> {}
                 }
             }
             return MathValue.ListVal(list)
         }
     }
 
+    data class CompoundNode(val expressions: List<MathNode>) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            if (expressions.isEmpty()) return MathValue.NullVal
+            var last: MathValue = MathValue.NullVal
+            for (expr in expressions) {
+                last = expr.eval(ctx)
+            }
+            return last
+        }
+    }
+
+    data class AssignNode(val varName: String, val expr: MathNode, val op: Char? = null) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val lower = varName.lowercase(Locale.ROOT)
+            val rhs = expr.eval(ctx)
+            val finalVal: MathValue = when (op) {
+                null -> rhs
+                '+' -> {
+                    val cur = ctx.env[lower]?.asDouble() ?: 0.0
+                    MathValue.NumberVal(cur + rhs.asDouble())
+                }
+                '-' -> {
+                    val cur = ctx.env[lower]?.asDouble() ?: 0.0
+                    MathValue.NumberVal(cur - rhs.asDouble())
+                }
+                '*' -> {
+                    val cur = ctx.env[lower]?.asDouble() ?: 1.0
+                    MathValue.NumberVal(cur * rhs.asDouble())
+                }
+                '/' -> {
+                    val cur = ctx.env[lower]?.asDouble() ?: 0.0
+                    MathValue.NumberVal(cur / rhs.asDouble())
+                }
+                else -> rhs
+            }
+            ctx.env[lower] = finalVal
+            return finalVal
+        }
+    }
+
+    data class PrefixIncDecNode(val op: String, val varName: String) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val lower = varName.lowercase(Locale.ROOT)
+            val cur = ctx.env[lower]?.asDouble() ?: 0.0
+            val next = if (op == "++") cur + 1.0 else cur - 1.0
+            val res = MathValue.NumberVal(next)
+            ctx.env[lower] = res
+            return res
+        }
+    }
+
+    data class PostfixIncDecNode(val op: String, val varName: String) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val lower = varName.lowercase(Locale.ROOT)
+            val cur = ctx.env[lower]?.asDouble() ?: 0.0
+            val next = if (op == "++") cur + 1.0 else cur - 1.0
+            ctx.env[lower] = MathValue.NumberVal(next)
+            return MathValue.NumberVal(cur)
+        }
+    }
+
+    data class RuleNode(val pattern: MathNode, val replacement: MathNode) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val varName = when (pattern) {
+                is IdentNode -> pattern.name
+                else -> pattern.eval(ctx).toDisplayString()
+            }
+            val repVal = replacement.eval(ctx)
+            return MathValue.RuleVal(varName, repVal)
+        }
+    }
+
+    data class ReplaceAllNode(val expr: MathNode, val ruleNode: MathNode, val repeated: Boolean = false) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val rules = mutableMapOf<String, MathValue>()
+            fun collectRules(rVal: MathValue) {
+                when (rVal) {
+                    is MathValue.RuleVal -> rules[rVal.lhs.lowercase(Locale.ROOT)] = rVal.rhs
+                    else -> {}
+                }
+            }
+            when (ruleNode) {
+                is ListNode -> ruleNode.items.forEach { collectRules(it.eval(ctx)) }
+                else -> collectRules(ruleNode.eval(ctx))
+            }
+
+            val saved = mutableMapOf<String, MathValue?>()
+            try {
+                for ((k, v) in rules) {
+                    saved[k] = ctx.env[k]
+                    ctx.env[k] = v
+                }
+                return expr.eval(ctx)
+            } finally {
+                for ((k, v) in saved) {
+                    if (v != null) ctx.env[k] = v else ctx.env.remove(k)
+                }
+            }
+        }
+    }
+
+    data class FunctionNode(val body: MathNode, val paramNames: List<String> = emptyList()) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            return MathValue.FunctionVal(body, paramNames)
+        }
+    }
+
+    data class PrefixNode(val func: MathNode, val arg: MathNode) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val argVal = arg.eval(ctx)
+            return invokeFunction(func, listOf(argVal), ctx)
+        }
+    }
+
+    data class PostfixNode(val arg: MathNode, val func: MathNode) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val argVal = arg.eval(ctx)
+            return invokeFunction(func, listOf(argVal), ctx)
+        }
+    }
+
+    data class MapNode(val func: MathNode, val listNode: MathNode) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val lVal = listNode.eval(ctx)
+            val elements = lVal.asList()
+            val res = mutableListOf<Double>()
+            for (item in elements) {
+                ctx.tick()
+                val out = invokeFunction(func, listOf(MathValue.NumberVal(item)), ctx)
+                res.add(out.asDouble())
+            }
+            return MathValue.ListVal(res)
+        }
+    }
+
+    data class ApplyNode(val func: MathNode, val exprNode: MathNode, val level1: Boolean = false) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val eVal = exprNode.eval(ctx)
+            val args = eVal.asList().map { MathValue.NumberVal(it) }
+            return invokeFunction(func, args, ctx)
+        }
+    }
+
+    data class PartNode(val expr: MathNode, val index: MathNode) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val eVal = expr.eval(ctx)
+            val idxVal = index.eval(ctx).asDouble().toInt()
+            val list = eVal.asList()
+            if (list.isEmpty()) return MathValue.NumberVal(Double.NaN)
+            val targetIdx = if (idxVal > 0) idxVal - 1 else if (idxVal < 0) list.size + idxVal else -1
+            if (targetIdx in list.indices) {
+                return MathValue.NumberVal(list[targetIdx])
+            }
+            return MathValue.NumberVal(Double.NaN)
+        }
+    }
+
+    data class ComparisonNode(val op: String, val left: MathNode, val right: MathNode) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val l = left.eval(ctx)
+            val r = right.eval(ctx)
+            val lNum = l.asDouble()
+            val rNum = r.asDouble()
+            val res = when (op) {
+                "==", "===" -> if (!lNum.isNaN() && !rNum.isNaN()) abs(lNum - rNum) < 1e-9 else l == r
+                "!=", "=!=" -> if (!lNum.isNaN() && !rNum.isNaN()) abs(lNum - rNum) >= 1e-9 else l != r
+                "<" -> lNum < rNum
+                "<=" -> lNum <= rNum
+                ">" -> lNum > rNum
+                ">=" -> lNum >= rNum
+                else -> false
+            }
+            return MathValue.BooleanVal(res)
+        }
+    }
+
+    data class LogicalOpNode(val op: String, val left: MathNode, val right: MathNode) : MathNode {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val l = left.eval(ctx)
+            return if (op == "&&") {
+                if (!l.asBoolean()) MathValue.BooleanVal(false)
+                else MathValue.BooleanVal(right.eval(ctx).asBoolean())
+            } else {
+                if (l.asBoolean()) MathValue.BooleanVal(true)
+                else MathValue.BooleanVal(right.eval(ctx).asBoolean())
+            }
+        }
+    }
+
     data class UnaryOpNode(val op: Char, val child: MathNode) : MathNode {
-        override fun eval(env: Map<String, MathValue>): MathValue {
-            val v = child.eval(env)
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val v = child.eval(ctx)
             return when (op) {
                 '-' -> when (v) {
                     is MathValue.NumberVal -> MathValue.NumberVal(-v.value)
@@ -126,6 +567,7 @@ sealed interface MathNode {
                     else -> error("Cannot negate $v")
                 }
                 '+' -> v
+                '~' -> MathValue.BooleanVal(!v.asBoolean()) // Logical Not
                 '!' -> when (v) {
                     is MathValue.NumberVal -> {
                         val n = kotlin.math.round(v.value).toInt()
@@ -144,9 +586,10 @@ sealed interface MathNode {
     }
 
     data class BinaryOpNode(val op: Char, val left: MathNode, val right: MathNode) : MathNode {
-        override fun eval(env: Map<String, MathValue>): MathValue {
-            val l = left.eval(env)
-            val r = right.eval(env)
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
+            val l = left.eval(ctx)
+            val r = right.eval(ctx)
 
             fun applyOp(a: Double, b: Double): Double = when (op) {
                 '+' -> a + b
@@ -176,113 +619,321 @@ sealed interface MathNode {
     }
 
     data class CallNode(val funcName: String, val args: List<MathNode>) : MathNode {
-        override fun eval(env: Map<String, MathValue>): MathValue {
+        override fun eval(ctx: ExecutionContext): MathValue {
+            ctx.tick()
             val fn = funcName.lowercase(Locale.ROOT)
+
+            // Custom function defined in environment
+            val custom = ctx.env[fn]
+            if (custom is MathValue.FunctionVal) {
+                val evaluatedArgs = args.map { it.eval(ctx) }
+                return invokePureFunction(custom, evaluatedArgs, ctx)
+            }
 
             // Special forms that delay or control argument evaluation
             when (fn) {
+                "if" -> {
+                    if (args.isEmpty()) return MathValue.NullVal
+                    val cond = args[0].eval(ctx).asBoolean()
+                    return if (cond) {
+                        args.getOrNull(1)?.eval(ctx) ?: MathValue.NullVal
+                    } else {
+                        args.getOrNull(2)?.eval(ctx) ?: MathValue.NullVal
+                    }
+                }
+                "which" -> {
+                    var i = 0
+                    while (i < args.size - 1) {
+                        val c = args[i].eval(ctx).asBoolean()
+                        if (c) return args[i + 1].eval(ctx)
+                        i += 2
+                    }
+                    return MathValue.NullVal
+                }
+                "while" -> {
+                    if (args.size < 2) error("While requires at least 2 arguments")
+                    val testNode = args[0]
+                    val bodyNode = args[1]
+                    var last: MathValue = MathValue.NullVal
+                    while (testNode.eval(ctx).asBoolean()) {
+                        ctx.tick()
+                        try {
+                            last = bodyNode.eval(ctx)
+                        } catch (_: BreakException) {
+                            break
+                        } catch (_: ContinueException) {
+                            continue
+                        }
+                    }
+                    return last
+                }
+                "for" -> {
+                    if (args.size < 4) error("For requires 4 arguments")
+                    val startNode = args[0]
+                    val testNode = args[1]
+                    val incrNode = args[2]
+                    val bodyNode = args[3]
+                    startNode.eval(ctx)
+                    while (testNode.eval(ctx).asBoolean()) {
+                        ctx.tick()
+                        try {
+                            bodyNode.eval(ctx)
+                        } catch (_: BreakException) {
+                            break
+                        } catch (_: ContinueException) {
+                            // fall through to incr
+                        }
+                        incrNode.eval(ctx)
+                    }
+                    return MathValue.NullVal
+                }
+                "do" -> {
+                    if (args.size < 2) error("Do requires at least 2 arguments")
+                    val bodyNode = args[0]
+                    val specNode = args[1]
+                    if (specNode is ListNode) {
+                        val varNode = specNode.items.getOrNull(0) as? IdentNode
+                        val varName = varNode?.name?.lowercase(Locale.ROOT) ?: "i"
+                        val min: Double
+                        val max: Double
+                        val step: Double
+                        when (specNode.items.size) {
+                            1 -> { min = 1.0; max = specNode.items[0].eval(ctx).asDouble(); step = 1.0 }
+                            2 -> { min = 1.0; max = specNode.items[1].eval(ctx).asDouble(); step = 1.0 }
+                            3 -> { min = specNode.items[1].eval(ctx).asDouble(); max = specNode.items[2].eval(ctx).asDouble(); step = 1.0 }
+                            else -> { min = specNode.items[1].eval(ctx).asDouble(); max = specNode.items[2].eval(ctx).asDouble(); step = specNode.items[3].eval(ctx).asDouble() }
+                        }
+                        val saved = ctx.env[varName]
+                        try {
+                            var curr = min
+                            val limit = 5000
+                            var count = 0
+                            if (step > 0.0) {
+                                while (curr <= max + 1e-9 && count < limit) {
+                                    ctx.tick()
+                                    ctx.env[varName] = MathValue.NumberVal(curr)
+                                    try {
+                                        bodyNode.eval(ctx)
+                                    } catch (_: BreakException) {
+                                        break
+                                    } catch (_: ContinueException) {
+                                        // next
+                                    }
+                                    curr += step
+                                    count++
+                                }
+                            } else if (step < 0.0) {
+                                while (curr >= max - 1e-9 && count < limit) {
+                                    ctx.tick()
+                                    ctx.env[varName] = MathValue.NumberVal(curr)
+                                    try {
+                                        bodyNode.eval(ctx)
+                                    } catch (_: BreakException) {
+                                        break
+                                    } catch (_: ContinueException) {
+                                        // next
+                                    }
+                                    curr += step
+                                    count++
+                                }
+                            }
+                        } finally {
+                            if (saved != null) ctx.env[varName] = saved else ctx.env.remove(varName)
+                        }
+                    } else {
+                        val n = specNode.eval(ctx).asDouble().toInt().coerceIn(0, 5000)
+                        for (i in 0 until n) {
+                            ctx.tick()
+                            try {
+                                bodyNode.eval(ctx)
+                            } catch (_: BreakException) {
+                                break
+                            } catch (_: ContinueException) {
+                                continue
+                            }
+                        }
+                    }
+                    return MathValue.NullVal
+                }
+                "break" -> throw BreakException()
+                "continue" -> throw ContinueException()
+                "return" -> throw ReturnException(args.getOrNull(0)?.eval(ctx) ?: MathValue.NullVal)
                 "table" -> {
                     if (args.isEmpty()) error("Table requires arguments")
                     val exprNode = args[0]
-                    if (args.size == 1) return exprNode.eval(env)
+                    if (args.size == 1) return exprNode.eval(ctx)
 
                     val specNode = args[1]
                     if (specNode is ListNode) {
                         val varNode = specNode.items.getOrNull(0) as? IdentNode
-                        val varName = varNode?.name ?: "x"
+                        val varName = varNode?.name?.lowercase(Locale.ROOT) ?: "x"
                         val min: Double
                         val max: Double
                         val step: Double
                         when (specNode.items.size) {
                             1 -> {
                                 min = 1.0
-                                max = specNode.items[0].eval(env).asDouble()
+                                max = specNode.items[0].eval(ctx).asDouble()
                                 step = 1.0
                             }
                             2 -> {
                                 min = 1.0
-                                max = specNode.items[1].eval(env).asDouble()
+                                max = specNode.items[1].eval(ctx).asDouble()
                                 step = 1.0
                             }
                             3 -> {
-                                min = specNode.items[1].eval(env).asDouble()
-                                max = specNode.items[2].eval(env).asDouble()
+                                min = specNode.items[1].eval(ctx).asDouble()
+                                max = specNode.items[2].eval(ctx).asDouble()
                                 step = 1.0
                             }
                             else -> {
-                                min = specNode.items[1].eval(env).asDouble()
-                                max = specNode.items[2].eval(env).asDouble()
-                                step = specNode.items[3].eval(env).asDouble()
+                                min = specNode.items[1].eval(ctx).asDouble()
+                                max = specNode.items[2].eval(ctx).asDouble()
+                                step = specNode.items[3].eval(ctx).asDouble()
                             }
                         }
 
                         val result = mutableListOf<Double>()
                         val limit = 5000
                         var curr = min
-                        if (step > 0.0) {
-                            while (curr <= max + 1e-9 && result.size < limit) {
-                                val subEnv = env + (varName.lowercase(Locale.ROOT) to MathValue.NumberVal(curr))
-                                val item = exprNode.eval(subEnv)
-                                result.addAll(item.asList())
-                                curr += step
+                        val saved = ctx.env[varName]
+                        try {
+                            if (step > 0.0) {
+                                while (curr <= max + 1e-9 && result.size < limit) {
+                                    ctx.tick()
+                                    ctx.env[varName] = MathValue.NumberVal(curr)
+                                    val item = exprNode.eval(ctx)
+                                    result.addAll(item.asList())
+                                    curr += step
+                                }
+                            } else if (step < 0.0) {
+                                while (curr >= max - 1e-9 && result.size < limit) {
+                                    ctx.tick()
+                                    ctx.env[varName] = MathValue.NumberVal(curr)
+                                    val item = exprNode.eval(ctx)
+                                    result.addAll(item.asList())
+                                    curr += step
+                                }
                             }
-                        } else if (step < 0.0) {
-                            while (curr >= max - 1e-9 && result.size < limit) {
-                                val subEnv = env + (varName.lowercase(Locale.ROOT) to MathValue.NumberVal(curr))
-                                val item = exprNode.eval(subEnv)
-                                result.addAll(item.asList())
-                                curr += step
-                            }
+                        } finally {
+                            if (saved != null) ctx.env[varName] = saved else ctx.env.remove(varName)
                         }
                         return MathValue.ListVal(result)
                     } else {
-                        val n = specNode.eval(env).asDouble().toInt().coerceIn(0, 5000)
+                        val n = specNode.eval(ctx).asDouble().toInt().coerceIn(0, 5000)
                         val result = mutableListOf<Double>()
                         for (i in 0 until n) {
-                            result.addAll(exprNode.eval(env).asList())
+                            ctx.tick()
+                            result.addAll(exprNode.eval(ctx).asList())
                         }
                         return MathValue.ListVal(result)
                     }
                 }
                 "nest" -> {
-                    val fnName = when (val fnNode = args.getOrNull(0)) {
-                        is IdentNode -> fnNode.name
-                        else -> error("Expected function name as first argument to Nest")
-                    }
-                    var curr = args.getOrNull(1)?.eval(env) ?: error("Expected expression in Nest")
-                    val n = args.getOrNull(2)?.eval(env)?.asDouble()?.toInt()?.coerceIn(0, 1000) ?: 1
+                    val fnNode = args.getOrNull(0) ?: error("Expected function in Nest")
+                    var curr = args.getOrNull(1)?.eval(ctx) ?: error("Expected expression in Nest")
+                    val n = args.getOrNull(2)?.eval(ctx)?.asDouble()?.toInt()?.coerceIn(0, 1000) ?: 1
                     for (step in 0 until n) {
-                        curr = CallNode(fnName, listOf(ConstantValueNode(curr))).eval(env)
+                        ctx.tick()
+                        curr = invokeFunction(fnNode, listOf(curr), ctx)
                     }
                     return curr
                 }
-                "fold" -> {
-                    val fnName = when (val fnNode = args.getOrNull(0)) {
-                        is IdentNode -> fnNode.name
-                        else -> error("Expected function name as first argument to Fold")
+                "nestlist" -> {
+                    val fnNode = args.getOrNull(0) ?: error("Expected function in NestList")
+                    var curr = args.getOrNull(1)?.eval(ctx) ?: error("Expected expression in NestList")
+                    val n = args.getOrNull(2)?.eval(ctx)?.asDouble()?.toInt()?.coerceIn(0, 1000) ?: 1
+                    val list = mutableListOf<Double>()
+                    list.add(curr.asDouble())
+                    for (step in 0 until n) {
+                        ctx.tick()
+                        curr = invokeFunction(fnNode, listOf(curr), ctx)
+                        list.add(curr.asDouble())
                     }
+                    return MathValue.ListVal(list)
+                }
+                "fold" -> {
+                    val fnNode = args.getOrNull(0) ?: error("Expected function in Fold")
                     if (args.size >= 3) {
-                        var acc = args[1].eval(env)
-                        val list = args[2].eval(env).asList()
+                        var acc = args[1].eval(ctx)
+                        val list = args[2].eval(ctx).asList()
                         for (item in list) {
-                            acc = CallNode(fnName, listOf(ConstantValueNode(acc), NumberNode(item))).eval(env)
+                            ctx.tick()
+                            acc = invokeFunction(fnNode, listOf(acc, MathValue.NumberVal(item)), ctx)
                         }
                         return acc
                     } else if (args.size == 2) {
-                        val list = args[1].eval(env).asList()
+                        val list = args[1].eval(ctx).asList()
                         if (list.isEmpty()) return MathValue.NumberVal(Double.NaN)
                         var acc: MathValue = MathValue.NumberVal(list[0])
                         for (i in 1 until list.size) {
-                            acc = CallNode(fnName, listOf(ConstantValueNode(acc), NumberNode(list[i]))).eval(env)
+                            ctx.tick()
+                            acc = invokeFunction(fnNode, listOf(acc, MathValue.NumberVal(list[i])), ctx)
                         }
                         return acc
                     } else {
                         error("Expected 2 or 3 arguments in Fold")
                     }
                 }
+                "foldlist" -> {
+                    val fnNode = args.getOrNull(0) ?: error("Expected function in FoldList")
+                    if (args.size >= 3) {
+                        var acc = args[1].eval(ctx)
+                        val list = args[2].eval(ctx).asList()
+                        val res = mutableListOf<Double>()
+                        res.add(acc.asDouble())
+                        for (item in list) {
+                            ctx.tick()
+                            acc = invokeFunction(fnNode, listOf(acc, MathValue.NumberVal(item)), ctx)
+                            res.add(acc.asDouble())
+                        }
+                        return MathValue.ListVal(res)
+                    } else if (args.size == 2) {
+                        val list = args[1].eval(ctx).asList()
+                        if (list.isEmpty()) return MathValue.ListVal(emptyList())
+                        var acc: MathValue = MathValue.NumberVal(list[0])
+                        val res = mutableListOf<Double>()
+                        res.add(acc.asDouble())
+                        for (i in 1 until list.size) {
+                            ctx.tick()
+                            acc = invokeFunction(fnNode, listOf(acc, MathValue.NumberVal(list[i])), ctx)
+                            res.add(acc.asDouble())
+                        }
+                        return MathValue.ListVal(res)
+                    } else {
+                        error("Expected 2 or 3 arguments in FoldList")
+                    }
+                }
+                "select" -> {
+                    val list = args.getOrNull(0)?.eval(ctx)?.asList() ?: emptyList()
+                    val crit = args.getOrNull(1) ?: error("Expected criteria in Select")
+                    val res = mutableListOf<Double>()
+                    for (item in list) {
+                        ctx.tick()
+                        val pass = invokeFunction(crit, listOf(MathValue.NumberVal(item)), ctx).asBoolean()
+                        if (pass) res.add(item)
+                    }
+                    return MathValue.ListVal(res)
+                }
+                "map" -> {
+                    val fnNode = args.getOrNull(0) ?: error("Expected function in Map")
+                    val list = args.getOrNull(1)?.eval(ctx)?.asList() ?: emptyList()
+                    val res = mutableListOf<Double>()
+                    for (item in list) {
+                        ctx.tick()
+                        val out = invokeFunction(fnNode, listOf(MathValue.NumberVal(item)), ctx)
+                        res.add(out.asDouble())
+                    }
+                    return MathValue.ListVal(res)
+                }
+                "apply" -> {
+                    val fnNode = args.getOrNull(0) ?: error("Expected function in Apply")
+                    val list = args.getOrNull(1)?.eval(ctx)?.asList() ?: emptyList()
+                    return invokeFunction(fnNode, list.map { MathValue.NumberVal(it) }, ctx)
+                }
             }
 
-            val evaluatedArgs = args.map { it.eval(env) }
+            val evaluatedArgs = args.map { it.eval(ctx) }
 
             // Check distribution constructors
             when (fn) {
@@ -703,6 +1354,12 @@ sealed interface MathNode {
                     }
                     return MathValue.ListVal(unique)
                 }
+                "part" -> {
+                    val list = evaluatedArgs.getOrNull(0)?.asList() ?: emptyList()
+                    val idx = evaluatedArgs.getOrNull(1)?.asDouble()?.toInt() ?: 1
+                    val pos = if (idx > 0) idx - 1 else if (idx < 0) list.size + idx else -1
+                    return if (pos in list.indices) MathValue.NumberVal(list[pos]) else MathValue.NumberVal(Double.NaN)
+                }
             }
 
             // Statistics & Aggregations
@@ -956,6 +1613,27 @@ sealed interface MathNode {
                 }
             }
 
+            // Predicates
+            when (fn) {
+                "evenq" -> {
+                    val n = evaluatedArgs.getOrNull(0)?.asDouble() ?: return MathValue.BooleanVal(false)
+                    val r = kotlin.math.round(n)
+                    return MathValue.BooleanVal(abs(n - r) < 1e-9 && (r.toLong() % 2L == 0L))
+                }
+                "oddq" -> {
+                    val n = evaluatedArgs.getOrNull(0)?.asDouble() ?: return MathValue.BooleanVal(false)
+                    val r = kotlin.math.round(n)
+                    return MathValue.BooleanVal(abs(n - r) < 1e-9 && (r.toLong() % 2L != 0L))
+                }
+                "integerq" -> {
+                    val n = evaluatedArgs.getOrNull(0)?.asDouble() ?: return MathValue.BooleanVal(false)
+                    return MathValue.BooleanVal(!n.isNaN() && !n.isInfinite() && abs(n - kotlin.math.round(n)) < 1e-9)
+                }
+                "positive" -> return MathValue.BooleanVal((evaluatedArgs.getOrNull(0)?.asDouble() ?: Double.NaN) > 0.0)
+                "negative" -> return MathValue.BooleanVal((evaluatedArgs.getOrNull(0)?.asDouble() ?: Double.NaN) < 0.0)
+                "zeroq" -> return MathValue.BooleanVal(abs(evaluatedArgs.getOrNull(0)?.asDouble() ?: 1.0) < 1e-11)
+            }
+
             when (fn) {
                 "sqrt" -> return applyUnary { sqrt(it) }
                 "cuberoot" -> return applyUnary { if (it >= 0.0) it.pow(1.0 / 3.0) else -(-it).pow(1.0 / 3.0) }
@@ -1003,12 +1681,12 @@ sealed interface MathNode {
                 "mod" -> {
                     val a = evaluatedArgs.getOrNull(0)?.asDouble() ?: 0.0
                     val b = evaluatedArgs.getOrNull(1)?.asDouble() ?: 1.0
-                    return MathValue.NumberVal(a % b)
+                    return MathValue.NumberVal(if (b == 0.0) Double.NaN else a % b)
                 }
                 "quotient" -> {
                     val a = evaluatedArgs.getOrNull(0)?.asDouble() ?: 0.0
                     val b = evaluatedArgs.getOrNull(1)?.asDouble() ?: 1.0
-                    return MathValue.NumberVal(floor(a / b))
+                    return MathValue.NumberVal(if (b == 0.0) Double.NaN else floor(a / b))
                 }
                 "divisible" -> {
                     val a = evaluatedArgs.getOrNull(0)?.asDouble()?.toLong() ?: 0L
@@ -1095,6 +1773,64 @@ sealed interface MathNode {
     }
 }
 
+internal fun invokeFunction(fnNode: MathNode, args: List<MathValue>, ctx: ExecutionContext): MathValue {
+    ctx.tick()
+    when (fnNode) {
+        is MathNode.IdentNode -> {
+            val fnLower = fnNode.name.lowercase(Locale.ROOT)
+            val custom = ctx.env[fnLower]
+            if (custom is MathValue.FunctionVal) {
+                return invokePureFunction(custom, args, ctx)
+            }
+            return MathNode.CallNode(fnNode.name, args.map { MathNode.ConstantValueNode(it) }).eval(ctx)
+        }
+        is MathNode.FunctionNode -> {
+            return invokePureFunction(MathValue.FunctionVal(fnNode.body, fnNode.paramNames), args, ctx)
+        }
+        else -> {
+            val evaluated = fnNode.eval(ctx)
+            if (evaluated is MathValue.FunctionVal) {
+                return invokePureFunction(evaluated, args, ctx)
+            }
+            if (evaluated is MathValue.SymbolVal) {
+                return MathNode.CallNode(evaluated.name, args.map { MathNode.ConstantValueNode(it) }).eval(ctx)
+            }
+            error("Cannot invoke non-function $evaluated")
+        }
+    }
+}
+
+internal fun invokePureFunction(fn: MathValue.FunctionVal, args: List<MathValue>, ctx: ExecutionContext): MathValue {
+    val savedSlots = mutableMapOf<String, MathValue?>()
+    val savedParams = mutableMapOf<String, MathValue?>()
+
+    try {
+        if (fn.paramNames.isNotEmpty()) {
+            for (i in fn.paramNames.indices) {
+                val p = fn.paramNames[i].lowercase(Locale.ROOT)
+                savedParams[p] = ctx.env[p]
+                ctx.env[p] = args.getOrElse(i) { MathValue.NullVal }
+            }
+        }
+        for (i in args.indices) {
+            val key = "#${i + 1}"
+            savedSlots[key] = ctx.env[key]
+            ctx.env[key] = args[i]
+        }
+        savedSlots["#"] = ctx.env["#"]
+        if (args.isNotEmpty()) ctx.env["#"] = args[0]
+
+        return fn.body.eval(ctx)
+    } finally {
+        for ((k, v) in savedSlots) {
+            if (v != null) ctx.env[k] = v else ctx.env.remove(k)
+        }
+        for ((k, v) in savedParams) {
+            if (v != null) ctx.env[k] = v else ctx.env.remove(k)
+        }
+    }
+}
+
 internal class WolframParser(private val tokens: List<Token>) {
     private var idx = 0
     private var depth = 0
@@ -1111,6 +1847,7 @@ internal class WolframParser(private val tokens: List<Token>) {
     }
 
     private fun peek(): Token = if (idx < tokens.size) tokens[idx] else Token(TokenType.EOF, "")
+    private fun peekNext(): Token = if (idx + 1 < tokens.size) tokens[idx + 1] else Token(TokenType.EOF, "")
 
     private fun match(type: TokenType): Boolean {
         if (peek().type == type) {
@@ -1130,23 +1867,151 @@ internal class WolframParser(private val tokens: List<Token>) {
     }
 
     fun parse(): MathNode? {
-        val expr = parseExpression()
+        val expr = parseCompound()
         if (peek().type != TokenType.EOF) return null
         return expr
     }
 
-    private fun parseExpression(): MathNode = withDepth {
+    // CompoundExpression: expr1 ; expr2 ; ...
+    private fun parseCompound(): MathNode {
+        val expressions = mutableListOf<MathNode>()
+        expressions.add(parseAssignment())
+        while (match(TokenType.SEMICOLON)) {
+            if (peek().type == TokenType.EOF || peek().type == TokenType.RBRACKET || peek().type == TokenType.RPAREN || peek().type == TokenType.RBRACE) {
+                expressions.add(MathNode.NullNode)
+                break
+            }
+            expressions.add(parseAssignment())
+        }
+        return if (expressions.size == 1) expressions[0] else MathNode.CompoundNode(expressions)
+    }
+
+    // Assignment: x = val, x += val, x -= val, x *= val, x /= val
+    private fun parseAssignment(): MathNode {
+        val node = parseRule()
+        if (node is MathNode.IdentNode) {
+            val t = peek().type
+            if (t in setOf(TokenType.EQUAL, TokenType.PLUS_EQUAL, TokenType.MINUS_EQUAL, TokenType.STAR_EQUAL, TokenType.SLASH_EQUAL)) {
+                consume(t)
+                val op = when (t) {
+                    TokenType.PLUS_EQUAL -> '+'
+                    TokenType.MINUS_EQUAL -> '-'
+                    TokenType.STAR_EQUAL -> '*'
+                    TokenType.SLASH_EQUAL -> '/'
+                    else -> null
+                }
+                val rhs = withDepth { parseAssignment() } // right-associative
+                return MathNode.AssignNode(node.name, rhs, op)
+            }
+        }
+        return node
+    }
+
+    // Rule: lhs -> rhs
+    private fun parseRule(): MathNode {
+        var node = parseReplace()
+        if (match(TokenType.ARROW)) {
+            val rhs = withDepth { parseRule() } // right-associative
+            node = MathNode.RuleNode(node, rhs)
+        }
+        return node
+    }
+
+    // ReplaceAll: expr /. rule, ReplaceRepeated: expr //. rule
+    private fun parseReplace(): MathNode {
+        var node = parsePostfix()
+        while (peek().type in setOf(TokenType.REPLACE_ALL, TokenType.REPLACE_REPEATED)) {
+            val op = consume(peek().type)
+            val rule = parseRule()
+            node = MathNode.ReplaceAllNode(node, rule, repeated = (op.type == TokenType.REPLACE_REPEATED))
+        }
+        return node
+    }
+
+    // Postfix: expr // f
+    private fun parsePostfix(): MathNode {
+        var node = parseMapApply()
+        while (match(TokenType.POSTFIX)) {
+            val func = parseMapApply()
+            node = MathNode.PostfixNode(node, func)
+        }
+        return node
+    }
+
+    // Map (/@), Apply (@@), Apply at level 1 (@@@)
+    private fun parseMapApply(): MathNode {
+        var node = parseFunction()
+        while (peek().type in setOf(TokenType.MAP, TokenType.APPLY, TokenType.APPLY_LEVEL)) {
+            val op = consume(peek().type)
+            val right = parseFunction()
+            node = when (op.type) {
+                TokenType.MAP -> MathNode.MapNode(node, right)
+                TokenType.APPLY -> MathNode.ApplyNode(node, right, level1 = false)
+                TokenType.APPLY_LEVEL -> MathNode.ApplyNode(node, right, level1 = true)
+                else -> node
+            }
+        }
+        return node
+    }
+
+    // Pure function: expr &
+    private fun parseFunction(): MathNode {
+        var node = parseLogicalOr()
+        if (match(TokenType.AMP)) {
+            node = MathNode.FunctionNode(node)
+        }
+        return node
+    }
+
+    // Logical OR: expr || expr
+    private fun parseLogicalOr(): MathNode {
+        var node = parseLogicalAnd()
+        while (match(TokenType.OR)) {
+            val right = parseLogicalAnd()
+            node = MathNode.LogicalOpNode("||", node, right)
+        }
+        return node
+    }
+
+    // Logical AND: expr && expr
+    private fun parseLogicalAnd(): MathNode {
+        var node = parseComparison()
+        while (match(TokenType.AND)) {
+            val right = parseComparison()
+            node = MathNode.LogicalOpNode("&&", node, right)
+        }
+        return node
+    }
+
+    // Comparisons: ==, !=, <, <=, >, >=
+    private fun parseComparison(): MathNode {
+        var node = parseExpression()
+        while (peek().type in setOf(
+            TokenType.EQUAL_EQUAL, TokenType.NOT_EQUAL,
+            TokenType.LESS, TokenType.LESS_EQUAL,
+            TokenType.GREATER, TokenType.GREATER_EQUAL
+        )) {
+            val op = consume(peek().type).text
+            val right = parseExpression()
+            node = MathNode.ComparisonNode(op, node, right)
+        }
+        return node
+    }
+
+    // Add / Subtract: + , -
+    private fun parseExpression(): MathNode {
         var node = parseTerm()
         while (peek().type in setOf(TokenType.PLUS, TokenType.MINUS)) {
             val op = consume(peek().type).text[0]
             val right = parseTerm()
             node = MathNode.BinaryOpNode(op, node, right)
         }
-        node
+        return node
     }
 
-    private fun parseTerm(): MathNode = withDepth {
-        var node = parseUnary()
+    // Multiply / Divide / Modulo: * , / , % , and implicit multiplication
+    private fun parseTerm(): MathNode {
+        var node = parsePrefix()
         while (peek().type in setOf(TokenType.STAR, TokenType.SLASH) ||
             (peek().type == TokenType.PERCENT && isBinaryPercent()) ||
             canStartImplicitMult()
@@ -1156,10 +2021,10 @@ internal class WolframParser(private val tokens: List<Token>) {
             } else {
                 '*' // implicit multiplication
             }
-            val right = parseUnary()
+            val right = parsePrefix()
             node = MathNode.BinaryOpNode(op, node, right)
         }
-        node
+        return node
     }
 
     private fun isBinaryPercent(): Boolean {
@@ -1172,35 +2037,84 @@ internal class WolframParser(private val tokens: List<Token>) {
 
     private fun canStartImplicitMult(): Boolean {
         val t = peek().type
-        return t in setOf(TokenType.IDENT, TokenType.LPAREN, TokenType.LBRACKET, TokenType.LBRACE)
+        return t in setOf(TokenType.IDENT, TokenType.LPAREN, TokenType.LBRACE)
     }
 
-    private fun parseUnary(): MathNode = withDepth {
-        if (match(TokenType.PLUS)) return@withDepth parseUnary()
-        if (match(TokenType.MINUS)) return@withDepth MathNode.UnaryOpNode('-', parseUnary())
-        parsePower()
+    // Prefix application: f @ x
+    private fun parsePrefix(): MathNode {
+        var node = parseUnary()
+        if (match(TokenType.AT)) {
+            val right = withDepth { parsePrefix() } // right-associative: f @ g @ x -> f @ (g @ x)
+            node = MathNode.PrefixNode(node, right)
+        }
+        return node
     }
 
-    private fun parsePower(): MathNode = withDepth {
-        var node = parsePostfix()
+    // Unary prefix: +, -, !, ++x, --x
+    private fun parseUnary(): MathNode {
+        if (match(TokenType.PLUS)) return parseUnary()
+        if (match(TokenType.MINUS)) return MathNode.UnaryOpNode('-', parseUnary())
+        if (match(TokenType.EXCLAMATION)) return MathNode.UnaryOpNode('~', parseUnary()) // Logical NOT
+        if (match(TokenType.PLUS_PLUS)) {
+            val t = consume(TokenType.IDENT)
+            return MathNode.PrefixIncDecNode("++", t.text)
+        }
+        if (match(TokenType.MINUS_MINUS)) {
+            val t = consume(TokenType.IDENT)
+            return MathNode.PrefixIncDecNode("--", t.text)
+        }
+        return parsePower()
+    }
+
+    // Power: ^ (right-associative)
+    private fun parsePower(): MathNode {
+        var node = parsePostfixUnary()
         if (match(TokenType.CARET)) {
-            val right = parseUnary() // right-associative power
+            val right = withDepth { parseUnary() }
             node = MathNode.BinaryOpNode('^', node, right)
         }
-        node
+        return node
     }
 
-    private fun parsePostfix(): MathNode = withDepth {
+    // Postfix unary: x!, x++, x--, list[[index]], function calls
+    private fun parsePostfixUnary(): MathNode {
         var node = parsePrimary()
-        while (match(TokenType.EXCLAMATION)) {
-            node = MathNode.UnaryOpNode('!', node)
+        while (true) {
+            when {
+                match(TokenType.EXCLAMATION) -> {
+                    node = MathNode.UnaryOpNode('!', node)
+                }
+                match(TokenType.PLUS_PLUS) -> {
+                    if (node is MathNode.IdentNode) node = MathNode.PostfixIncDecNode("++", node.name)
+                }
+                match(TokenType.MINUS_MINUS) -> {
+                    if (node is MathNode.IdentNode) node = MathNode.PostfixIncDecNode("--", node.name)
+                }
+                peek().type == TokenType.LBRACKET && peekNext().type == TokenType.LBRACKET -> {
+                    consume(TokenType.LBRACKET)
+                    consume(TokenType.LBRACKET)
+                    val idx = parseCompound()
+                    consume(TokenType.RBRACKET)
+                    consume(TokenType.RBRACKET)
+                    node = MathNode.PartNode(node, idx)
+                }
+                peek().type == TokenType.LBRACKET -> {
+                    consume(TokenType.LBRACKET)
+                    val args = parseArgList(TokenType.RBRACKET)
+                    node = when (node) {
+                        is MathNode.IdentNode -> MathNode.CallNode(node.name, args)
+                        else -> MathNode.CallNode("Function", listOf(node) + args)
+                    }
+                }
+                else -> break
+            }
         }
-        node
+        return node
     }
 
-    private fun parsePrimary(): MathNode = withDepth {
+    private fun parsePrimary(): MathNode {
         val t = peek()
-        when (t.type) {
+        return when (t.type) {
             TokenType.NUMBER -> {
                 consume(TokenType.NUMBER)
                 MathNode.NumberNode(t.value)
@@ -1208,6 +2122,10 @@ internal class WolframParser(private val tokens: List<Token>) {
             TokenType.PERCENT -> {
                 consume(TokenType.PERCENT)
                 MathNode.OutNode
+            }
+            TokenType.SLOT -> {
+                consume(TokenType.SLOT)
+                MathNode.SlotNode(t.intVal)
             }
             TokenType.IDENT -> {
                 val name = consume(TokenType.IDENT).text
@@ -1221,19 +2139,20 @@ internal class WolframParser(private val tokens: List<Token>) {
                     val lower = name.lowercase(Locale.ROOT)
                     if (lower == "true") MathNode.BooleanNode(true)
                     else if (lower == "false") MathNode.BooleanNode(false)
+                    else if (lower == "null") MathNode.NullNode
                     else if (lower == "%" || lower == "out") MathNode.OutNode
                     else MathNode.IdentNode(name)
                 }
             }
             TokenType.LPAREN -> {
                 consume(TokenType.LPAREN)
-                val expr = parseExpression()
+                val expr = withDepth { parseCompound() }
                 consume(TokenType.RPAREN)
                 expr
             }
             TokenType.LBRACE -> {
                 consume(TokenType.LBRACE)
-                val items = parseArgList(TokenType.RBRACE)
+                val items = withDepth { parseArgList(TokenType.RBRACE) }
                 MathNode.ListNode(items)
             }
             else -> error("Unexpected token: ${t.text}")
@@ -1244,7 +2163,7 @@ internal class WolframParser(private val tokens: List<Token>) {
         val list = mutableListOf<MathNode>()
         if (match(closingType)) return@withDepth list
         while (true) {
-            list.add(parseExpression())
+            list.add(parseCompound())
             if (match(TokenType.COMMA)) continue
             consume(closingType)
             break

@@ -130,6 +130,10 @@ fun SearchSettingsPage(
     var isLocating by remember { mutableStateOf(false) }
 
     fun fetchCurrentLocation() {
+        if (!LocationHelper.isLocationEnabled(context)) {
+            Toast.makeText(context, "Please turn on device location in system settings", Toast.LENGTH_SHORT).show()
+            return
+        }
         scope.launch {
             isLocating = true
             try {
@@ -142,8 +146,10 @@ fun SearchSettingsPage(
                     Toast.makeText(context, "Location set: $targetLocation", Toast.LENGTH_SHORT).show()
                     showWeatherCityDialog = false
                 } else {
-                    Toast.makeText(context, "Could not acquire current location", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Could not acquire location. Please try again or type city name manually.", Toast.LENGTH_LONG).show()
                 }
+            } catch (_: Exception) {
+                Toast.makeText(context, "Could not acquire location", Toast.LENGTH_SHORT).show()
             } finally {
                 isLocating = false
             }

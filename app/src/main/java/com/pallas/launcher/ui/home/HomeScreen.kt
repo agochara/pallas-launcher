@@ -79,21 +79,6 @@ import com.pallas.launcher.ui.theme.LocalWindowBlurController
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-private fun gestureActionLabel(action: GestureAction, installedApps: List<AppItem>): String = when (action) {
-    is GestureAction.OpenSearch -> "Search"
-    is GestureAction.OpenAppDrawer -> "Apps"
-    is GestureAction.OpenNotifications -> "Notifications"
-    is GestureAction.OpenQuickSettings -> "Quick Settings"
-    is GestureAction.OpenCamera -> "Camera"
-    is GestureAction.OpenDialer -> "Dialer"
-    is GestureAction.LockScreen -> "Lock Screen"
-    is GestureAction.LaunchApp -> {
-        installedApps.firstOrNull { it.uniqueKey == action.uniqueKey }?.label
-            ?: installedApps.firstOrNull { it.packageName == action.packageName }?.label
-            ?: action.packageName.substringAfterLast('.')
-    }
-    is GestureAction.None -> ""
-}
 
 @Composable
 fun PallasHomeScreen(
@@ -207,32 +192,6 @@ fun PallasHomeScreen(
                 onBackgroundLongPress = { viewModel.openSettings() },
                 onDoubleTap = { viewModel.executeGesture(settings.doubleTapAction) },
                 canLongSwipeHorizontal = screens.size > 1,
-                labelFor = { dir, isLong ->
-                    when (dir) {
-                        SwipeDir.UP -> {
-                            val label = gestureActionLabel(settings.swipeUpAction, installedApps)
-                            if (label.isNotBlank()) "↑ $label" else null
-                        }
-                        SwipeDir.DOWN -> {
-                            val label = gestureActionLabel(settings.swipeDownAction, installedApps)
-                            if (label.isNotBlank()) "↓ $label" else null
-                        }
-                        SwipeDir.LEFT -> {
-                            if (isLong && screens.size > 1) "Next screen"
-                            else {
-                                val label = gestureActionLabel(settings.shortSwipeLeftAction, installedApps)
-                                if (label.isNotBlank()) "← $label" else null
-                            }
-                        }
-                        SwipeDir.RIGHT -> {
-                            if (isLong && screens.size > 1) "Previous screen"
-                            else {
-                                val label = gestureActionLabel(settings.shortSwipeRightAction, installedApps)
-                                if (label.isNotBlank()) "→ $label" else null
-                            }
-                        }
-                    }
-                },
                 onHorizontalDrag = { dragX ->
                     coroutineScope.launch {
                         pagerOffsetX.snapTo(dragX)
@@ -326,20 +285,22 @@ fun PallasHomeScreen(
                         .padding(top = statusBarTopPadding, bottom = navBarBottomPadding)
                 ) {
                     val clockComposable: @Composable () -> Unit = {
-                        ClockHeader(
-                            timeString = currentTime,
-                            dateString = currentDate,
-                            alignment = settings.clockHorizontalAlignment,
-                            showDate = settings.showDate,
-                            onClockClick = { viewModel.openClock() },
-                            onDateClick = { viewModel.openCalendar() },
-                            fontScale = settings.appFontScale,
-                            paddingLeftDp = settings.clockPaddingLeftDp,
-                            paddingRightDp = settings.clockPaddingRightDp,
-                            paddingTopDp = settings.clockPaddingTopDp,
-                            paddingBottomDp = settings.clockPaddingBottomDp,
-                            shadow = homeTextShadow
-                        )
+                        if (settings.showClock) {
+                            ClockHeader(
+                                timeString = currentTime,
+                                dateString = currentDate,
+                                alignment = settings.clockHorizontalAlignment,
+                                showDate = settings.showDate,
+                                onClockClick = { viewModel.openClock() },
+                                onDateClick = { viewModel.openCalendar() },
+                                fontScale = settings.appFontScale,
+                                paddingLeftDp = settings.clockPaddingLeftDp,
+                                paddingRightDp = settings.clockPaddingRightDp,
+                                paddingTopDp = settings.clockPaddingTopDp,
+                                paddingBottomDp = settings.clockPaddingBottomDp,
+                                shadow = homeTextShadow
+                            )
+                        }
                     }
 
                     val appsAlignment = when (appsPos) {
@@ -387,6 +348,7 @@ fun PallasHomeScreen(
                                     paddingRightDp = settings.screensPaddingRightDp,
                                     paddingTopDp = settings.screensPaddingTopDp,
                                     paddingBottomDp = settings.screensPaddingBottomDp,
+                                    appSpacingDp = settings.screensAppSpacingDp,
                                     isLoaded = isAppsLoaded,
                                     shadow = homeTextShadow,
                                     onAppClick = { app ->
@@ -439,6 +401,7 @@ fun PallasHomeScreen(
                                         paddingRightDp = settings.screensPaddingRightDp,
                                         paddingTopDp = settings.screensPaddingTopDp,
                                         paddingBottomDp = settings.screensPaddingBottomDp,
+                                        appSpacingDp = settings.screensAppSpacingDp,
                                         isLoaded = isAppsLoaded,
                                         shadow = homeTextShadow,
                                         onAppClick = { app ->

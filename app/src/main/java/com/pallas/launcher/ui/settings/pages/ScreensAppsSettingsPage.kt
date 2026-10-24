@@ -171,6 +171,22 @@ fun ScreensAppsSettingsPage(
                         steps = 15,
                         valueFormat = { "${it.toInt()} dp" }
                     )
+                    SettingsSliderRow(
+                        title = "App Row Spacing",
+                        persistedValue = settings.screensAppSpacingDp.toFloat(),
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensAppSpacingDp = value.toInt()) } },
+                        valueRange = 2f..24f,
+                        steps = 10,
+                        valueFormat = { "${it.toInt()} dp" }
+                    )
+                    SettingsSliderRow(
+                        title = "App Label Size",
+                        persistedValue = settings.screensFontScale,
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensFontScale = value) } },
+                        valueRange = 0.7f..1.5f,
+                        steps = 7,
+                        valueFormat = { "${(it * 100).toInt()}%" }
+                    )
                 }
             }
 

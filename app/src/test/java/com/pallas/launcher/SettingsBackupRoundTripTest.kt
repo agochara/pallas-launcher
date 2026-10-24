@@ -37,7 +37,7 @@ class SettingsBackupRoundTripTest {
             type == Boolean::class.javaPrimitiveType -> !(default as Boolean)
             type == Int::class.javaPrimitiveType -> (default as Int) + 3
             type == Float::class.javaPrimitiveType -> (default as Float) + 0.25f
-            type.isEnum -> type.enumConstants.first { it != default }
+            type.isEnum -> type.enumConstants!!.first { it != default }
             type == String::class.java -> if (default == "x1") "x2" else "x1"
             GestureAction::class.java.isAssignableFrom(type) -> GestureAction.LaunchApp("com.example.target")
             Set::class.java.isAssignableFrom(type) -> setOf("a.b.c", "d.e.f")

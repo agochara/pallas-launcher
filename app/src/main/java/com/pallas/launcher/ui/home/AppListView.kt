@@ -37,6 +37,7 @@ fun AppListView(
     paddingRightDp: Int = 32,
     paddingTopDp: Int = 12,
     paddingBottomDp: Int = 24,
+    appSpacingDp: Int = 10,
     isLoaded: Boolean = true,
     onAppClick: (ScreenApp) -> Unit,
     onAppLongClick: (ScreenApp) -> Unit,
@@ -142,7 +143,7 @@ fun AppListView(
                         onClick = { onAppClick(app) },
                         onLongClick = { onAppLongClick(app) }
                     )
-                    .padding(vertical = 10.dp)
+                    .padding(vertical = appSpacingDp.dp)
             )
         }
     }

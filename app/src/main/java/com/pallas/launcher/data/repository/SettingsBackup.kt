@@ -102,6 +102,7 @@ object SettingsBackup {
         put("clockVerticalPosition", s.clockVerticalPosition.name)
         put("clockHorizontalAlignment", s.clockHorizontalAlignment.name)
         put("is24HourClock", s.is24HourClock)
+        put("showClock", s.showClock)
         put("showDate", s.showDate)
         put("showBattery", s.showBattery)
         put("clockPaddingDp", s.clockPaddingDp)
@@ -117,6 +118,7 @@ object SettingsBackup {
         put("screensPaddingRightDp", s.screensPaddingRightDp)
         put("screensPaddingTopDp", s.screensPaddingTopDp)
         put("screensPaddingBottomDp", s.screensPaddingBottomDp)
+        put("screensAppSpacingDp", s.screensAppSpacingDp)
         put("nameLengthSortOrder", s.nameLengthSortOrder.name)
 
         put("appFontScale", s.appFontScale.toDouble())
@@ -217,6 +219,7 @@ object SettingsBackup {
             clockVerticalPosition = enumOf("clockVerticalPosition", base.clockVerticalPosition, ClockVerticalPosition.entries.toTypedArray()),
             clockHorizontalAlignment = enumOf("clockHorizontalAlignment", base.clockHorizontalAlignment, ClockHorizontalAlignment.entries.toTypedArray()),
             is24HourClock = o.optBoolean("is24HourClock", base.is24HourClock),
+            showClock = o.optBoolean("showClock", base.showClock),
             showDate = o.optBoolean("showDate", base.showDate),
             showBattery = o.optBoolean("showBattery", base.showBattery),
             clockPaddingDp = dp("clockPaddingDp", base.clockPaddingDp),
@@ -232,6 +235,7 @@ object SettingsBackup {
             screensPaddingRightDp = dp("screensPaddingRightDp", base.screensPaddingRightDp),
             screensPaddingTopDp = dp("screensPaddingTopDp", base.screensPaddingTopDp),
             screensPaddingBottomDp = dp("screensPaddingBottomDp", base.screensPaddingBottomDp),
+            screensAppSpacingDp = dp("screensAppSpacingDp", base.screensAppSpacingDp),
             nameLengthSortOrder = enumOf("nameLengthSortOrder", base.nameLengthSortOrder, NameLengthSortOrder.entries.toTypedArray()),
 
             appFontScale = scale("appFontScale", base.appFontScale),

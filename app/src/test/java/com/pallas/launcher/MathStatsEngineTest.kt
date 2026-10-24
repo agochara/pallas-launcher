@@ -460,8 +460,113 @@ class MathStatsEngineTest {
     }
 
     @Test
+    fun testWolframMiniCommandsAndOperators() {
+        // Prefix @
+        val prefixRes = MathStatsEngine.evaluate("= Sqrt @ 16", "=")
+        assertNotNull(prefixRes)
+        assertEquals("= 4", prefixRes?.primaryValue)
+
+        // Postfix //
+        val postfixRes = MathStatsEngine.evaluate("= 16 // Sqrt", "=")
+        assertNotNull(postfixRes)
+        assertEquals("= 4", postfixRes?.primaryValue)
+
+        val postfixTotal = MathStatsEngine.evaluate("= {1, 2, 3} // Total", "=")
+        assertNotNull(postfixTotal)
+        assertEquals("= 6", postfixTotal?.primaryValue)
+
+        // Map /@
+        val mapRes = MathStatsEngine.evaluate("= Sqrt /@ {4, 9, 16}", "=")
+        assertNotNull(mapRes)
+        assertEquals("{2, 3, 4}", mapRes?.primaryValue)
+
+        // Apply @@
+        val applyRes = MathStatsEngine.evaluate("= Plus @@ {1, 2, 3, 4}", "=")
+        assertNotNull(applyRes)
+        assertEquals("= 10", applyRes?.primaryValue)
+
+        // ReplaceAll /. with Rule ->
+        val replaceRes = MathStatsEngine.evaluate("= x^2 + 2*x + 1 /. x -> 3", "=")
+        assertNotNull(replaceRes)
+        assertEquals("= 16", replaceRes?.primaryValue)
+
+        // Pure functions # and &
+        val pureRes = MathStatsEngine.evaluate("= (#^2) & /@ {1, 2, 3}", "=")
+        assertNotNull(pureRes)
+        assertEquals("{1, 4, 9}", pureRes?.primaryValue)
+
+        // Additional pure function syntaxes
+        assertEquals("{1, 4, 9}", MathStatsEngine.evaluate("= (#^2 &) /@ {1, 2, 3}", "=")?.primaryValue)
+        assertEquals("{1, 4, 9}", MathStatsEngine.evaluate("= #^2 & /@ {1, 2, 3}", "=")?.primaryValue)
+        assertEquals("= 5", MathStatsEngine.evaluate("= Sqrt @ 16 + 1", "=")?.primaryValue)
+        assertEquals("= 5", MathStatsEngine.evaluate("= (Sqrt /@ {4, 9}) // Total", "=")?.primaryValue)
+
+        // Part indexing [[ ]]
+        val partRes1 = MathStatsEngine.evaluate("= {10, 20, 30}[[2]]", "=")
+        assertNotNull(partRes1)
+        assertEquals("= 20", partRes1?.primaryValue)
+
+        val partResNeg = MathStatsEngine.evaluate("= {10, 20, 30}[[-1]]", "=")
+        assertNotNull(partResNeg)
+        assertEquals("= 30", partResNeg?.primaryValue)
+
+        // Nested brackets
+        val nestedBrackets = MathStatsEngine.evaluate("= Total[Range[100]]", "=")
+        assertNotNull(nestedBrackets)
+        assertEquals("= 5050", nestedBrackets?.primaryValue)
+    }
+
+    @Test
+    fun testWolframControlFlowAndLoops() {
+        // Compound assignments
+        assertEquals("= 7", MathStatsEngine.evaluate("= x = 5; x += 2; x", "=")?.primaryValue)
+
+        // If
+        val ifTrue = MathStatsEngine.evaluate("= If[10 > 5, 42, 0]", "=")
+        assertEquals("= 42", ifTrue?.primaryValue)
+        val ifFalse = MathStatsEngine.evaluate("= If[10 < 5, 42, 0]", "=")
+        assertEquals("= 0", ifFalse?.primaryValue)
+
+        // Which
+        val whichRes = MathStatsEngine.evaluate("= Which[1 < 0, 10, 1 > 0, 20]", "=")
+        assertEquals("= 20", whichRes?.primaryValue)
+
+        // While loop
+        val whileRes = MathStatsEngine.evaluate("= s = 0; i = 1; While[i <= 5, s += i; i++]; s", "=")
+        assertEquals("= 15", whileRes?.primaryValue)
+
+        // For loop
+        val forRes = MathStatsEngine.evaluate("= s = 0; For[i = 1, i <= 4, i++, s += i]; s", "=")
+        assertEquals("= 10", forRes?.primaryValue)
+
+        // Do loop
+        val doRes = MathStatsEngine.evaluate("= s = 0; Do[s += i, {i, 5}]; s", "=")
+        assertEquals("= 15", doRes?.primaryValue)
+
+        // Select with EvenQ
+        val selectRes = MathStatsEngine.evaluate("= Select[{1, 2, 3, 4, 5, 6}, EvenQ]", "=")
+        assertEquals("{2, 4, 6}", selectRes?.primaryValue)
+
+        // NestList & FoldList
+        assertEquals("{1, 2, 4, 8, 16}", MathStatsEngine.evaluate("= NestList[# * 2 &, 1, 4]", "=")?.primaryValue)
+        assertEquals("{0, 1, 3, 6}", MathStatsEngine.evaluate("= FoldList[Plus, 0, {1, 2, 3}]", "=")?.primaryValue)
+    }
+
+    @Test
+    fun testWolframComputationTimeoutSafety() {
+        // Infinite While loop should terminate quickly and safely
+        val start = System.currentTimeMillis()
+        val timeoutRes = MathStatsEngine.evaluate("= While[True, 1]", "=")
+        val elapsed = System.currentTimeMillis() - start
+        assertNotNull(timeoutRes)
+        assertEquals("Timeout", timeoutRes?.badge)
+        assertTrue("Timeout must terminate within 1000ms, elapsed: ${elapsed}ms", elapsed < 1000)
+    }
+
+    @Test
     fun testExpectedShortfallBoundary() {
         val res = MathStatsEngine.evaluate("= ExpectedShortfall[{10, 20, 30, 40, 50}, 0.95]", "=")
         assertNotNull(res)
     }
 }
+

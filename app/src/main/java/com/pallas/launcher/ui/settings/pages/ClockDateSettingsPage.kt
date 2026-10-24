@@ -114,6 +114,12 @@ fun ClockDateSettingsPage(
                 SettingsSectionHeader("Format & Metadata")
                 SettingsGroup {
                     SettingsSwitchRow(
+                        title = "Show Clock",
+                        subtitle = "Display the digital clock on the home screen.",
+                        checked = settings.showClock,
+                        onCheckedChange = { viewModel.updateSettings { copy(showClock = it) } }
+                    )
+                    SettingsSwitchRow(
                         title = "24-Hour Time",
                         subtitle = "Display time in 24-hour military format instead of AM/PM.",
                         checked = settings.is24HourClock,
