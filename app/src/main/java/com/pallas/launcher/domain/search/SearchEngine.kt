@@ -41,9 +41,23 @@ class SearchEngine(
         if (trimmed.isEmpty()) return emptyList<LauncherSearchResult>() to null
 
         val eval = SmartCommandEngine.evaluateCommands(trimmed, contacts, webSearch, configs, defaultWeatherCity)
+        if (trimmed.startsWith("@")) {
+            return eval.immediateResults to null
+        }
         val mathCfg = configs["math"] ?: CommandConfig.DEFAULTS.getValue("math")
         val isMathPrefix = mathCfg.enabled && mathCfg.prefix.isNotEmpty() && trimmed.startsWith(mathCfg.prefix)
-        val appResults = if (isMathPrefix) emptyList() else searchIndex.search(trimmed).map { LauncherSearchResult.App(it) }
+        val isMathRichCard = mathCfg.enabled && eval.immediateResults.any {
+            it is LauncherSearchResult.RichCard && it.type == SmartCommandType.MATH_STATS
+        }
+        val texCfg = configs["tex"] ?: CommandConfig.DEFAULTS.getValue("tex")
+        val isTexWithArg = texCfg.enabled && eval.immediateResults.any {
+            it is LauncherSearchResult.RichCard && it.type == SmartCommandType.LATEX
+        }
+        val convertCfg = configs["convert"] ?: CommandConfig.DEFAULTS.getValue("convert")
+        val isConvertWithArg = convertCfg.enabled && eval.immediateResults.any {
+            it is LauncherSearchResult.RichCard && it.type == SmartCommandType.CONVERT
+        }
+        val appResults = if (isMathPrefix || isMathRichCard || isTexWithArg || isConvertWithArg) emptyList() else searchIndex.search(trimmed).map { LauncherSearchResult.App(it) }
 
         val trailing = eval.immediateResults.filter { it.id == SETTINGS_COMMAND_ID }
         val commandRows = eval.immediateResults.filter { it.id != SETTINGS_COMMAND_ID }

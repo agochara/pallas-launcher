@@ -14,10 +14,10 @@ import com.pallas.launcher.domain.model.HomeScreen
 import com.pallas.launcher.domain.model.LauncherSettings
 import com.pallas.launcher.domain.model.ScreenApp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 
@@ -37,23 +37,23 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val installedApps: StateFlow<List<AppItem>> = appRepository.installedApps
     val allInstalledApps: StateFlow<List<AppItem>> = appRepository.rawInstalledApps
 
+    private val _selectedScreenId = MutableStateFlow(uiPrefs.getString("current_screen_id", null))
+
     val currentScreenIndex: StateFlow<Int> = combine(
         screenRepository.screens,
-        settingsRepository.settings
-    ) { screenList, _ ->
-        val id = withContext(Dispatchers.IO) { uiPrefs.getString("current_screen_id", null) }
-        val idx = if (id != null) screenList.indexOfFirst { it.id == id } else 0
-        if (screenList.isEmpty()) 0 else idx.coerceIn(0, screenList.size - 1)
-    }.flowOn(Dispatchers.IO)
-     .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+        _selectedScreenId
+    ) { screenList, id ->
+        if (screenList.isEmpty()) 0
+        else {
+            val idx = if (id != null) screenList.indexOfFirst { it.id == id } else 0
+            idx.coerceIn(0, screenList.lastIndex)
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     fun setScreenIndex(index: Int) {
         val id = screens.value.getOrNull(index)?.id ?: return
+        _selectedScreenId.value = id
         uiPrefs.edit().putString("current_screen_id", id).apply()
-    }
-
-    fun reloadAppsAndIcons() {
-        appRepository.reloadApps(clearAllIcons = true)
     }
 
     fun updateSettings(transform: LauncherSettings.() -> LauncherSettings) =
@@ -66,9 +66,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun reorderApps(screenId: String, apps: List<ScreenApp>) = screenRepository.reorderApps(screenId, apps)
     fun removeAppFromScreen(screenId: String, uniqueKey: String) = screenRepository.removeAppFromScreen(screenId, uniqueKey)
     fun updateAppLabel(screenId: String, uniqueKey: String, newLabel: String) =
-        screenRepository.updateAppLabel(screenId, uniqueKey, newLabel, settings.value.nameLengthSortOrder)
+        screenRepository.updateAppLabel(screenId, uniqueKey, newLabel, com.pallas.launcher.domain.model.NameLengthSortOrder.OFF)
     fun addAppsToScreen(screenId: String, apps: List<AppItem>) =
-        screenRepository.addAppsToScreen(screenId, apps, settings.value.nameLengthSortOrder)
+        screenRepository.addAppsToScreen(screenId, apps, com.pallas.launcher.domain.model.NameLengthSortOrder.OFF)
     fun sortedForDisplay(apps: List<ScreenApp>): List<ScreenApp> =
         screenRepository.sortAppsByNameLength(apps, settings.value.nameLengthSortOrder)
 
@@ -81,16 +81,27 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         settingsRepository.addSearchContact(nickname, name, phoneNumber)
     fun removeSearchContact(id: String) = settingsRepository.removeSearchContact(id)
 
-    fun updateCommandConfig(id: String, enabled: Boolean, prefix: String) {
+    fun updateCommandConfig(id: String, enabled: Boolean, prefix: String): String? {
         val cleanPrefix = prefix.trim()
-        if (cleanPrefix.isEmpty() || cleanPrefix.contains("\\s".toRegex())) return
+        if (cleanPrefix.isEmpty()) return "Prefix cannot be blank"
+        if (cleanPrefix.contains("\\s".toRegex())) return "Prefix cannot contain spaces"
+        val currentConfigs = settings.value.commandConfigs
+        val conflict = currentConfigs.values.firstOrNull {
+            it.id != id && it.enabled && it.prefix.equals(cleanPrefix, ignoreCase = true)
+        }
+        if (conflict != null && enabled) {
+            return "Prefix '$cleanPrefix' is already used by ${conflict.label}"
+        }
         updateSettings {
-            val conflict = commandConfigs.values.firstOrNull { it.id != id && it.enabled && it.prefix.equals(cleanPrefix, ignoreCase = true) }
-            if (conflict != null && enabled) return@updateSettings this
+            val innerConflict = commandConfigs.values.firstOrNull {
+                it.id != id && it.enabled && it.prefix.equals(cleanPrefix, ignoreCase = true)
+            }
+            if (innerConflict != null && enabled) return@updateSettings this
             val existing = commandConfigs[id] ?: CommandConfig.DEFAULTS[id]
                 ?: CommandConfig(id, id, enabled, cleanPrefix)
             copy(commandConfigs = commandConfigs + (id to existing.copy(enabled = enabled, prefix = cleanPrefix)))
         }
+        return null
     }
 
     sealed interface ImportOutcome {
@@ -99,7 +110,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     suspend fun buildBackupJson(): String = withContext(Dispatchers.Default) {
-        SettingsBackup.export(settings.value, screens.value, screenRepository)
+        SettingsBackup.export(
+            settings = settings.value,
+            screens = screens.value,
+            screenRepository = screenRepository,
+            customAppLabels = screenRepository.customAppLabels.value
+        )
     }
 
     suspend fun previewBackup(text: String): SettingsBackup.ParseResult = withContext(Dispatchers.Default) {
@@ -112,7 +128,27 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             is SettingsBackup.ParseResult.Ok -> {
                 val parsed = result.parsed
                 settingsRepository.replaceAll(parsed.settings)
-                parsed.screensJson?.let { screenRepository.replaceAll(screenRepository.parseScreens(it)) }
+                val restoredScreens = parsed.screensJson?.let {
+                    val list = screenRepository.parseScreens(it)
+                    screenRepository.replaceAll(list)
+                    list
+                }
+                if (parsed.hasCustomAppLabels) {
+                    screenRepository.replaceCustomAppLabels(parsed.customAppLabels)
+                } else if (restoredScreens != null) {
+                    val derivedLabels = buildMap {
+                        restoredScreens.forEach { screen ->
+                            screen.apps.forEach { app ->
+                                app.customLabel?.trim()?.takeIf { it.isNotEmpty() }?.let { put(app.uniqueKey, it) }
+                            }
+                        }
+                    }
+                    screenRepository.replaceCustomAppLabels(derivedLabels)
+                }
+                restoredScreens?.firstOrNull()?.id?.let { firstId ->
+                    _selectedScreenId.value = firstId
+                    uiPrefs.edit().putString("current_screen_id", firstId).apply()
+                }
                 ImportOutcome.Success(parsed.screenCount, parsed.appCount)
             }
         }

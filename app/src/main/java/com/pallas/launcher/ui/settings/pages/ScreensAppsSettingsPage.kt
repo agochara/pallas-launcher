@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -66,6 +67,8 @@ import com.pallas.launcher.ui.settings.components.SettingsLargeTopBar
 import com.pallas.launcher.ui.settings.components.SettingsSectionHeader
 import com.pallas.launcher.ui.settings.components.SettingsSegmentedRow
 import com.pallas.launcher.ui.settings.components.SettingsSliderRow
+import com.pallas.launcher.ui.theme.LauncherTypography
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,11 +82,15 @@ fun ScreensAppsSettingsPage(
     val colorScheme = MaterialTheme.colorScheme
     val settings by viewModel.settings.collectAsState()
     val installedApps by viewModel.installedApps.collectAsState()
+    val allInstalledApps by viewModel.allInstalledApps.collectAsState()
     val haptic = LocalHapticFeedback.current
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     var selectedIndex by remember { mutableStateOf(currentScreenIndex.coerceIn(0, (screens.size - 1).coerceAtLeast(0))) }
+    LaunchedEffect(currentScreenIndex, screens.size) {
+        selectedIndex = if (screens.isNotEmpty()) currentScreenIndex.coerceIn(0, screens.lastIndex) else 0
+    }
     val activeScreen = screens.getOrNull(selectedIndex) ?: screens.firstOrNull()
 
     var draggedScreenIndex by remember { mutableStateOf<Int?>(null) }
@@ -97,6 +104,7 @@ fun ScreensAppsSettingsPage(
     var newContextTag by remember { mutableStateOf("") }
 
     var screenToRename by remember { mutableStateOf<HomeScreen?>(null) }
+    var screenToDelete by remember { mutableStateOf<HomeScreen?>(null) }
     var appToRename by remember { mutableStateOf<ScreenApp?>(null) }
     var showAppPickerSheet by remember { mutableStateOf(false) }
 
@@ -142,42 +150,47 @@ fun ScreensAppsSettingsPage(
                     SettingsSliderRow(
                         title = "Left Padding",
                         persistedValue = settings.screensPaddingLeftDp.toFloat(),
-                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingLeftDp = value.toInt()) } },
-                        valueRange = 0f..64f,
-                        steps = 15,
-                        valueFormat = { "${it.toInt()} dp" }
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingLeftDp = value.roundToInt()) } },
+                        valueRange = 0f..160f,
+                        steps = 0,
+                        valueFormat = { "${it.roundToInt()} dp" },
+                        stepIncrement = 1f
                     )
                     SettingsSliderRow(
                         title = "Right Padding",
                         persistedValue = settings.screensPaddingRightDp.toFloat(),
-                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingRightDp = value.toInt()) } },
-                        valueRange = 0f..64f,
-                        steps = 15,
-                        valueFormat = { "${it.toInt()} dp" }
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingRightDp = value.roundToInt()) } },
+                        valueRange = 0f..160f,
+                        steps = 0,
+                        valueFormat = { "${it.roundToInt()} dp" },
+                        stepIncrement = 1f
                     )
                     SettingsSliderRow(
                         title = "Top Padding",
                         persistedValue = settings.screensPaddingTopDp.toFloat(),
-                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingTopDp = value.toInt()) } },
-                        valueRange = 0f..64f,
-                        steps = 15,
-                        valueFormat = { "${it.toInt()} dp" }
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingTopDp = value.roundToInt()) } },
+                        valueRange = 0f..160f,
+                        steps = 0,
+                        valueFormat = { "${it.roundToInt()} dp" },
+                        stepIncrement = 1f
                     )
                     SettingsSliderRow(
                         title = "Bottom Padding",
                         persistedValue = settings.screensPaddingBottomDp.toFloat(),
-                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingBottomDp = value.toInt()) } },
-                        valueRange = 0f..64f,
-                        steps = 15,
-                        valueFormat = { "${it.toInt()} dp" }
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensPaddingBottomDp = value.roundToInt()) } },
+                        valueRange = 0f..160f,
+                        steps = 0,
+                        valueFormat = { "${it.roundToInt()} dp" },
+                        stepIncrement = 1f
                     )
                     SettingsSliderRow(
                         title = "App Row Spacing",
                         persistedValue = settings.screensAppSpacingDp.toFloat(),
-                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensAppSpacingDp = value.toInt()) } },
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensAppSpacingDp = value.roundToInt()) } },
                         valueRange = 2f..24f,
-                        steps = 10,
-                        valueFormat = { "${it.toInt()} dp" }
+                        steps = 0,
+                        valueFormat = { "${it.roundToInt()} dp" },
+                        stepIncrement = 1f
                     )
                     SettingsSliderRow(
                         title = "App Label Size",
@@ -185,7 +198,7 @@ fun ScreensAppsSettingsPage(
                         onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensFontScale = value) } },
                         valueRange = 0.7f..1.5f,
                         steps = 7,
-                        valueFormat = { "${(it * 100).toInt()}%" }
+                        valueFormat = { "${(it * 100f).roundToInt()}%" }
                     )
                 }
             }
@@ -223,15 +236,17 @@ fun ScreensAppsSettingsPage(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp),
+                        .padding(start = 28.dp, end = 20.dp, top = 24.dp, bottom = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Screens Manager",
-                        style = MaterialTheme.typography.labelLarge,
+                        style = LauncherTypography.settingsSectionHeader,
                         color = colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp)
                     )
                     IconButton(
                         onClick = { showAddScreenDialog = true },
@@ -346,10 +361,7 @@ fun ScreensAppsSettingsPage(
                         }
 
                         if (screens.size > 1) {
-                            TextButton(onClick = {
-                                viewModel.removeScreen(activeScreen.id)
-                                selectedIndex = 0
-                            }) {
+                            TextButton(onClick = { screenToDelete = activeScreen }) {
                                 Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp), tint = colorScheme.error)
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Delete", color = colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -364,15 +376,17 @@ fun ScreensAppsSettingsPage(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp),
+                        .padding(start = 28.dp, end = 20.dp, top = 24.dp, bottom = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Apps on '${activeScreen?.name ?: "Screen"}'",
-                        style = MaterialTheme.typography.labelLarge,
+                        style = LauncherTypography.settingsSectionHeader,
                         color = colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp)
                     )
                     IconButton(
                         onClick = { showAppPickerSheet = true },
@@ -482,7 +496,7 @@ fun ScreensAppsSettingsPage(
                                     Icon(
                                         imageVector = Icons.Default.DragHandle,
                                         contentDescription = "Drag to reorder",
-                                        tint = colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        tint = colorScheme.onSurfaceVariant.copy(alpha = if (sortActive) 0.25f else 0.6f),
                                         modifier = Modifier.size(24.dp)
                                     )
                                 }
@@ -546,10 +560,10 @@ fun ScreensAppsSettingsPage(
                 SettingsSectionHeader("Hidden from App List (${settings.hiddenFromAppList.size})")
                 if (settings.hiddenFromAppList.isEmpty()) {
                     Text(
-                        text = "No apps are hidden from the app list. To hide an app from the drawer only, long press it and choose 'Hide from App List'.",
+                        text = "No apps are hidden from the app list. To hide an app from the app list only, long press it and choose 'Hide from App List'.",
                         color = colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp)
                     )
                 } else {
                     Column(
@@ -559,8 +573,8 @@ fun ScreensAppsSettingsPage(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         settings.hiddenFromAppList.forEach { key ->
-                            val appItem = installedApps.find { it.uniqueKey == key }
-                                ?: installedApps.find { it.packageName == key }
+                            val appItem = allInstalledApps.find { it.uniqueKey == key }
+                                ?: allInstalledApps.find { it.packageName == key }
                             val appLabel = appItem?.label ?: key
                             Row(
                                 modifier = Modifier
@@ -607,7 +621,7 @@ fun ScreensAppsSettingsPage(
                         text = "No apps are hidden. To completely hide an app across launcher, search and screens, long press it and choose 'Hide App'.",
                         color = colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp)
                     )
                 } else {
                     Column(
@@ -617,8 +631,8 @@ fun ScreensAppsSettingsPage(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         settings.hiddenApps.forEach { key ->
-                            val appItem = installedApps.find { it.uniqueKey == key }
-                                ?: installedApps.find { it.packageName == key }
+                            val appItem = allInstalledApps.find { it.uniqueKey == key }
+                                ?: allInstalledApps.find { it.packageName == key }
                             val appLabel = appItem?.label ?: key
                             Row(
                                 modifier = Modifier
@@ -655,7 +669,7 @@ fun ScreensAppsSettingsPage(
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(28.dp))
+                Spacer(modifier = Modifier.height(32.dp))
             }
         }
     }
@@ -748,6 +762,38 @@ fun ScreensAppsSettingsPage(
             },
             dismissButton = {
                 TextButton(onClick = { screenToRename = null }) {
+                    Text("Cancel", color = colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
+
+    // Delete Screen Confirmation Dialog
+    screenToDelete?.let { s ->
+        AlertDialog(
+            onDismissRequest = { screenToDelete = null },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = colorScheme.surfaceContainerHigh,
+            title = { Text(text = "Delete '${s.name}'?", color = colorScheme.onSurface) },
+            text = {
+                Text(
+                    text = if (s.apps.isEmpty()) "This empty home screen will be removed."
+                    else "This screen and its ${s.apps.size} app shortcut(s) will be removed.",
+                    color = colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.removeScreen(s.id)
+                    selectedIndex = 0
+                    viewModel.setScreenIndex(0)
+                    screenToDelete = null
+                }) {
+                    Text("Delete", color = colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { screenToDelete = null }) {
                     Text("Cancel", color = colorScheme.onSurfaceVariant)
                 }
             }

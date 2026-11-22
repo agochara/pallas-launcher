@@ -2,10 +2,12 @@ package com.pallas.launcher.ui.settings.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,13 +18,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import kotlin.math.round
+import kotlin.math.roundToInt
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -31,7 +39,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
@@ -47,7 +54,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.Role
 import com.pallas.launcher.ui.theme.LauncherTypography
 
 /** Outer corners of a grouped card; the rows inside use a much smaller radius -> the M3E "segmented list" look. */
@@ -89,27 +99,6 @@ fun SettingsLargeTopBar(
     )
 }
 
-/** Kept for pages that are not migrated yet (non-collapsing). */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SettingsTopBar(title: String, onBack: () -> Unit) {
-    TopAppBar(
-        title = {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold
-            )
-        },
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-        },
-        colors = settingsTopBarColors()
-    )
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun settingsTopBarColors(): TopAppBarColors = TopAppBarDefaults.topAppBarColors(
@@ -128,7 +117,10 @@ fun SettingsSectionHeader(title: String) {
         text = title,
         style = LauncherTypography.settingsSectionHeader,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 28.dp, top = 24.dp, bottom = 8.dp)
+        textAlign = TextAlign.Start,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 28.dp, end = 28.dp, top = 24.dp, bottom = 8.dp)
     )
 }
 
@@ -163,7 +155,7 @@ fun SettingsSwitchRow(
         shape = InnerShape,
         modifier = modifier
             .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
     ) {
         Row(
             modifier = Modifier
@@ -173,14 +165,24 @@ fun SettingsSwitchRow(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Start
+                )
                 if (subtitle != null) {
-                    Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Start
+                    )
                 }
             }
             Switch(
                 checked = checked,
-                onCheckedChange = onCheckedChange,
+                onCheckedChange = null,
                 thumbContent = if (checked) {
                     { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(SwitchDefaults.IconSize)) }
                 } else null
@@ -203,12 +205,12 @@ fun SettingsNavRow(
         shape = InnerShape,
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = 20.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (icon != null) {
@@ -228,10 +230,20 @@ fun SettingsNavRow(
                 }
                 Spacer(modifier = Modifier.width(16.dp))
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Start
+                )
                 if (subtitle != null) {
-                    Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Start
+                    )
                 }
             }
             Icon(
@@ -255,6 +267,14 @@ fun <T> SettingsSegmentedRow(
     label: (T) -> String,
     modifier: Modifier = Modifier
 ) {
+    val useTwoByTwoGrid = options.size == 4 && options.any { label(it).length > 5 }
+    val buttonTextStyle = if (!useTwoByTwoGrid && options.size >= 4 && options.none { label(it).length > 5 }) {
+        MaterialTheme.typography.labelMedium
+    } else {
+        MaterialTheme.typography.labelLarge
+    }
+    val buttonPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
+
     Surface(color = rowContainerColor(), shape = InnerShape, modifier = modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
@@ -262,25 +282,76 @@ fun <T> SettingsSegmentedRow(
                 .padding(horizontal = 20.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                options.forEachIndexed { index, option ->
-                    val shapes = when {
-                        options.size == 1 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
-                        index == 0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
-                        index == options.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
-                        else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Start
+            )
+            if (useTwoByTwoGrid) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    options.chunked(2).forEach { rowOptions ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            rowOptions.forEachIndexed { index, option ->
+                                val shapes = when {
+                                    rowOptions.size == 1 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                                    index == 0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                                    else -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                                }
+                                ToggleButton(
+                                    checked = option == selected,
+                                    onCheckedChange = { if (it) onSelected(option) },
+                                    shapes = shapes,
+                                    contentPadding = buttonPadding,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = label(option),
+                                        style = buttonTextStyle,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
                     }
-                    ToggleButton(
-                        checked = option == selected,
-                        onCheckedChange = { if (it) onSelected(option) },
-                        shapes = shapes,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(label(option), style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    options.forEachIndexed { index, option ->
+                        val shapes = when {
+                            options.size == 1 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                            index == 0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                            index == options.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                            else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                        }
+                        ToggleButton(
+                            checked = option == selected,
+                            onCheckedChange = { if (it) onSelected(option) },
+                            shapes = shapes,
+                            contentPadding = buttonPadding,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = label(option),
+                                style = buttonTextStyle,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
             }
@@ -295,7 +366,9 @@ fun SettingsSliderRow(
     onValueChangeFinished: (Float) -> Unit,
     valueRange: ClosedFloatingPointRange<Float>,
     steps: Int = 0,
-    valueFormat: (Float) -> String = { "${(it * 100).toInt()}%" },
+    valueFormat: (Float) -> String = { "${(it * 100f).roundToInt()}%" },
+    enabled: Boolean = true,
+    stepIncrement: Float? = null,
     modifier: Modifier = Modifier
 ) {
     var sliderPosition by remember(persistedValue) { mutableFloatStateOf(persistedValue) }
@@ -308,24 +381,88 @@ fun SettingsSliderRow(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.weight(1f).padding(end = 12.dp)
+                )
                 Text(
                     valueFormat(sliderPosition),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
+                    color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
                 )
             }
-            Slider(
-                value = sliderPosition,
-                onValueChange = { sliderPosition = it },
-                onValueChangeFinished = { onValueChangeFinished(sliderPosition) },
-                valueRange = valueRange,
-                steps = steps
-            )
+            if (stepIncrement != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val buttonColors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    FilledTonalIconButton(
+                        onClick = {
+                            val base = round(sliderPosition / stepIncrement) * stepIncrement
+                            val next = (base - stepIncrement).coerceIn(valueRange.start, valueRange.endInclusive)
+                            sliderPosition = next
+                            onValueChangeFinished(next)
+                        },
+                        enabled = enabled && sliderPosition > valueRange.start + 1e-4f,
+                        colors = buttonColors,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Remove,
+                            contentDescription = "Decrease $title",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Slider(
+                        value = sliderPosition,
+                        onValueChange = { sliderPosition = it },
+                        onValueChangeFinished = { onValueChangeFinished(sliderPosition) },
+                        valueRange = valueRange,
+                        steps = steps,
+                        enabled = enabled,
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilledTonalIconButton(
+                        onClick = {
+                            val base = round(sliderPosition / stepIncrement) * stepIncrement
+                            val next = (base + stepIncrement).coerceIn(valueRange.start, valueRange.endInclusive)
+                            sliderPosition = next
+                            onValueChangeFinished(next)
+                        },
+                        enabled = enabled && sliderPosition < valueRange.endInclusive - 1e-4f,
+                        colors = buttonColors,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Increase $title",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            } else {
+                Slider(
+                    value = sliderPosition,
+                    onValueChange = { sliderPosition = it },
+                    onValueChangeFinished = { onValueChangeFinished(sliderPosition) },
+                    valueRange = valueRange,
+                    steps = steps,
+                    enabled = enabled
+                )
+            }
         }
     }
 }

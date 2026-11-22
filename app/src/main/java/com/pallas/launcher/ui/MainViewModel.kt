@@ -2,33 +2,41 @@ package com.pallas.launcher.ui
 
 import android.app.Application
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Process
 import android.os.UserHandle
+import android.provider.ContactsContract
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pallas.launcher.data.repository.AppRepository
 import com.pallas.launcher.data.repository.AppUsageTracker
 import com.pallas.launcher.data.repository.ScreenRepository
-import com.pallas.launcher.data.repository.SettingsBackup
 import com.pallas.launcher.data.repository.SettingsRepository
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.model.GestureAction
 import com.pallas.launcher.domain.model.HomeScreen
 import com.pallas.launcher.domain.model.LauncherSettings
+import com.pallas.launcher.domain.model.WolframRequestTrigger
+import com.pallas.launcher.domain.model.WolframSubmitMode
 import com.pallas.launcher.domain.model.NameLengthSortOrder
 import com.pallas.launcher.domain.model.ScreenApp
 import com.pallas.launcher.domain.search.AsyncCommandRequest
 import com.pallas.launcher.domain.search.LauncherSearchResult
+import com.pallas.launcher.domain.search.MathStatsEngine
 import com.pallas.launcher.domain.search.SETTINGS_COMMAND_ID
 import com.pallas.launcher.domain.search.SearchEngine
+import com.pallas.launcher.domain.search.SmartCommandType
 import com.pallas.launcher.domain.search.WebSearchConfig
 import com.pallas.launcher.domain.search.isInertOnTap
 import com.pallas.launcher.platform.BatteryManagerHelper
 import com.pallas.launcher.platform.BrowserHelper
+import com.pallas.launcher.platform.CurrencyRateService
 import com.pallas.launcher.platform.LiveCommandService
 import com.pallas.launcher.platform.SystemActionsManager
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +52,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import com.pallas.launcher.domain.model.SearchContact
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -162,6 +173,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _searchResults = MutableStateFlow<List<LauncherSearchResult>>(emptyList())
     val searchResults: StateFlow<List<LauncherSearchResult>> = _searchResults.asStateFlow()
+    private val deviceContacts = MutableStateFlow<List<SearchContact>>(emptyList())
 
     private var liveCommandJob: Job? = null
 
@@ -212,13 +224,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
-        context.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        CurrencyRateService.init(context)
+        ContextCompat.registerReceiver(
+            context,
+            batteryReceiver,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         val timeFilter = IntentFilter().apply {
             addAction(Intent.ACTION_TIME_TICK)
             addAction(Intent.ACTION_TIME_CHANGED)
             addAction(Intent.ACTION_TIMEZONE_CHANGED)
         }
-        context.registerReceiver(timeTickReceiver, timeFilter)
+        ContextCompat.registerReceiver(
+            context,
+            timeTickReceiver,
+            timeFilter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         updateTimeAndDate()
 
         viewModelScope.launch {
@@ -324,6 +347,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun closeSettings() {
         if (_overlay.value is LauncherOverlay.Settings) {
+            _currentScreenIndex.value = savedScreenIndex()
             _overlay.value = LauncherOverlay.None
         }
     }
@@ -383,6 +407,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             is LauncherOverlay.RenameApp -> {
                 _overlay.value = if (current.returnToDrawer) LauncherOverlay.Drawer else LauncherOverlay.None
             }
+            is LauncherOverlay.Settings -> {
+                _currentScreenIndex.value = savedScreenIndex()
+                _overlay.value = LauncherOverlay.None
+            }
             else -> {
                 _overlay.value = LauncherOverlay.None
             }
@@ -398,14 +426,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val s = settings.value
-        val (immediate, asyncRequest) = searchEngine.searchAll(
+        val contacts = mergeSearchContacts(s.searchContacts, deviceContacts.value)
+        val (rawImmediate, asyncRequest) = searchEngine.searchAll(
             query,
-            s.searchContacts,
+            contacts,
             webSearchConfig(s),
             s.commandConfigs,
             s.defaultWeatherCity
         )
+        val waQuery = wolframArgument(query, s)
+        val immediate = if (waQuery != null && asyncRequest is AsyncCommandRequest.Wolfram) {
+            when {
+                s.wolframSubmitMode == WolframSubmitMode.WEBSITE -> rawImmediate.map {
+                    if (it is LauncherSearchResult.RichCard && it.type == SmartCommandType.WOLFRAM && it.isLoading) {
+                        it.copy(
+                            isLoading = false,
+                            primaryValue = "Open in browser",
+                            subtitle = "",
+                            execute = { ctx ->
+                                SystemActionsManager.openUrl(ctx, "https://www.wolframalpha.com/input?i=${android.net.Uri.encode(waQuery)}")
+                            }
+                        )
+                    } else it
+                }
+                s.wolframRequestTrigger == WolframRequestTrigger.ENTER -> rawImmediate.map {
+                    if (it is LauncherSearchResult.RichCard && it.type == SmartCommandType.WOLFRAM && it.isLoading) {
+                        it.copy(
+                            isLoading = false,
+                            primaryValue = "Query Wolfram|Alpha",
+                            subtitle = "",
+                            execute = {}
+                        )
+                    } else it
+                }
+                else -> rawImmediate
+            }
+        } else rawImmediate
         _searchResults.value = immediate
+
+        if (immediate.any { it is LauncherSearchResult.RichCard && it.type == SmartCommandType.CONVERT } &&
+            CurrencyRateService.isStale()
+        ) {
+            CurrencyRateService.refreshInBackground {
+                if (_searchQuery.value == query && _overlay.value is LauncherOverlay.Search) {
+                    onSearchQueryChanged(query)
+                }
+            }
+        }
 
         if (s.autoLaunchSingleMatch && asyncRequest == null && query.trim().length >= 2) {
             val only = immediate.singleOrNull()
@@ -415,15 +482,126 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        if (asyncRequest != null) {
+        if (asyncRequest != null && (asyncRequest !is AsyncCommandRequest.Wolfram ||
+                (s.wolframRequestTrigger == WolframRequestTrigger.IDLE && s.wolframSubmitMode == WolframSubmitMode.API))) {
             liveCommandJob = viewModelScope.launch {
-                delay(180)
+                val debounceMs = when (asyncRequest) {
+                    is AsyncCommandRequest.Wolfram -> s.wolframIdleDelaySeconds * 1000L
+                    is AsyncCommandRequest.MathPlot -> 260L
+                    else -> 180L
+                }
+                delay(debounceMs)
+                if (_searchQuery.value != query) return@launch
                 val resolved = resolveLiveCommand(asyncRequest)
+                if (_searchQuery.value != query) return@launch
                 _searchResults.value = _searchResults.value.map { current ->
-                    if (current is LauncherSearchResult.RichCard && current.isLoading) resolved else current
+                    if (current is LauncherSearchResult.RichCard && current.isLoading && current.type == resolved.type) resolved else current
                 }
             }
         }
+    }
+
+    /** Handles Enter/search-button for explicit Wolfram queries or pending debounced plot evaluations; all other searches keep normal selection behavior. */
+    fun submitWolframQuery(): Boolean {
+        val loadingPlot = _searchResults.value.firstOrNull {
+            it is LauncherSearchResult.RichCard && it.type == SmartCommandType.MATH_STATS && it.isLoading
+        }
+        if (loadingPlot != null) {
+            liveCommandJob?.cancel()
+            val q = _searchQuery.value
+            val mathPrefix = settings.value.commandConfigs["math"]?.takeIf { it.enabled }?.prefix?.trim().orEmpty()
+            liveCommandJob = viewModelScope.launch {
+                val resolved = resolveLiveCommand(AsyncCommandRequest.MathPlot(q, mathPrefix))
+                if (_searchQuery.value != q) return@launch
+                _searchResults.value = _searchResults.value.map { current ->
+                    if (current is LauncherSearchResult.RichCard && current.type == SmartCommandType.MATH_STATS && current.isLoading) resolved else current
+                }
+            }
+            return true
+        }
+
+        val s = settings.value
+        val query = _searchQuery.value
+        val argument = wolframArgument(query, s) ?: return false
+        if (s.wolframSubmitMode == WolframSubmitMode.WEBSITE) {
+            liveCommandJob?.cancel()
+            dismissOverlay()
+            SystemActionsManager.openUrl(context, "https://www.wolframalpha.com/input?i=${android.net.Uri.encode(argument)}")
+            return true
+        }
+        val currentCard = _searchResults.value.firstOrNull {
+            it is LauncherSearchResult.RichCard && it.type == SmartCommandType.WOLFRAM
+        } as? LauncherSearchResult.RichCard ?: return true
+        val isPendingOrLoading = currentCard.isLoading || currentCard.id.startsWith("wa_loading_")
+        if (!isPendingOrLoading) {
+            return false
+        }
+        liveCommandJob?.cancel()
+        _searchResults.value = _searchResults.value.map { current ->
+            if (current is LauncherSearchResult.RichCard && current.type == SmartCommandType.WOLFRAM) {
+                current.copy(isLoading = true, primaryValue = "", subtitle = "querying Wolfram|Alpha…")
+            } else current
+        }
+        liveCommandJob = viewModelScope.launch {
+            val resolved = resolveLiveCommand(AsyncCommandRequest.Wolfram(argument))
+            if (_searchQuery.value != query) return@launch
+            _searchResults.value = _searchResults.value.map { current ->
+                if (current is LauncherSearchResult.RichCard && current.type == SmartCommandType.WOLFRAM) resolved else current
+            }
+        }
+        return true
+    }
+
+    private fun wolframArgument(query: String, s: LauncherSettings): String? {
+        val prefix = s.commandConfigs["wolfram"]?.takeIf { it.enabled }?.prefix?.trim().orEmpty()
+        if (prefix.isEmpty()) return null
+        val trimmed = query.trim()
+        if (!trimmed.startsWith(prefix, ignoreCase = true)) return null
+        if (trimmed.length > prefix.length && !trimmed[prefix.length].isWhitespace()) return null
+        return trimmed.drop(prefix.length).trim().takeIf { it.isNotEmpty() }
+    }
+
+    fun refreshDeviceContacts() {
+        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = runCatching {
+                val contacts = mutableListOf<SearchContact>()
+                val projection = arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                )
+                context.contentResolver.query(
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    projection,
+                    null,
+                    null,
+                    "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} COLLATE NOCASE ASC"
+                )?.use { cursor ->
+                    val idColumn = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
+                    val nameColumn = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                    val numberColumn = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                    while (cursor.moveToNext()) {
+                        val id = if (idColumn >= 0) cursor.getString(idColumn).orEmpty() else ""
+                        val name = if (nameColumn >= 0) cursor.getString(nameColumn).orEmpty() else ""
+                        val number = if (numberColumn >= 0) cursor.getString(numberColumn).orEmpty() else ""
+                        if (name.isNotBlank() && number.isNotBlank()) {
+                            contacts += SearchContact("device:$id:$number", name, name, number)
+                        }
+                    }
+                }
+                contacts.distinctBy { it.phoneNumber.filter(Char::isDigit) }
+            }.getOrDefault(emptyList())
+            deviceContacts.value = loaded
+            withContext(Dispatchers.Main) {
+                if (_searchQuery.value.startsWith("@")) onSearchQueryChanged(_searchQuery.value)
+            }
+        }
+    }
+
+    private fun mergeSearchContacts(saved: List<SearchContact>, device: List<SearchContact>): List<SearchContact> {
+        val savedNumbers = saved.map { it.phoneNumber.filter(Char::isDigit) }.filter { it.isNotEmpty() }.toSet()
+        return saved + device.filter { it.phoneNumber.filter(Char::isDigit) !in savedNumbers }
     }
 
     private suspend fun resolveLiveCommand(request: AsyncCommandRequest): LauncherSearchResult.RichCard =
@@ -436,6 +614,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             is AsyncCommandRequest.Weather -> LiveCommandService.fetchWeatherOrSolar(request.city, request.isSolarOnly)
             is AsyncCommandRequest.Wolfram -> LiveCommandService.fetchWolframShortAnswer(request.query, settings.value.wolframAppId)
+            is AsyncCommandRequest.MathPlot -> withContext(Dispatchers.Default) {
+                val out = MathStatsEngine.evaluate(request.rawInput, request.prefix)
+                    ?: MathStatsEngine.evaluate(request.rawInput, "")
+                if (out != null) {
+                    LauncherSearchResult.RichCard(
+                        id = "cmd_math_${out.title}",
+                        type = SmartCommandType.MATH_STATS,
+                        title = out.title,
+                        primaryValue = out.primaryValue,
+                        consoleOutput = out.consoleOutput,
+                        chart = out.chart,
+                        badgeText = out.badge,
+                        isBadgePositive = true,
+                        subtitle = out.subtitle,
+                        hasInfoManual = false,
+                        execute = { ctx ->
+                            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                            cm?.setPrimaryClip(ClipData.newPlainText("Pallas Math", out.copyText))
+                            Toast.makeText(ctx, "Copied ${out.copyText}", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                } else {
+                    LauncherSearchResult.RichCard(
+                        id = "cmd_math_plot_error",
+                        type = SmartCommandType.MATH_STATS,
+                        title = request.rawInput,
+                        subtitle = "Could not evaluate plot — verify domain or syntax",
+                        isLoading = false
+                    )
+                }
+            }
         }
 
     private val browserLabelCache = HashMap<String, String?>()
@@ -448,6 +657,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun launchSearchResult(result: LauncherSearchResult) {
         if (result.isInertOnTap) return
+        if (result is LauncherSearchResult.RichCard &&
+            result.type == SmartCommandType.WOLFRAM &&
+            result.id.startsWith("wa_loading_")
+        ) {
+            submitWolframQuery()
+            return
+        }
         dismissOverlay()
         when (result) {
             is LauncherSearchResult.App -> {
@@ -514,8 +730,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         SystemActionsManager.launchShortcut(context, packageName, shortcutId, handle)
     }
 
-    fun onResume() {
-        if (_overlay.value is LauncherOverlay.Search && _searchQuery.value.isNotBlank()) {
+    fun onResume(preserveSearch: Boolean = false) {
+        refreshDeviceContacts()
+        if (!preserveSearch && _overlay.value is LauncherOverlay.Search && _searchQuery.value.isNotBlank()) {
             dismissOverlay()
         }
     }
@@ -527,8 +744,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             else if (_currentScreenIndex.value != 0) setScreenIndex(0)
         } else {
             when (current) {
-                is LauncherOverlay.Drawer, is LauncherOverlay.Search,
-                is LauncherOverlay.AppOptions, is LauncherOverlay.AppPicker -> dismissOverlay()
+                is LauncherOverlay.Search -> closeSearch()
+                is LauncherOverlay.Drawer,
+                is LauncherOverlay.AppOptions, is LauncherOverlay.AppPicker,
+                is LauncherOverlay.SetAlias, is LauncherOverlay.RenameApp -> {
+                    _overlay.value = LauncherOverlay.None
+                }
                 else -> Unit
             }
         }
@@ -536,32 +757,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun sortedForDisplay(apps: List<ScreenApp>): List<ScreenApp> =
         screenRepository.sortAppsByNameLength(apps, settings.value.nameLengthSortOrder)
-
-    sealed interface ImportOutcome {
-        data class Success(val screens: Int, val apps: Int) : ImportOutcome
-        data class Failure(val message: String) : ImportOutcome
-    }
-
-    suspend fun buildBackupJson(): String = withContext(Dispatchers.Default) {
-        SettingsBackup.export(settings.value, screenRepository.screens.value, screenRepository)
-    }
-
-    suspend fun previewBackup(text: String): SettingsBackup.ParseResult =
-        withContext(Dispatchers.Default) { SettingsBackup.parse(text) }
-
-    suspend fun applyBackup(text: String): ImportOutcome = withContext(Dispatchers.Default) {
-        when (val result = SettingsBackup.parse(text)) {
-            is SettingsBackup.ParseResult.Error -> ImportOutcome.Failure(result.message)
-            is SettingsBackup.ParseResult.Ok -> {
-                val parsed = result.parsed
-                settingsRepository.replaceAll(parsed.settings)
-                parsed.screensJson?.let { screenRepository.replaceAll(screenRepository.parseScreens(it)) }
-                _currentScreenIndex.value = savedScreenIndex()
-                persistCurrentScreen()
-                ImportOutcome.Success(parsed.screenCount, parsed.appCount)
-            }
-        }
-    }
 
     fun addScreen(name: String, contextTag: String? = null) = screenRepository.addScreen(name, contextTag)
     fun renameScreen(screenId: String, newName: String, newContextTag: String? = null) = screenRepository.renameScreen(screenId, newName, newContextTag)

@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -29,9 +30,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pallas.launcher.ui.settings.pages.AppearanceSettingsPage
+import com.pallas.launcher.ui.settings.pages.BackupSettingsPage
 import com.pallas.launcher.ui.settings.pages.ClockDateSettingsPage
 import com.pallas.launcher.ui.settings.pages.GesturesSettingsPage
 import com.pallas.launcher.ui.settings.pages.MainSettingsPage
+import com.pallas.launcher.ui.settings.pages.MathManualPage
 import com.pallas.launcher.ui.settings.pages.ScreensAppsSettingsPage
 import com.pallas.launcher.ui.settings.pages.SearchSettingsPage
 import kotlin.coroutines.cancellation.CancellationException
@@ -59,7 +62,7 @@ fun SettingsScreen(
     val screens by viewModel.screens.collectAsState()
     val currentScreenIndex by viewModel.currentScreenIndex.collectAsState()
 
-    var currentSubpage by remember { mutableStateOf(SettingsSubpage.MAIN) }
+    var currentSubpage by rememberSaveable { mutableStateOf(SettingsSubpage.MAIN) }
 
     val animProgress = remember { Animatable(0f) }
     var backSwipeEdge by remember { mutableIntStateOf(BackEventCompat.EDGE_LEFT) }
@@ -71,9 +74,7 @@ fun SettingsScreen(
                 backSwipeEdge = backEvent.swipeEdge
                 animProgress.snapTo(backEvent.progress)
             }
-            if (currentSubpage == SettingsSubpage.MATH_MANUAL) {
-                currentSubpage = SettingsSubpage.SEARCH
-            } else if (currentSubpage != SettingsSubpage.MAIN) {
+            if (currentSubpage != SettingsSubpage.MAIN) {
                 currentSubpage = SettingsSubpage.MAIN
             } else {
                 onDismiss()
@@ -157,7 +158,7 @@ fun SettingsScreen(
                     )
                 }
                 SettingsSubpage.BACKUP -> {
-                    com.pallas.launcher.ui.settings.pages.BackupSettingsPage(
+                    BackupSettingsPage(
                         viewModel = viewModel,
                         onBack = { currentSubpage = SettingsSubpage.MAIN }
                     )
@@ -165,13 +166,13 @@ fun SettingsScreen(
                 SettingsSubpage.SEARCH -> {
                     SearchSettingsPage(
                         viewModel = viewModel,
-                        onBack = { currentSubpage = SettingsSubpage.MAIN },
-                        onNavigateToMathManual = { currentSubpage = SettingsSubpage.MATH_MANUAL }
+                        onBack = { currentSubpage = SettingsSubpage.MAIN }
                     )
                 }
                 SettingsSubpage.MATH_MANUAL -> {
-                    com.pallas.launcher.ui.settings.pages.MathManualPage(
-                        onBack = { currentSubpage = SettingsSubpage.SEARCH }
+                    MathManualPage(
+                        viewModel = viewModel,
+                        onBack = { currentSubpage = SettingsSubpage.MAIN }
                     )
                 }
             }

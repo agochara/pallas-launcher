@@ -1,5 +1,6 @@
 package com.pallas.launcher.ui.search
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -34,10 +36,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,7 +56,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.search.LauncherSearchResult
+import com.pallas.launcher.domain.search.MathChartData
+import com.pallas.launcher.domain.search.SmartCommandType
 import com.pallas.launcher.domain.search.isEnterEligible
+import com.pallas.launcher.ui.components.ChartPreviewDialog
+import com.pallas.launcher.ui.components.TexPreviewDialog
 import com.pallas.launcher.ui.theme.LauncherTypography
 import com.pallas.launcher.ui.theme.launcherBackdropBrush
 import kotlinx.coroutines.delay
@@ -62,6 +71,7 @@ fun LauncherSearchOverlay(
     results: List<LauncherSearchResult>,
     onQueryChange: (String) -> Unit,
     onResultClick: (LauncherSearchResult) -> Unit,
+    onSearchSubmit: () -> Boolean = { false },
     onDismiss: () -> Unit,
     onAppLongPress: ((AppItem) -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -70,6 +80,22 @@ fun LauncherSearchOverlay(
     val keyboardController = LocalSoftwareKeyboardController.current
     val listState = rememberLazyListState()
     val latestDismiss by rememberUpdatedState(onDismiss)
+    var previewLatex by remember { mutableStateOf<String?>(null) }
+    var previewChart by remember { mutableStateOf<MathChartData?>(null) }
+
+    val activateResult: (LauncherSearchResult) -> Unit = { result ->
+        keyboardController?.hide()
+        if (result is LauncherSearchResult.RichCard &&
+            result.type == SmartCommandType.LATEX &&
+            !result.latexSource.isNullOrBlank()
+        ) {
+            previewLatex = result.latexSource
+        } else if (result is LauncherSearchResult.RichCard && result.chart != null) {
+            previewChart = result.chart
+        } else {
+            onResultClick(result)
+        }
+    }
 
     LaunchedEffect(Unit) {
         var requested = false
@@ -144,11 +170,13 @@ fun LauncherSearchOverlay(
                 if (query.isNotEmpty() && results.isEmpty()) {
                     val trimmed = query.trim()
                     val isCommandLike = trimmed.startsWith("=") || trimmed.startsWith("?") ||
-                        trimmed.startsWith("!") || trimmed.startsWith("/") || trimmed.startsWith(":")
+                        trimmed.startsWith("!") || trimmed.startsWith("/") || trimmed.startsWith(":") ||
+                        trimmed.contains(';') || trimmed.contains('{') || trimmed.contains('[') ||
+                        trimmed.contains(":=") || trimmed.contains("//") || trimmed.contains("(*")
                     if (!isCommandLike) {
                         item {
                             Text(
-                                text = "No apps match \"$query\"",
+                                text = if (trimmed.startsWith("@")) "No contacts match \"${trimmed.drop(1)}\"" else "No apps match \"$query\"",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp)
@@ -160,10 +188,7 @@ fun LauncherSearchOverlay(
                         SearchResultItemView(
                             result = result,
                             isFirst = index == 0,
-                            onClick = {
-                                keyboardController?.hide()
-                                onResultClick(result)
-                            },
+                            onClick = { activateResult(result) },
                             onLongClick = if (result is LauncherSearchResult.App && onAppLongPress != null) {
                                 {
                                     keyboardController?.hide()
@@ -175,55 +200,82 @@ fun LauncherSearchOverlay(
                 }
             }
 
+            val isCodeInput = remember(query) {
+                val t = query.trimStart()
+                t.startsWith("=") || t.startsWith("\\") ||
+                    t.contains('[') || t.contains('{') || t.contains(';') ||
+                    t.contains(":=") || t.contains("->") || t.contains("//") ||
+                    t.contains("/@") || t.contains("@@") || t.contains("(*")
+            }
+            val inputTextStyle = LauncherTypography.searchInput.copy(
+                color = colorScheme.onSurface,
+                fontFamily = if (isCodeInput) FontFamily.Monospace else LauncherTypography.searchInput.fontFamily
+            )
+
             Surface(
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(8.dp),
                 color = colorScheme.surfaceContainerHigh,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (query.isNotEmpty()) colorScheme.primary.copy(alpha = 0.5f)
+                    else colorScheme.outlineVariant.copy(alpha = 0.5f)
+                ),
+                shadowElevation = 0.dp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 10.dp)
-                    .height(56.dp)
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .heightIn(min = 50.dp, max = 148.dp)
             ) {
                 Row(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 18.dp),
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
-                        tint = colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp)
+                        tint = if (query.isNotEmpty()) {
+                            colorScheme.primary.copy(alpha = 0.85f)
+                        } else {
+                            colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        },
+                        modifier = Modifier.size(19.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
 
                     Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                         if (query.isEmpty()) {
                             Text(
-                                text = "Search apps",
+                                text = "Search",
                                 style = LauncherTypography.searchInput,
-                                color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                color = colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                             )
                         }
                         BasicTextField(
                             value = query,
                             onValueChange = onQueryChange,
-                            textStyle = LauncherTypography.searchInput.copy(color = colorScheme.onSurface),
+                            textStyle = inputTextStyle,
                             cursorBrush = SolidColor(colorScheme.primary),
-                            singleLine = true,
+                            singleLine = false,
+                            maxLines = 4,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(
                                 onSearch = {
-                                    // Safety: the keyboard's Enter must NEVER place a phone call from an ambiguous query.
-                                    // A call only fires from Enter when the user typed "call <name>" AND exactly one contact matches.
-                                    val explicitCall = query.trim().startsWith("call ", ignoreCase = true) &&
-                                        results.count { it is LauncherSearchResult.ContactCall } == 1
-                                    val target = results.firstOrNull {
-                                        it.isEnterEligible && (it !is LauncherSearchResult.ContactCall || explicitCall)
-                                    }
-                                    target?.let {
+                                    if (onSearchSubmit()) {
                                         keyboardController?.hide()
-                                        onResultClick(it)
+                                    } else {
+                                        // Contact searches are explicit with `@`; Enter selects their top-ranked match.
+                                        // The `call` command (or customized prefix) still requires exactly one nickname match.
+                                        val trimmedQuery = query.trim()
+                                        val explicitCall = trimmedQuery.contains(' ') &&
+                                            results.count { it is LauncherSearchResult.ContactCall } == 1
+                                        val explicitContactLookup = trimmedQuery.startsWith("@") &&
+                                            trimmedQuery.drop(1).isNotBlank()
+                                        val target = results.firstOrNull {
+                                            it.isEnterEligible && (it !is LauncherSearchResult.ContactCall || explicitCall || explicitContactLookup)
+                                        }
+                                        target?.let { activateResult(it) }
                                     }
                                 }
                             ),
@@ -239,7 +291,7 @@ fun LauncherSearchOverlay(
                             contentDescription = "Clear search",
                             tint = colorScheme.onSurfaceVariant,
                             modifier = Modifier
-                                .size(22.dp)
+                                .size(19.dp)
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
@@ -249,6 +301,20 @@ fun LauncherSearchOverlay(
                     }
                 }
             }
+        }
+
+        previewLatex?.let { latex ->
+            TexPreviewDialog(
+                latex = latex,
+                onDismiss = { previewLatex = null }
+            )
+        }
+
+        previewChart?.let { chart ->
+            ChartPreviewDialog(
+                chart = chart,
+                onDismiss = { previewChart = null }
+            )
         }
     }
 }

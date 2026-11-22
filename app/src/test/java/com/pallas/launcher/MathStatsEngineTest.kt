@@ -1,9 +1,14 @@
 package com.pallas.launcher
 
+import com.pallas.launcher.domain.model.AppItem
+import com.pallas.launcher.domain.search.LauncherSearchResult
+import com.pallas.launcher.domain.search.MathChartData
 import com.pallas.launcher.domain.search.MathStatsEngine
+import com.pallas.launcher.domain.search.SearchEngine
 import com.pallas.launcher.domain.search.SmartCommandEngine
 import com.pallas.launcher.domain.search.SmartCommandType
-import com.pallas.launcher.domain.search.LauncherSearchResult
+import kotlin.math.PI
+import kotlin.math.abs
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -567,6 +572,211 @@ class MathStatsEngineTest {
     fun testExpectedShortfallBoundary() {
         val res = MathStatsEngine.evaluate("= ExpectedShortfall[{10, 20, 30, 40, 50}, 0.95]", "=")
         assertNotNull(res)
+    }
+
+    @Test
+    fun testVariadicGcdLcmAndLogListThreading() {
+        assertEquals("= 12", MathStatsEngine.evaluate("= GCD[24, 36, 60]", "=")?.primaryValue)
+        assertEquals("= 12", MathStatsEngine.evaluate("= GCD[{24, 36, 60}]", "=")?.primaryValue)
+        assertEquals("= 24", MathStatsEngine.evaluate("= LCM[4, 6, 8]", "=")?.primaryValue)
+        assertEquals("{1, 2, 3}", MathStatsEngine.evaluate("= Log[2, {2, 4, 8}]", "=")?.primaryValue)
+        assertEquals("= 10", MathStatsEngine.evaluate("= Plus[{1, 2, 3, 4}]", "=")?.primaryValue)
+        assertEquals("= 24", MathStatsEngine.evaluate("= Times[{1, 2, 3, 4}]", "=")?.primaryValue)
+    }
+
+    @Test
+    fun testBareAssignmentsAndWebAppNonHijacking() {
+        val compact = MathStatsEngine.evaluate("q=10;q", "=")
+        assertEquals("= 10", compact?.primaryValue)
+
+        val spaced = MathStatsEngine.evaluate("q = 10; q", "=")
+        assertEquals("= 10", spaced?.primaryValue)
+
+        // Semicolon-terminated statement yields Null without overwriting %
+        assertEquals("= 42", MathStatsEngine.evaluate("= 42", "=")?.primaryValue)
+        val suppressed = MathStatsEngine.evaluate("= q = 10;", "=")
+        assertEquals("Done", suppressed?.badge)
+        assertEquals("= Null", suppressed?.primaryValue)
+        assertEquals("= 42", MathStatsEngine.evaluate("= %", "=")?.primaryValue)
+
+        // SmartCommandEngine routes `q = 10; q` to Math without Web Search
+        val mathEval = SmartCommandEngine.evaluateCommands("q = 10; q", emptyList())
+        assertTrue(mathEval.immediateResults.any {
+            it is LauncherSearchResult.RichCard && it.type == SmartCommandType.MATH_STATS && it.primaryValue == "= 10"
+        })
+        assertFalse(mathEval.immediateResults.any {
+            it is LauncherSearchResult.Command && it.type == SmartCommandType.WEB_SEARCH
+        })
+
+        // Regular `q <terms>` still routes to Web Search
+        val webEval = SmartCommandEngine.evaluateCommands("q weather today", emptyList())
+        assertTrue(webEval.immediateResults.any {
+            it is LauncherSearchResult.Command && it.type == SmartCommandType.WEB_SEARCH
+        })
+        assertFalse(webEval.immediateResults.any {
+            it is LauncherSearchResult.RichCard && it.type == SmartCommandType.MATH_STATS
+        })
+
+        // SearchEngine suppresses app hits for bare math cards like `q = 10; q`
+        val searchEngine = SearchEngine(null)
+        searchEngine.updateIndex(
+            listOf(AppItem("com.example.q", "MainActivity", "QuickNote")),
+            emptyMap()
+        )
+        val (mathSearchResults, _) = searchEngine.searchAll("q = 10; q")
+        assertFalse(mathSearchResults.any { it is LauncherSearchResult.App })
+        val (appSearchResults, _) = searchEngine.searchAll("qu")
+        assertTrue(appSearchResults.any { it is LauncherSearchResult.App && it.app.label == "QuickNote" })
+
+        // Ordinary app queries starting with built-in function words do not hijack
+        assertNull(MathStatsEngine.evaluate("prime video", "="))
+        assertNull(MathStatsEngine.evaluate("map", "="))
+        assertNull(MathStatsEngine.evaluate("print", "="))
+    }
+
+    @Test
+    fun testPrintAndEchoConsoleOutput() {
+        val p1 = MathStatsEngine.evaluate("= Print[\"hello\"]", "=")
+        assertNotNull(p1)
+        assertEquals("Print", p1?.badge)
+        assertEquals("", p1?.primaryValue)
+        assertEquals("hello", p1?.consoleOutput)
+        assertEquals("hello", p1?.copyText)
+
+        val p2 = MathStatsEngine.evaluate("q = 10; Print[q^2]; q", "=")
+        assertNotNull(p2)
+        assertEquals("= 10", p2?.primaryValue)
+        assertEquals("100", p2?.consoleOutput)
+
+        val cmd = SmartCommandEngine.evaluateCommands("q = 10; Print[q^2]; q", emptyList())
+        val card = cmd.immediateResults.firstOrNull { it is LauncherSearchResult.RichCard } as? LauncherSearchResult.RichCard
+        assertEquals("100", card?.consoleOutput)
+
+        val echo = MathStatsEngine.evaluate("= Echo[2 + 3, \"sum\"]", "=")
+        assertNotNull(echo)
+        assertEquals("= 5", echo?.primaryValue)
+        assertTrue(echo?.consoleOutput?.contains("sum") == true)
+        assertTrue(echo?.consoleOutput?.contains("5") == true)
+    }
+
+    @Test
+    fun testSetDelayedFunctionsScopingAndClear() {
+        assertEquals("= 26", MathStatsEngine.evaluate("= f[x_] := x^2 + 1; f[5]", "=")?.primaryValue)
+        assertEquals(
+            "= 720",
+            MathStatsEngine.evaluate("= fact[n_] := If[n <= 1, 1, n * fact[n - 1]]; fact[6]", "=")?.primaryValue
+        )
+        assertEquals("= 5", MathStatsEngine.evaluate("= Module[{a = 3, b = 4}, Sqrt[a^2 + b^2]]", "=")?.primaryValue)
+        assertEquals("= 100", MathStatsEngine.evaluate("= With[{k = 10}, k^2]", "=")?.primaryValue)
+        assertEquals("= 14", MathStatsEngine.evaluate("= Block[{x = 7}, x * 2]", "=")?.primaryValue)
+
+        val cleared = MathStatsEngine.evaluate("= x = 9; Clear[x]; x", "=")
+        assertEquals("Symbol", cleared?.badge)
+        assertEquals("x", cleared?.primaryValue)
+    }
+
+    @Test
+    fun testNumericalCalculusAndSolvers() {
+        val sumVal = MathStatsEngine.evaluate("= Sum[1/k^2, {k, 1, 100}]", "=")!!.copyText.toDouble()
+        assertEquals(1.6349839, sumVal, 1e-4)
+
+        assertEquals("= 120", MathStatsEngine.evaluate("= Product[k, {k, 1, 5}]", "=")?.primaryValue)
+
+        val intVal = MathStatsEngine.evaluate("= NIntegrate[Sin[x]^2, {x, 0, Pi}]", "=")!!.copyText.toDouble()
+        assertEquals(PI / 2.0, intVal, 1e-4)
+
+        val derivVal = MathStatsEngine.evaluate("= ND[x^3, x, 2]", "=")!!.copyText.toDouble()
+        assertEquals(12.0, derivVal, 1e-3)
+
+        val root = MathStatsEngine.evaluate("= FindRoot[Cos[x] == x, {x, 0.7}]", "=")
+        assertNotNull(root)
+        assertTrue("Expected root near 0.73909, got ${root?.primaryValue}", root?.primaryValue?.contains("0.7390") == true)
+
+        val minRes = MathStatsEngine.evaluate("= NMinimize[x^2 - 4*x + 7, x]", "=")
+        assertNotNull(minRes)
+        assertTrue("Expected min value 3 near x -> 2, got ${minRes?.primaryValue}", minRes?.primaryValue?.startsWith("{3,") == true)
+
+        val maxRes = MathStatsEngine.evaluate("= NMaximize[-x^2 + 6*x, {x, 0, 10}]", "=")
+        assertNotNull(maxRes)
+        assertTrue("Expected max value 9 near x -> 3, got ${maxRes?.primaryValue}", maxRes?.primaryValue?.startsWith("{9,") == true)
+
+        assertEquals("3.1415927", MathStatsEngine.evaluate("= N[Pi, 8]", "=")?.primaryValue)
+    }
+
+    @Test
+    fun testSpanIndexingMatricesAndListOps() {
+        assertEquals("{3, 4, 5, 6, 7}", MathStatsEngine.evaluate("= Range[10][[3 ;; 7]]", "=")?.primaryValue)
+        assertEquals("{1, 3, 5, 7, 9}", MathStatsEngine.evaluate("= Range[10][[1 ;; 10 ;; 2]]", "=")?.primaryValue)
+        assertEquals("= 3", MathStatsEngine.evaluate("= {{1, 2}, {3, 4}}[[2, 1]]", "=")?.primaryValue)
+
+        assertEquals("= -2", MathStatsEngine.evaluate("= Det[{{1, 2}, {3, 4}}]", "=")?.primaryValue)
+        val inv = MathStatsEngine.evaluate("= Inverse[{{1, 2}, {3, 4}}]", "=")
+        assertEquals("Matrix (2×2)", inv?.badge)
+        assertEquals("= 1", MathStatsEngine.evaluate("= Tr[Dot[{{1, 2}, {3, 4}}, Inverse[{{1, 2}, {3, 4}}]]]/2", "=")?.primaryValue)
+
+        val tr = MathStatsEngine.evaluate("= Transpose[{{1, 2, 3}, {4, 5, 6}}]", "=")
+        assertEquals("Matrix (3×2)", tr?.badge)
+        assertEquals("{{1, 4}, {2, 5}, {3, 6}}", tr?.primaryValue)
+
+        assertEquals("= 32", MathStatsEngine.evaluate("= Dot[{1, 2, 3}, {4, 5, 6}]", "=")?.primaryValue)
+        assertEquals("= 5", MathStatsEngine.evaluate("= Tr[{{1, 2}, {3, 4}}]", "=")?.primaryValue)
+        assertEquals("= 5", MathStatsEngine.evaluate("= Norm[{3, 4}]", "=")?.primaryValue)
+        assertEquals("{0, 0, 1}", MathStatsEngine.evaluate("= Cross[{1, 0, 0}, {0, 1, 0}]", "=")?.primaryValue)
+
+        assertEquals("{1, 2, 3, 4}", MathStatsEngine.evaluate("= Flatten[{{1, {2}}, {3, 4}}]", "=")?.primaryValue)
+        assertEquals("{{1, 2}, {3, 4}, {5, 6}}", MathStatsEngine.evaluate("= Partition[{1, 2, 3, 4, 5, 6}, 2]", "=")?.primaryValue)
+        assertEquals("{1, 2, 3}", MathStatsEngine.evaluate("= Union[{3, 1, 2, 1}]", "=")?.primaryValue)
+        assertEquals("{2, 3}", MathStatsEngine.evaluate("= Intersection[{1, 2, 3}, {2, 3, 4}]", "=")?.primaryValue)
+        assertEquals("{1, 3}", MathStatsEngine.evaluate("= Complement[{1, 2, 3, 4}, {2, 4}]", "=")?.primaryValue)
+    }
+
+    @Test
+    fun testNumberTheoryAndSpecialFunctions() {
+        assertEquals("{{2, 3}, {3, 2}, {5, 1}}", MathStatsEngine.evaluate("= FactorInteger[360]", "=")?.primaryValue)
+        assertEquals("{1, 2, 3, 4, 6, 12}", MathStatsEngine.evaluate("= Divisors[12]", "=")?.primaryValue)
+        assertEquals("= 29", MathStatsEngine.evaluate("= Prime[10]", "=")?.primaryValue)
+        assertEquals("= 10", MathStatsEngine.evaluate("= PrimePi[30]", "=")?.primaryValue)
+        assertEquals("= 24", MathStatsEngine.evaluate("= PowerMod[2, 10, 1000]", "=")?.primaryValue)
+        assertEquals("{1, 2, 3, 4}", MathStatsEngine.evaluate("= IntegerDigits[1234]", "=")?.primaryValue)
+        assertEquals("= 123", MathStatsEngine.evaluate("= FromDigits[{1, 2, 3}]", "=")?.primaryValue)
+
+        // Mathematica ArcTan[x, y] takes x first, y second
+        val atan11 = MathStatsEngine.evaluate("= ArcTan[1, 1]", "=")!!.copyText.toDouble()
+        assertEquals(PI / 4.0, atan11, 1e-4)
+        val atan01 = MathStatsEngine.evaluate("= ArcTan[0, 1]", "=")!!.copyText.toDouble()
+        assertEquals(PI / 2.0, atan01, 1e-4)
+        val atanNeg = MathStatsEngine.evaluate("= ArcTan[-1, 0]", "=")!!.copyText.toDouble()
+        assertEquals(PI, atanNeg, 1e-4)
+
+        assertEquals("= 4", MathStatsEngine.evaluate("= Mod[-1, 5]", "=")?.primaryValue)
+        assertEquals("= 24", MathStatsEngine.evaluate("= Gamma[5]", "=")?.primaryValue)
+        assertEquals("= 1", MathStatsEngine.evaluate("= Boole[3 > 2]", "=")?.primaryValue)
+        assertEquals("= 1", MathStatsEngine.evaluate("= Sin[90°]", "=")?.primaryValue)
+    }
+
+    @Test
+    fun testWolframSyntaxExtensionsAndTablePlot() {
+        assertEquals("= 5", MathStatsEngine.evaluate("= (* comment *) 2 + 3", "=")?.primaryValue)
+        assertEquals("= True", MathStatsEngine.evaluate("= 1 < 2 < 3", "=")?.primaryValue)
+        assertEquals("= False", MathStatsEngine.evaluate("= 1 < 3 < 2", "=")?.primaryValue)
+
+        // Parenthesized function calls for known functions vs implicit multiplication for variables
+        assertEquals("= 55", MathStatsEngine.evaluate("= f[n_] := n(n + 1)/2; f[10]", "=")?.primaryValue)
+        assertEquals("= 1", MathStatsEngine.evaluate("= Sin(Pi/2)", "=")?.primaryValue)
+
+        assertEquals("hello world", MathStatsEngine.evaluate("= \"hello\" <> \" \" <> \"world\"", "=")?.primaryValue)
+        assertEquals("= 4", MathStatsEngine.evaluate("= (Sqrt @* (# + 1 &))[15]", "=")?.primaryValue)
+        assertEquals("= 3", MathStatsEngine.evaluate("= x //. {x -> y + 1, y -> 2}", "=")?.primaryValue)
+        assertEquals("{3, 7}", MathStatsEngine.evaluate("= Plus @@@ {{1, 2}, {3, 4}}", "=")?.primaryValue)
+
+        val lp = MathStatsEngine.evaluate("= ListPlot[Table[{i, i^2}, {i, 5}]]", "=")
+        assertNotNull(lp)
+        val chart = lp?.chart as? MathChartData.Cartesian2D
+        assertNotNull(chart)
+        val pts = chart!!.series.first().segments.flatten()
+        assertEquals(5, pts.size)
+        assertEquals(1.0, pts[0].x, 1e-6)
+        assertEquals(25.0, pts[4].y, 1e-6)
     }
 }
 

@@ -24,6 +24,7 @@ sealed interface AsyncCommandRequest {
     data class Finance(val query: String) : AsyncCommandRequest
     data class Weather(val city: String, val isSolarOnly: Boolean) : AsyncCommandRequest
     data class Wolfram(val query: String) : AsyncCommandRequest
+    data class MathPlot(val rawInput: String, val prefix: String) : AsyncCommandRequest
 }
 
 data class CommandEvaluation(
@@ -218,6 +219,73 @@ object SmartCommandEngine {
         return null
     }
 
+    private fun hasUnescapedToken(text: String, token: String): Boolean {
+        var idx = text.indexOf(token)
+        while (idx >= 0) {
+            var backslashes = 0
+            var pos = idx - 1
+            while (pos >= 0 && text[pos] == '\\') {
+                backslashes++
+                pos--
+            }
+            if (backslashes % 2 == 0) return true
+            idx = text.indexOf(token, idx + token.length)
+        }
+        return false
+    }
+
+    fun normalizeUserLatex(raw: String): String {
+        var s = raw.trim()
+        if (s.isEmpty()) return ""
+
+        val beginDoc = "\\begin{document}"
+        val endDoc = "\\end{document}"
+        val beginIdx = s.indexOf(beginDoc)
+        if (beginIdx >= 0) {
+            val endIdx = s.lastIndexOf(endDoc)
+            if (endIdx > beginIdx) {
+                s = s.substring(beginIdx + beginDoc.length, endIdx).trim()
+            }
+        }
+
+        var changed = true
+        while (changed) {
+            changed = false
+            s = s.trim()
+            when {
+                s.startsWith("$$") && s.endsWith("$$") && s.length >= 4 -> {
+                    val inner = s.substring(2, s.length - 2)
+                    if (!hasUnescapedToken(inner, "$$")) {
+                        s = inner.trim()
+                        changed = true
+                    }
+                }
+                s.startsWith("\\[") && s.endsWith("\\]") && s.length >= 4 -> {
+                    val inner = s.substring(2, s.length - 2)
+                    if (!hasUnescapedToken(inner, "\\]")) {
+                        s = inner.trim()
+                        changed = true
+                    }
+                }
+                s.startsWith("\\(") && s.endsWith("\\)") && s.length >= 4 -> {
+                    val inner = s.substring(2, s.length - 2)
+                    if (!hasUnescapedToken(inner, "\\)")) {
+                        s = inner.trim()
+                        changed = true
+                    }
+                }
+                s.startsWith("$") && !s.startsWith("$$") && s.endsWith("$") && !s.endsWith("$$") && s.length >= 2 -> {
+                    val inner = s.substring(1, s.length - 1)
+                    if (!hasUnescapedToken(inner, "$")) {
+                        s = inner.trim()
+                        changed = true
+                    }
+                }
+            }
+        }
+        return s.trim()
+    }
+
     fun evaluateCommands(
         rawQuery: String,
         contacts: List<SearchContact>,
@@ -234,31 +302,162 @@ object SmartCommandEngine {
         fun cfg(id: String) = configs[id] ?: CommandConfig.DEFAULTS.getValue(id)
         val fallbackCity = defaultWeatherCity.trim().ifEmpty { LauncherSettings.DEFAULT_WEATHER_CITY }
 
+        // 0. Smart Unit & Currency Converter (evaluated before Math so `100 km -> mi` or `= 100 usd to inr` doesn't hit Wolfram RuleVal)
+        var matchedConvert = false
+        val convCfg = cfg("convert")
+        if (convCfg.enabled) {
+            val convArg = matchPrefixArg(trimmed, convCfg.prefix)
+                ?: matchPrefixArg(trimmed, "convert")
+                ?: if (convCfg.prefix.equals("convert", ignoreCase = true)) matchPrefixArg(trimmed, "conv") else null
+            if (convArg != null) {
+                if (convArg.isEmpty()) {
+                    results.add(
+                        LauncherSearchResult.Command(
+                            id = "cmd_convert_hint",
+                            title = "Unit & Currency Converter",
+                            subtitle = "",
+                            type = SmartCommandType.CONVERT,
+                            execute = {}
+                        )
+                    )
+                } else {
+                    val out = UnitConverterEngine.evaluate(convArg, hasExplicitPrefix = true)
+                    if (out != null) {
+                        results.add(
+                            LauncherSearchResult.RichCard(
+                                id = "cmd_convert_${out.title}",
+                                type = SmartCommandType.CONVERT,
+                                title = out.title,
+                                primaryValue = out.primaryValue,
+                                badgeText = out.badge,
+                                isBadgePositive = true,
+                                subtitle = out.subtitle,
+                                execute = { ctx ->
+                                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    cm?.setPrimaryClip(ClipData.newPlainText("Pallas Convert", out.copyText))
+                                    Toast.makeText(ctx, "Copied ${out.copyText}", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        )
+                    }
+                    matchedConvert = true
+                }
+            } else {
+                UnitConverterEngine.evaluate(trimmed, hasExplicitPrefix = false)?.let { out ->
+                    results.add(
+                        LauncherSearchResult.RichCard(
+                            id = "cmd_convert_${out.title}",
+                            type = SmartCommandType.CONVERT,
+                            title = out.title,
+                            primaryValue = out.primaryValue,
+                            badgeText = out.badge,
+                            isBadgePositive = true,
+                            subtitle = out.subtitle,
+                            execute = { ctx ->
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                cm?.setPrimaryClip(ClipData.newPlainText("Pallas Convert", out.copyText))
+                                Toast.makeText(ctx, "Copied ${out.copyText}", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    )
+                    matchedConvert = true
+                }
+            }
+        }
+
         // 1. Math & Fat-Tailed Probability
+        var matchedMath = false
         val mathCfg = cfg("math")
-        if (mathCfg.enabled) {
+        if (mathCfg.enabled && !matchedConvert) {
             val mathArg = matchPrefixArg(trimmed, mathCfg.prefix)
             if (mathArg != null) {
+                matchedMath = true
                 if (mathArg.isEmpty()) {
                     results.add(
                         LauncherSearchResult.Command(
                             id = "cmd_math_hint",
                             title = "Math & Probability Engine",
-                            subtitle = "e.g. '${mathCfg.prefix} ParetoDistribution[1, 2]' or 'Mean[{1, 2, 3, 4}]'",
+                            subtitle = "",
                             type = SmartCommandType.MATH_STATS,
                             hasInfoManual = false,
                             execute = {}
                         )
                     )
                 } else {
-                    val out = MathStatsEngine.evaluate(trimmed, mathCfg.prefix)
-                    if (out != null) {
+                    if (MathStatsEngine.containsPlotOrChart(trimmed, mathCfg.prefix)) {
+                        if (!MathStatsEngine.areDelimitersBalanced(mathArg) || !mathArg.contains('[')) {
+                            results.add(
+                                LauncherSearchResult.RichCard(
+                                    id = "cmd_math_typing",
+                                    type = SmartCommandType.MATH_STATS,
+                                    title = "Plot & Visualization Engine",
+                                    subtitle = "Complete brackets…",
+                                    primaryValue = "",
+                                    isLoading = false
+                                )
+                            )
+                        } else {
+                            results.add(
+                                LauncherSearchResult.RichCard(
+                                    id = "cmd_math_plot_loading",
+                                    type = SmartCommandType.MATH_STATS,
+                                    title = mathArg,
+                                    subtitle = "rendering plot…",
+                                    isLoading = true
+                                )
+                            )
+                            asyncReq = AsyncCommandRequest.MathPlot(trimmed, mathCfg.prefix)
+                        }
+                    } else {
+                        val out = MathStatsEngine.evaluate(trimmed, mathCfg.prefix)
+                        if (out != null) {
+                            results.add(
+                                LauncherSearchResult.RichCard(
+                                    id = "cmd_math_${out.title}",
+                                    type = SmartCommandType.MATH_STATS,
+                                    title = out.title,
+                                    primaryValue = out.primaryValue,
+                                    consoleOutput = out.consoleOutput,
+                                    chart = out.chart,
+                                    badgeText = out.badge,
+                                    isBadgePositive = true,
+                                    subtitle = out.subtitle,
+                                    hasInfoManual = false,
+                                    execute = { ctx ->
+                                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                        cm?.setPrimaryClip(ClipData.newPlainText("Pallas Math", out.copyText))
+                                        Toast.makeText(ctx, "Copied ${out.copyText}", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            )
+                        }
+                    }
+                }
+            } else {
+                if (MathStatsEngine.containsPlotOrChart(trimmed, "")) {
+                    if (MathStatsEngine.areDelimitersBalanced(trimmed) && (trimmed.contains('[') || trimmed.contains("//") || trimmed.contains('@'))) {
+                        results.add(
+                            LauncherSearchResult.RichCard(
+                                id = "cmd_math_plot_loading",
+                                type = SmartCommandType.MATH_STATS,
+                                title = trimmed,
+                                subtitle = "rendering plot…",
+                                isLoading = true
+                            )
+                        )
+                        asyncReq = AsyncCommandRequest.MathPlot(trimmed, "")
+                        matchedMath = true
+                    }
+                } else {
+                    MathStatsEngine.evaluate(trimmed, "")?.let { out ->
                         results.add(
                             LauncherSearchResult.RichCard(
                                 id = "cmd_math_${out.title}",
                                 type = SmartCommandType.MATH_STATS,
                                 title = out.title,
                                 primaryValue = out.primaryValue,
+                                consoleOutput = out.consoleOutput,
+                                chart = out.chart,
                                 badgeText = out.badge,
                                 isBadgePositive = true,
                                 subtitle = out.subtitle,
@@ -270,39 +469,43 @@ object SmartCommandEngine {
                                 }
                             )
                         )
-                    } else {
-                        // User is actively typing an expression after the math prefix
+                        matchedMath = true
+                    }
+                }
+            }
+        }
+
+        // 1.5. LaTeX Renderer
+        val texCfg = cfg("tex")
+        if (texCfg.enabled) {
+            val texArg = matchPrefixArg(trimmed, texCfg.prefix)
+            if (texArg != null) {
+                if (texArg.isEmpty()) {
+                    results.add(
+                        LauncherSearchResult.Command(
+                            id = "cmd_tex_hint",
+                            title = "LaTeX Formula Renderer",
+                            subtitle = "",
+                            type = SmartCommandType.LATEX,
+                            execute = {}
+                        )
+                    )
+                } else {
+                    val normalized = normalizeUserLatex(texArg)
+                    if (normalized.isNotEmpty()) {
                         results.add(
                             LauncherSearchResult.RichCard(
-                                id = "cmd_math_typing",
-                                type = SmartCommandType.MATH_STATS,
-                                title = "Math & Probability Engine",
-                                subtitle = "Evaluating expression…",
-                                primaryValue = mathArg,
-                                isLoading = false
+                                id = "cmd_tex_preview",
+                                type = SmartCommandType.LATEX,
+                                title = "LaTeX",
+                                primaryValue = "",
+                                latexSource = normalized,
+                                badgeText = "LaTeX",
+                                isBadgePositive = true,
+                                subtitle = ""
                             )
                         )
                     }
-                }
-            } else {
-                MathStatsEngine.evaluate(trimmed, "")?.let { out ->
-                    results.add(
-                        LauncherSearchResult.RichCard(
-                            id = "cmd_math_${out.title}",
-                            type = SmartCommandType.MATH_STATS,
-                            title = out.title,
-                            primaryValue = out.primaryValue,
-                            badgeText = out.badge,
-                            isBadgePositive = true,
-                            subtitle = out.subtitle,
-                            hasInfoManual = false,
-                            execute = { ctx ->
-                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                cm?.setPrimaryClip(ClipData.newPlainText("Pallas Math", out.copyText))
-                                Toast.makeText(ctx, "Copied ${out.copyText}", Toast.LENGTH_SHORT).show()
-                            }
-                        )
-                    )
                 }
             }
         }
@@ -338,7 +541,7 @@ object SmartCommandEngine {
                         LauncherSearchResult.Command(
                             id = "cmd_stock_hint",
                             title = "Markets & Commodities",
-                            subtitle = "e.g. '${stockCfg.prefix} nifty', '${stockCfg.prefix} reliance', '${stockCfg.prefix} nvda', '${stockCfg.prefix} gold'",
+                            subtitle = "",
                             type = SmartCommandType.FINANCE,
                             execute = {}
                         )
@@ -393,7 +596,7 @@ object SmartCommandEngine {
                         LauncherSearchResult.Command(
                             id = "cmd_wa_hint",
                             title = "Wolfram|Alpha Short Answer",
-                            subtitle = "Type '${waCfg.prefix} <query>'",
+                            subtitle = "",
                             type = SmartCommandType.WOLFRAM,
                             execute = {}
                         )
@@ -426,7 +629,7 @@ object SmartCommandEngine {
                         LauncherSearchResult.Command(
                             id = "cmd_alarm_hint",
                             title = "Set Alarm",
-                            subtitle = "Clock • e.g. '${alCfg.prefix} 530', '${alCfg.prefix} 1805'",
+                            subtitle = "Clock",
                             type = SmartCommandType.ALARM,
                             execute = { SystemActionsManager.openClock(it) }
                         )
@@ -438,7 +641,7 @@ object SmartCommandEngine {
                             LauncherSearchResult.Command(
                                 id = "cmd_alarm_${parsed.hour}_${parsed.minute}",
                                 title = "Set alarm for $formatted",
-                                subtitle = "Clock • Tap or press Enter to set alarm",
+                                subtitle = "Clock",
                                 type = SmartCommandType.ALARM,
                                 execute = { SystemActionsManager.setAlarm(it, parsed.hour, parsed.minute) }
                             )
@@ -458,7 +661,7 @@ object SmartCommandEngine {
                         LauncherSearchResult.Command(
                             id = "cmd_timer_hint",
                             title = "Set Timer",
-                            subtitle = "Clock • e.g. '${timerCfg.prefix} 5m', '${timerCfg.prefix} 1:05'",
+                            subtitle = "Clock",
                             type = SmartCommandType.TIMER,
                             execute = { SystemActionsManager.openClock(it) }
                         )
@@ -469,7 +672,7 @@ object SmartCommandEngine {
                             LauncherSearchResult.Command(
                                 id = "cmd_timer_${parsed.totalSeconds}",
                                 title = "Set timer for ${parsed.formattedDuration}",
-                                subtitle = "Clock • Tap or press Enter to start timer",
+                                subtitle = "Clock",
                                 type = SmartCommandType.TIMER,
                                 execute = { SystemActionsManager.setTimer(it, parsed.totalSeconds) }
                             )
@@ -481,7 +684,7 @@ object SmartCommandEngine {
 
         // 8. Web Search
         val webCfg = cfg("web")
-        if (webCfg.enabled) {
+        if (webCfg.enabled && !matchedMath) {
             val webArg = matchPrefixArg(trimmed, webCfg.prefix) ?: matchPrefixArg(trimmed, "query")
             if (webArg != null) {
                 if (webArg.isEmpty()) {
@@ -489,7 +692,7 @@ object SmartCommandEngine {
                         LauncherSearchResult.Command(
                             id = "cmd_web_hint",
                             title = "Search the web",
-                            subtitle = "Type '${webCfg.prefix} <terms>' • opens in ${webSearch.browserLabel ?: "your default browser"}",
+                            subtitle = webSearch.browserLabel ?: "Default browser",
                             type = SmartCommandType.WEB_SEARCH,
                             execute = { SystemActionsManager.openWebSearch(it, "", webSearch.engine, webSearch.browserPackage) }
                         )
@@ -499,7 +702,7 @@ object SmartCommandEngine {
                         LauncherSearchResult.Command(
                             id = "cmd_web_$webArg",
                             title = "Search ${webSearch.engine.label} for \"$webArg\"",
-                            subtitle = "Opens in ${webSearch.browserLabel ?: "your default browser"}",
+                            subtitle = webSearch.browserLabel ?: "Default browser",
                             type = SmartCommandType.WEB_SEARCH,
                             execute = { SystemActionsManager.openWebSearch(it, webArg, webSearch.engine, webSearch.browserPackage) }
                         )
@@ -508,9 +711,33 @@ object SmartCommandEngine {
             }
         }
 
+        // @nickname is a direct contact lookup. Keep it ahead of app results so Enter
+        // can call the selected saved contact without requiring the `call` command.
+        if (trimmed.startsWith("@")) {
+            val query = trimmed.drop(1).trim()
+            contacts.mapNotNull { contact ->
+                val nicknameMatch = if (query.isBlank()) MatchResult(1.0) else SearchRanking.evaluateMatch(query, contact.nickname)
+                val nameMatch = if (query.isBlank() || contact.name.isBlank()) MatchResult(0.0) else SearchRanking.evaluateMatch(query, contact.name)
+                val phoneMatch = if (query.isBlank()) MatchResult(0.0) else SearchRanking.evaluateMatch(query, contact.phoneNumber)
+                val boostedNickname = if (nicknameMatch.score > 0.0) nicknameMatch.score + 120.0 else 0.0
+                val best = maxOf(boostedNickname, nameMatch.score, phoneMatch.score)
+                if (query.isNotBlank() && best <= 0.0) return@mapNotNull null
+                best to LauncherSearchResult.ContactCall(
+                        id = "contact_call_${contact.id}",
+                        nickname = contact.nickname,
+                        contactName = contact.name,
+                        phoneNumber = contact.phoneNumber,
+                        execute = { SystemActionsManager.callPhoneNumber(it, contact.phoneNumber) }
+                    )
+            }.sortedWith(compareByDescending<Pair<Double, LauncherSearchResult.ContactCall>> { it.first }
+                .thenBy { it.second.nickname.lowercase(Locale.ROOT) })
+                .take(12)
+                .forEach { results.add(it.second) }
+        }
+
         // 9. Call
         val callCfg = cfg("call")
-        if (callCfg.enabled) {
+        if (callCfg.enabled && !trimmed.startsWith("@")) {
             val afterCall = matchPrefixArg(trimmed, callCfg.prefix)
             if (afterCall != null) {
                 val matches = if (afterCall.isEmpty()) contacts else {

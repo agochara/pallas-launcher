@@ -181,6 +181,33 @@ class SmartCommandsAndContactsTests {
     }
 
     @Test
+    fun testAtSearchFuzzyMatchesContactNamesAndNicknames() {
+        val contacts = listOf(
+            SearchContact(nickname = "Mom", name = "Mary Smith", phoneNumber = "+1234567890"),
+            SearchContact(nickname = "Dad", name = "John Smith", phoneNumber = "+1987654321")
+        )
+
+        val exact = SmartCommandEngine.evaluateCommands("@Mom", contacts).immediateResults
+        assertEquals("Mom", (exact.first() as LauncherSearchResult.ContactCall).nickname)
+
+        val fuzzy = SmartCommandEngine.evaluateCommands("@Mry", contacts).immediateResults
+        assertEquals("Mom", (fuzzy.first() as LauncherSearchResult.ContactCall).nickname)
+
+        val nonMatching = SmartCommandEngine.evaluateCommands("@nonexistent", contacts).immediateResults
+        assertTrue("Non-matching @ search must return empty results", nonMatching.isEmpty())
+
+        // `call` remains the explicit saved-nickname shortcut.
+        val direct = SmartCommandEngine.evaluateCommands("call Mom", contacts).immediateResults
+        assertEquals("Mom", (direct.first() as LauncherSearchResult.ContactCall).nickname)
+    }
+
+    @Test
+    fun testStockPeriodRemainsAvailableInline() {
+        val evaluation = SmartCommandEngine.evaluateCommands("st RELIANCE 5y", emptyList())
+        assertEquals("RELIANCE 5y", (evaluation.asyncRequest as com.pallas.launcher.domain.search.AsyncCommandRequest.Finance).query)
+    }
+
+    @Test
     fun testSearchEngineIntegratesCommandsAndApps() {
         val searchEngine = SearchEngine()
         val apps = listOf(
@@ -233,20 +260,20 @@ class SmartCommandsAndContactsTests {
 
         val buckets = apps.groupBy { app ->
             val c = app.label.trim().firstOrNull()?.uppercaseChar()
-            if (c != null && c in 'A'..'Z') c.toString() else "#"
+            if (c != null && c in 'A'..'Z') c.toString() else "0-9"
         }
 
-        val letterOrder = ('A'..'Z').map { it.toString() } + "#"
+        val letterOrder = ('A'..'Z').map { it.toString() } + "0-9"
         val railItems = buildList {
             letterOrder.forEach { letter ->
                 if (!buckets[letter].isNullOrEmpty()) {
-                    add(if (letter == "#") "•" else letter)
+                    add(if (letter == "0-9") "0–9" else letter)
                 }
             }
         }
 
-        // Must contain only C, F, M, •
-        assertEquals(listOf("C", "F", "M", "•"), railItems)
+        // Must contain only C, F, M, 0–9, with no hash bucket.
+        assertEquals(listOf("C", "F", "M", "0–9"), railItems)
         // Does not contain A, B, D, E, Z, etc.
         assertTrue(!railItems.contains("A"))
         assertTrue(!railItems.contains("B"))
@@ -350,11 +377,14 @@ class SmartCommandsAndContactsTests {
                 put("stock", org.json.JSONObject().put("enabled", true).put("prefix", "s t"))
                 // Duplicate prefix matching weather ("w") -> should fallback to default prefix ("wa")
                 put("wolfram", org.json.JSONObject().put("enabled", true).put("prefix", "w"))
+                // Case-insensitive duplicate prefix ("W") -> should fallback to default prefix ("tex")
+                put("tex", org.json.JSONObject().put("enabled", true).put("prefix", "W"))
             })
         }
         val settings = com.pallas.launcher.data.repository.SettingsBackup.settingsFromJson(json)
         assertEquals("w", settings.commandConfigs["weather"]?.prefix)
         assertEquals("st", settings.commandConfigs["stock"]?.prefix)
         assertEquals("wa", settings.commandConfigs["wolfram"]?.prefix)
+        assertEquals("tex", settings.commandConfigs["tex"]?.prefix)
     }
 }

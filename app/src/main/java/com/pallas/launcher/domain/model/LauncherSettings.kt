@@ -40,6 +40,9 @@ enum class EdgeScrubReleaseAction {
     LAUNCH_TOP
 }
 
+enum class WolframSubmitMode { API, WEBSITE }
+enum class WolframRequestTrigger { ENTER, IDLE }
+
 enum class TextShadowMode {
     OFF,
     AUTO,
@@ -72,6 +75,8 @@ data class CommandConfig(
             "web" to CommandConfig("web", "Web Search", true, "q"),
             "call" to CommandConfig("call", "Direct Call", true, "call"),
             "math" to CommandConfig("math", "Math & Fat-Tail Stats", true, "="),
+            "tex" to CommandConfig("tex", "LaTeX Renderer", true, "tex"),
+            "convert" to CommandConfig("convert", "Unit & Currency Converter", true, "convert"),
             "stock" to CommandConfig("stock", "Markets & Finance", true, "st"),
             "weather" to CommandConfig("weather", "Weather", true, "w"),
             "solar" to CommandConfig("solar", "Sunrise & Sunset", true, "sun"),
@@ -85,6 +90,8 @@ data class CommandConfig(
 data class LauncherSettings(
     val themeMode: ThemeMode = ThemeMode.DARK,
     val showWallpaperScrim: Boolean = false,
+    /** Strength multiplier for the home wallpaper gradient, from 0 (off) to 1 (full). */
+    val wallpaperScrimStrength: Float = 1.0f,
     val hideStatusBar: Boolean = false,
     val clockVerticalPosition: ClockVerticalPosition = ClockVerticalPosition.TOP,
     val clockHorizontalAlignment: ClockHorizontalAlignment = ClockHorizontalAlignment.RIGHT,
@@ -98,6 +105,11 @@ data class LauncherSettings(
     val shortSwipeRightAction: GestureAction = GestureAction.OpenDialer,
     val swipeUpAction: GestureAction = GestureAction.OpenAppDrawer,
     val swipeDownAction: GestureAction = GestureAction.OpenNotifications,
+    val swipeDownLeftAction: GestureAction = GestureAction.OpenNotifications,
+    val swipeDownRightAction: GestureAction = GestureAction.OpenNotifications,
+    val wolframSubmitMode: WolframSubmitMode = WolframSubmitMode.API,
+    val wolframRequestTrigger: WolframRequestTrigger = WolframRequestTrigger.ENTER,
+    val wolframIdleDelaySeconds: Int = 2,
     val doubleTapAction: GestureAction = GestureAction.LockScreen,
     val customAliases: Map<String, String> = emptyMap(),
     val searchContacts: List<SearchContact> = emptyList(),

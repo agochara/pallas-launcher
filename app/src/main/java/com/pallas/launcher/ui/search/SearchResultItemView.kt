@@ -5,11 +5,14 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,7 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ShowChart
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Functions
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Icon
@@ -50,7 +54,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -59,6 +65,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -73,7 +80,10 @@ import com.pallas.launcher.domain.search.LauncherSearchResult
 import com.pallas.launcher.domain.search.MathStatsEngine
 import com.pallas.launcher.domain.search.SmartCommandType
 import com.pallas.launcher.ui.apps.AppIconImage
+import com.pallas.launcher.ui.components.LatexFormula
+import com.pallas.launcher.ui.components.MathChartCanvas
 import com.pallas.launcher.ui.theme.LauncherTypography
+import com.pallas.launcher.ui.theme.LocalLauncherColors
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -93,16 +103,29 @@ fun SearchResultItemView(
         LauncherTypography.searchResultTitle
     }
 
+    val rowShape = RoundedCornerShape(8.dp)
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = if (result is LauncherSearchResult.RichCard) 5.dp else 3.dp)
-            .clip(RoundedCornerShape(18.dp))
+            .padding(horizontal = 16.dp, vertical = if (result is LauncherSearchResult.RichCard) 4.dp else 2.dp)
+            .clip(rowShape)
             .background(
                 when {
-                    result is LauncherSearchResult.RichCard -> if (isFirst) colorScheme.surfaceContainerHigh else colorScheme.surfaceContainerLow
-                    isFirst -> colorScheme.surfaceContainerHigh.copy(alpha = 0.78f)
+                    result is LauncherSearchResult.RichCard -> if (isFirst) colorScheme.surfaceContainerHigh else colorScheme.surfaceContainer
+                    isFirst -> colorScheme.surfaceContainerHigh.copy(alpha = 0.72f)
                     else -> Color.Transparent
+                }
+            )
+            .then(
+                if (result is LauncherSearchResult.RichCard || isFirst) {
+                    Modifier.border(
+                        width = 1.dp,
+                        color = if (isFirst) colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        else colorScheme.outlineVariant.copy(alpha = 0.3f),
+                        shape = rowShape
+                    )
+                } else {
+                    Modifier
                 }
             )
             .combinedClickable(
@@ -116,7 +139,7 @@ fun SearchResultItemView(
                     }
                 }
             )
-            .padding(horizontal = 14.dp, vertical = if (result is LauncherSearchResult.RichCard) 12.dp else 10.dp),
+            .padding(horizontal = 12.dp, vertical = if (result is LauncherSearchResult.RichCard) 11.dp else 9.dp),
         verticalAlignment = if (result is LauncherSearchResult.RichCard) Alignment.Top else Alignment.CenterVertically
     ) {
         when (result) {
@@ -145,8 +168,8 @@ fun SearchResultItemView(
                     }
                 }
 
-                AppIconImage(app = result.app, size = 32.dp, shape = CircleShape)
-                Spacer(modifier = Modifier.width(16.dp))
+                AppIconImage(app = result.app, size = 32.dp, shape = RoundedCornerShape(8.dp))
+                Spacer(modifier = Modifier.width(14.dp))
                 Text(
                     text = annotated,
                     style = titleStyle,
@@ -167,13 +190,15 @@ fun SearchResultItemView(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = result.subtitle,
-                        style = LauncherTypography.searchResultSubtitle,
-                        color = colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (result.subtitle.isNotEmpty()) {
+                        Text(
+                            text = result.subtitle,
+                            style = LauncherTypography.searchResultSubtitle,
+                            color = colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 
@@ -208,33 +233,51 @@ fun SearchResultItemView(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier.fillMaxWidth()
                         ) {
+                            val isMathTitle = result.type == SmartCommandType.MATH_STATS
                             Text(
                                 text = result.title,
-                                style = MaterialTheme.typography.labelLarge,
+                                style = if (isMathTitle) {
+                                    MaterialTheme.typography.labelLarge.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                } else {
+                                    MaterialTheme.typography.labelLarge
+                                },
                                 color = colorScheme.onSurfaceVariant,
                                 softWrap = true,
                                 modifier = Modifier.weight(1f, fill = false)
                             )
                             result.badgeText?.let { badge ->
                                 val badgeColor = when (result.isBadgePositive) {
-                                    true -> colorScheme.primaryContainer
-                                    false -> colorScheme.errorContainer
+                                    true -> colorScheme.primary.copy(alpha = 0.12f)
+                                    false -> colorScheme.errorContainer.copy(alpha = 0.65f)
                                     null -> colorScheme.surfaceContainerHighest
                                 }
+                                val borderColor = when (result.isBadgePositive) {
+                                    true -> colorScheme.primary.copy(alpha = 0.28f)
+                                    false -> colorScheme.error.copy(alpha = 0.28f)
+                                    null -> colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                }
                                 val textColor = when (result.isBadgePositive) {
-                                    true -> colorScheme.onPrimaryContainer
+                                    true -> colorScheme.primary
                                     false -> colorScheme.onErrorContainer
                                     null -> colorScheme.onSurfaceVariant
                                 }
                                 Surface(
-                                    shape = RoundedCornerShape(8.dp),
+                                    shape = RoundedCornerShape(5.dp),
                                     color = badgeColor,
+                                    border = BorderStroke(1.dp, borderColor),
                                     modifier = Modifier.padding(start = 8.dp)
                                 ) {
                                     Text(
                                         text = badge,
-                                        style = LauncherTypography.badge,
+                                        style = LauncherTypography.badge.copy(
+                                            fontSize = 10.sp,
+                                            letterSpacing = 0.3.sp
+                                        ),
                                         color = textColor,
+                                        maxLines = 1,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
@@ -243,38 +286,168 @@ fun SearchResultItemView(
 
                         if (result.primaryValue.isNotEmpty()) {
                             val isMathOrWolfram = result.type == SmartCommandType.MATH_STATS || result.type == SmartCommandType.WOLFRAM
-                            val isLongOutput = isMathOrWolfram && result.primaryValue.length > 36
-                            val valueStyle = when {
-                                isLongOutput -> MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Medium,
-                                    lineHeight = 22.sp,
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                                )
-                                isMathOrWolfram -> MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    lineHeight = 28.sp
-                                )
-                                else -> LauncherTypography.cardValue.copy(lineHeight = 28.sp)
+                            val isMultilineConvert = result.type == SmartCommandType.CONVERT && result.primaryValue.contains('\n')
+                            val isLongOrMultiline = (isMathOrWolfram &&
+                                (result.primaryValue.length > 36 || result.primaryValue.contains('\n'))) || isMultilineConvert
+                            val isLongConvert = result.type == SmartCommandType.CONVERT && result.primaryValue.length > 28
+                            val formattedPrimary = remember(result.primaryValue, colorScheme.primary) {
+                                if (result.primaryValue.startsWith("= ")) {
+                                    buildAnnotatedString {
+                                        withStyle(
+                                            SpanStyle(
+                                                color = colorScheme.primary,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        ) {
+                                            append("= ")
+                                        }
+                                        append(result.primaryValue.removePrefix("= "))
+                                    }
+                                } else {
+                                    buildAnnotatedString { append(result.primaryValue) }
+                                }
                             }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)
-                            ) {
-                                Text(
-                                    text = result.primaryValue,
-                                    style = valueStyle,
-                                    color = colorScheme.onSurface,
-                                    softWrap = true,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                if (result.sparkline.size >= 2) {
-                                    SparklineCanvas(
-                                        points = result.sparkline,
-                                        isPositive = result.isBadgePositive != false,
-                                        modifier = Modifier.width(64.dp).height(24.dp).padding(start = 8.dp)
+                            if (isLongOrMultiline) {
+                                Surface(
+                                    shape = RoundedCornerShape(7.dp),
+                                    color = colorScheme.surfaceContainerLowest,
+                                    border = BorderStroke(1.dp, colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
+                                ) {
+                                    val textModifier = if (isMultilineConvert) {
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState())
+                                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                                    } else {
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                                    }
+                                    Text(
+                                        text = formattedPrimary,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = if (isMultilineConvert) 12.5.sp else 14.sp,
+                                            lineHeight = 20.sp
+                                        ),
+                                        color = colorScheme.onSurface,
+                                        softWrap = !isMultilineConvert,
+                                        modifier = textModifier
                                     )
                                 }
+                            } else {
+                                val valueStyle = when {
+                                    isMathOrWolfram -> MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        lineHeight = 28.sp
+                                    )
+                                    isLongConvert -> MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        lineHeight = 24.sp
+                                    )
+                                    else -> LauncherTypography.cardValue.copy(lineHeight = 28.sp)
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)
+                                ) {
+                                    Text(
+                                        text = formattedPrimary,
+                                        style = valueStyle,
+                                        color = colorScheme.onSurface,
+                                        softWrap = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (result.sparkline.size >= 2) {
+                                        SparklineCanvas(
+                                            points = result.sparkline,
+                                            isPositive = result.isBadgePositive != false,
+                                            modifier = Modifier.width(64.dp).height(24.dp).padding(start = 8.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!result.consoleOutput.isNullOrEmpty()) {
+                            val barColor = colorScheme.primary.copy(alpha = 0.55f)
+                            Surface(
+                                shape = RoundedCornerShape(7.dp),
+                                color = colorScheme.surfaceContainerLowest,
+                                border = BorderStroke(1.dp, colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 3.dp, bottom = 2.dp)
+                            ) {
+                                Text(
+                                    text = result.consoleOutput,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = 18.sp
+                                    ),
+                                    color = colorScheme.onSurface.copy(alpha = 0.9f),
+                                    softWrap = true,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .drawBehind {
+                                            drawRect(
+                                                color = barColor,
+                                                topLeft = Offset.Zero,
+                                                size = Size(3.dp.toPx(), size.height)
+                                            )
+                                        }
+                                        .padding(start = 11.dp, end = 10.dp, top = 7.dp, bottom = 7.dp)
+                                )
+                            }
+                        }
+
+                        if (!result.latexSource.isNullOrBlank()) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = colorScheme.surfaceContainerLowest,
+                                border = BorderStroke(1.dp, colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState())
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    LatexFormula(
+                                        latex = result.latexSource,
+                                        color = colorScheme.onSurface,
+                                        fontSize = 20.sp
+                                    )
+                                }
+                            }
+                        }
+
+                        if (result.chart != null) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = colorScheme.surfaceContainerLowest,
+                                border = BorderStroke(1.dp, colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                MathChartCanvas(
+                                    chart = result.chart,
+                                    isDark = LocalLauncherColors.current.isDark,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(186.dp)
+                                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                                )
                             }
                         }
 
@@ -318,30 +491,46 @@ fun SearchResultItemView(
 @Composable
 private fun CommandLeadingIcon(type: SmartCommandType) {
     val colorScheme = MaterialTheme.colorScheme
-    val icon = when (type) {
-        SmartCommandType.ALARM -> Icons.Default.Alarm
-        SmartCommandType.TIMER -> Icons.Default.Timer
-        SmartCommandType.CALL -> Icons.Default.Call
-        SmartCommandType.WEB_SEARCH -> Icons.Default.Search
-        SmartCommandType.MATH_STATS, SmartCommandType.WOLFRAM -> Icons.Default.Functions
-        SmartCommandType.FINANCE -> Icons.AutoMirrored.Filled.ShowChart
-        SmartCommandType.WEATHER -> Icons.Default.Cloud
-        SmartCommandType.SOLAR -> Icons.Default.WbSunny
-        SmartCommandType.SETTINGS -> Icons.Default.Settings
-    }
+    val tileShape = RoundedCornerShape(7.dp)
     Box(
         modifier = Modifier
-            .size(32.dp)
-            .clip(CircleShape)
-            .background(colorScheme.primaryContainer),
+            .size(30.dp)
+            .clip(tileShape)
+            .background(colorScheme.primary.copy(alpha = 0.12f))
+            .border(1.dp, colorScheme.primary.copy(alpha = 0.22f), tileShape),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = colorScheme.onPrimaryContainer,
-            modifier = Modifier.size(18.dp)
-        )
+        if (type == SmartCommandType.LATEX) {
+            Text(
+                text = "LaTeX",
+                fontFamily = FontFamily.Serif,
+                fontWeight = FontWeight.Bold,
+                fontSize = 8.sp,
+                letterSpacing = (-0.3).sp,
+                maxLines = 1,
+                color = colorScheme.primary
+            )
+        } else {
+            val icon = when (type) {
+                SmartCommandType.ALARM -> Icons.Default.Alarm
+                SmartCommandType.TIMER -> Icons.Default.Timer
+                SmartCommandType.CALL -> Icons.Default.Call
+                SmartCommandType.WEB_SEARCH -> Icons.Default.Search
+                SmartCommandType.MATH_STATS, SmartCommandType.WOLFRAM -> Icons.Default.Functions
+                SmartCommandType.CONVERT -> Icons.Default.SwapHoriz
+                SmartCommandType.FINANCE -> Icons.AutoMirrored.Filled.ShowChart
+                SmartCommandType.WEATHER -> Icons.Default.Cloud
+                SmartCommandType.SOLAR -> Icons.Default.WbSunny
+                SmartCommandType.SETTINGS -> Icons.Default.Settings
+                SmartCommandType.LATEX -> Icons.Default.Functions
+            }
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = colorScheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+        }
     }
 }
 

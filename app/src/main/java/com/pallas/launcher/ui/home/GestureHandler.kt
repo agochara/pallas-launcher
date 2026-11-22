@@ -38,6 +38,8 @@ private enum class DragAxis {
 fun GestureContainer(
     onSwipeUp: () -> Unit,
     onSwipeDown: () -> Unit,
+    onSwipeDownLeft: () -> Unit = onSwipeDown,
+    onSwipeDownRight: () -> Unit = onSwipeDown,
     onShortSwipeLeft: () -> Unit,
     onLongSwipeLeft: () -> Unit,
     onShortSwipeRight: () -> Unit,
@@ -62,6 +64,8 @@ fun GestureContainer(
 
     val currentOnSwipeUp by rememberUpdatedState(onSwipeUp)
     val currentOnSwipeDown by rememberUpdatedState(onSwipeDown)
+    val currentOnSwipeDownLeft by rememberUpdatedState(onSwipeDownLeft)
+    val currentOnSwipeDownRight by rememberUpdatedState(onSwipeDownRight)
     val currentOnShortSwipeLeft by rememberUpdatedState(onShortSwipeLeft)
     val currentOnLongSwipeLeft by rememberUpdatedState(onLongSwipeLeft)
     val currentOnShortSwipeRight by rememberUpdatedState(onShortSwipeRight)
@@ -75,6 +79,7 @@ fun GestureContainer(
     var totalDragX by remember { mutableFloatStateOf(0f) }
     var totalDragY by remember { mutableFloatStateOf(0f) }
     var lockedAxis by remember { mutableStateOf(DragAxis.NONE) }
+    var verticalSwipeStartX by remember { mutableFloatStateOf(0f) }
 
     val gestureModifier = if (enabled) {
         modifier
@@ -95,10 +100,11 @@ fun GestureContainer(
             }
             .pointerInput(enabled, canLongSwipeHorizontal) {
                 detectDragGestures(
-                    onDragStart = {
+                    onDragStart = { start ->
                         totalDragX = 0f
                         totalDragY = 0f
                         lockedAxis = DragAxis.NONE
+                        verticalSwipeStartX = start.x
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
@@ -136,7 +142,7 @@ fun GestureContainer(
                             if (totalDragY < 0) {
                                 currentOnSwipeUp()
                             } else {
-                                currentOnSwipeDown()
+                                if (verticalSwipeStartX < size.width / 2f) currentOnSwipeDownLeft() else currentOnSwipeDownRight()
                             }
                         } else if (wasHorizontal && finalAbsX >= shortSwipeMinPx) {
                             val commitLong = canLongSwipeHorizontal && finalAbsX >= longSwipeMinPx

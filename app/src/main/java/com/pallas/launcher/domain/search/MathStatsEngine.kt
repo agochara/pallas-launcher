@@ -1,123 +1,240 @@
 package com.pallas.launcher.domain.search
 
+import com.pallas.launcher.domain.model.CommandConfig
 import java.util.Locale
 import java.util.Random
 import kotlin.math.*
 
 object MathStatsEngine {
 
-    val MANUAL_ENTRIES: List<ManualEntry> = listOf(
-        // Arithmetic & Elementary Math
-        ManualEntry("Plus[a, b, ...] / a + b", "Arithmetic & Elementary Math", "Addition of numbers or vectors.", "= 15 + 27"),
-        ManualEntry("Power[a, b] / a ^ b", "Arithmetic & Elementary Math", "Raises a to the power of b.", "= 2^10"),
-        ManualEntry("Sqrt[x] / CubeRoot[x]", "Arithmetic & Elementary Math", "Square root and cube root.", "= Sqrt[256]"),
-        ManualEntry("Abs[x] / Sign[x]", "Arithmetic & Elementary Math", "Absolute value and signum (-1, 0, 1).", "= Abs[-42]"),
-        ManualEntry("Log[b, x] / Log[x] / Ln[x]", "Arithmetic & Elementary Math", "Logarithm to base b of x (e.g. Log[2, 64]=6), natural log ln(x), or common Log10[x]. Note argument order: Log[base, x].", "= Log[2, 64]"),
-        ManualEntry("Sin[x] / Cos[x] / Tan[x]", "Arithmetic & Elementary Math", "Trigonometric functions (radians; use Deg/Rad to convert).", "= Sin[Pi / 2]"),
-        ManualEntry("ArcSin[x] / ArcCos[x] / ArcTan[x]", "Arithmetic & Elementary Math", "Inverse trigonometric functions.", "= ArcTan[1]"),
-        ManualEntry("Round[x] / Floor[x] / Ceiling[x]", "Arithmetic & Elementary Math", "Rounding to nearest integer, floor, or ceiling.", "= Round[3.74]"),
-        ManualEntry("Mod[m, d] / Quotient[m, d]", "Arithmetic & Elementary Math", "Remainder and integer quotient of m divided by d.", "= Mod[17, 5]"),
-        ManualEntry("GCD[a, b, ...] / LCM[a, b, ...]", "Arithmetic & Elementary Math", "Greatest common divisor and least common multiple.", "= GCD[24, 36]"),
-        ManualEntry("PrimeQ[n] / NextPrime[n]", "Arithmetic & Elementary Math", "Tests if n is prime, or finds the next prime after n.", "= PrimeQ[97]"),
-        ManualEntry("Fibonacci[n]", "Arithmetic & Elementary Math", "Calculates the n-th Fibonacci number.", "= Fibonacci[12]"),
-        ManualEntry("Clip[x, min, max]", "Arithmetic & Elementary Math", "Clamps value x between min and max.", "= Clip[15, 0, 10]"),
-        ManualEntry("Binomial[n, k]", "Arithmetic & Elementary Math", "Binomial coefficient n choose k.", "= Binomial[52, 5]"),
-        ManualEntry("Factorial[n] / n!", "Arithmetic & Elementary Math", "Factorial of non-negative integer n.", "= 6!"),
-
-        // Lists & Vectors
-        ManualEntry("{x1, x2, ...} (List)", "Lists & Vectors", "List creation with vector arithmetic.", "= {1, 2, 3} * 2"),
-        ManualEntry("Range[n] / Range[min, max, [step]]", "Lists & Vectors", "Generates an arithmetic sequence as a list.", "= Range[10]"),
-        ManualEntry("Total[list] / Length[list]", "Lists & Vectors", "Sum of elements and list length.", "= Total[Range[100]]"),
-        ManualEntry("First[list] / Last[list]", "Lists & Vectors", "Returns first or last element of a list.", "= First[{10, 20, 30}]"),
-        ManualEntry("Take[list, n] / Drop[list, n]", "Lists & Vectors", "Takes or drops the first n elements.", "= Take[Range[10], 4]"),
-        ManualEntry("Sort[list] / Reverse[list]", "Lists & Vectors", "Sorts list ascending or reverses order.", "= Sort[{5, 2, 8, 1, 9}]"),
-        ManualEntry("Differences[list] / Accumulate[list]", "Lists & Vectors", "Successive differences or running prefix sums.", "= Accumulate[{1, 2, 3, 4}]"),
-        ManualEntry("DeleteDuplicates[list]", "Lists & Vectors", "Removes duplicates from list preserving first occurrence order.", "= DeleteDuplicates[{1, 2, 2, 3, 1, 4}]"),
-        ManualEntry("Table[expr, {i, max}] / Table[expr, {i, min, max, [step]}]", "Lists & Vectors", "Generates a list by evaluating expression for values of iterator i.", "= Table[i^2, {i, 5}]"),
-        ManualEntry("Fold[f, [x], list]", "Lists & Vectors", "Successive reduction of list using binary function f.", "= Fold[Plus, 0, {1, 2, 3, 4}]"),
-        ManualEntry("Nest[f, expr, n]", "Lists & Vectors", "Applies function f to expression n times.", "= Nest[Sqrt, 256, 3]"),
-
-        // Statistics
-        ManualEntry("Mean[list]", "Statistics", "Calculates the arithmetic mean.", "= Mean[{2, 4, 6, 8, 10}]"),
-        ManualEntry("Median[list]", "Statistics", "Calculates the median value of a list.", "= Median[{1, 3, 3, 6, 7, 8, 9}]"),
-        ManualEntry("Variance[list]", "Statistics", "Calculates the sample variance (n - 1 denominator).", "= Variance[{2, 4, 4, 4, 5, 5, 7, 9}]"),
-        ManualEntry("StandardDeviation[list]", "Statistics", "Calculates the sample standard deviation.", "= StandardDeviation[{2, 4, 4, 4, 5, 5, 7, 9}]"),
-        ManualEntry("Quantile[list, q]", "Statistics", "Empirical quantile for quantile q in [0, 1].", "= Quantile[Range[100], 0.75]"),
-        ManualEntry("InterquartileRange[list]", "Statistics", "IQR difference between Q3 (75%) and Q1 (25%).", "= InterquartileRange[{1, 2, 3, 4, 5, 6, 7, 8}]"),
-        ManualEntry("GeometricMean[list]", "Statistics", "Geometric mean of positive numbers.", "= GeometricMean[{1, 2, 4, 8}]"),
-        ManualEntry("HarmonicMean[list]", "Statistics", "Harmonic mean of positive numbers.", "= HarmonicMean[{1, 2, 4}]"),
-        ManualEntry("RootMeanSquare[list]", "Statistics", "Root mean square (quadratic mean).", "= RootMeanSquare[{1, -2, 3}]"),
-        ManualEntry("Skewness[list] / Kurtosis[list]", "Statistics", "Measures asymmetry and tail thickness of data.", "= Skewness[{1, 2, 2, 3, 4, 5, 9}]"),
-        ManualEntry("Correlation[list1, list2]", "Statistics", "Pearson correlation coefficient between two lists.", "= Correlation[{1, 2, 3}, {2, 4, 6}]"),
-        ManualEntry("Standardize[list]", "Statistics", "Normalizes data to mean 0 and standard deviation 1.", "= Standardize[{10, 20, 30, 40, 50}]"),
-        ManualEntry("MovingAverage[list, r]", "Statistics", "Calculates the moving average of window size r.", "= MovingAverage[{1, 2, 3, 4, 5, 6}, 3]"),
-        ManualEntry("MaxDrawdown[list]", "Statistics", "Maximum peak-to-trough decline in a price or value series.", "= MaxDrawdown[{100, 120, 90, 110, 80, 150}]"),
-
-        // Probability Distributions
-        ManualEntry("NormalDistribution[μ=0, σ=1]", "Distributions", "Gaussian bell curve with mean μ and standard deviation σ.", "= NormalDistribution[100, 15]"),
-        ManualEntry("UniformDistribution[min=0, max=1]", "Distributions", "Continuous uniform distribution between min and max.", "= UniformDistribution[0, 10]"),
-        ManualEntry("ExponentialDistribution[λ=1]", "Distributions", "Memoryless continuous decay with rate λ.", "= ExponentialDistribution[1.5]"),
-        ManualEntry("PoissonDistribution[μ]", "Distributions", "Discrete count distribution with event rate μ.", "= PoissonDistribution[4]"),
-        ManualEntry("BinomialDistribution[n, p]", "Distributions", "Number of successes in n independent Bernoulli trials with probability p.", "= BinomialDistribution[20, 0.5]"),
-        ManualEntry("StudentTDistribution[ν]", "Distributions", "Student's t-distribution with ν degrees of freedom.", "= StudentTDistribution[3]"),
-        ManualEntry("CauchyDistribution[x0=0, γ=1]", "Distributions", "Lorentz distribution with location x0 and scale γ. Undefined mean.", "= CauchyDistribution[0, 1]"),
-        ManualEntry("GammaDistribution[α, β=1]", "Distributions", "Gamma distribution with shape α and scale β.", "= GammaDistribution[2, 1]"),
-        ManualEntry("BetaDistribution[α, β]", "Distributions", "Beta distribution on interval [0, 1] with shape parameters α and β.", "= BetaDistribution[2, 5]"),
-        ManualEntry("GeometricDistribution[p]", "Distributions", "Number of Bernoulli trials until first success with success probability p.", "= GeometricDistribution[0.2]"),
-
-        // Heavy Tails & Power Laws
-        ManualEntry("ParetoDistribution[k=1, α=1]", "Heavy Tails & Power Laws", "Power law survival P(X>x)=(k/x)^α. Minimum value k, tail exponent α.", "= ParetoDistribution[1, 2]"),
-        ManualEntry("LevyDistribution[μ=0, c=1]", "Heavy Tails & Power Laws", "Lévy stable distribution (α=1/2). Heavy tail, infinite mean and variance.", "= LevyDistribution[0, 1]"),
-        ManualEntry("LogNormalDistribution[μ=0, σ=1]", "Heavy Tails & Power Laws", "Subexponential distribution with high variance and positive skew.", "= LogNormalDistribution[0, 1.2]"),
-        ManualEntry("FrechetDistribution[α, [s=1], [m=0]]", "Heavy Tails & Power Laws", "Extreme Value Type II fat-tailed maximum domain of attraction.", "= FrechetDistribution[2, 1, 0]"),
-        ManualEntry("WeibullDistribution[k, [λ=1]]", "Heavy Tails & Power Laws", "Subexponential when shape k < 1; thin-tailed when k > 1.", "= WeibullDistribution[0.7, 1]"),
-        ManualEntry("HillEstimator[list, [k]]", "Heavy Tails & Power Laws", "Extreme value theory estimator for Pareto tail exponent α.", "= HillEstimator[{10, 15, 25, 40, 90, 200}]"),
-        ManualEntry("ExpectedShortfall[dist | list, [q=0.95]]", "Heavy Tails & Power Laws", "Conditional Value at Risk (CVaR) average beyond quantile q.", "= ExpectedShortfall[NormalDistribution[0, 1], 0.95]"),
-
-        // Distribution Operations
-        ManualEntry("PDF[dist, x]", "Probability Ops", "Evaluates Probability Density Function (or PMF) at x or list of x.", "= PDF[NormalDistribution[0, 1], 0]"),
-        ManualEntry("CDF[dist, x]", "Probability Ops", "Cumulative Distribution Function: P(X ≤ x).", "= CDF[NormalDistribution[0, 1], 1.96]"),
-        ManualEntry("SurvivalFunction[dist, x]", "Probability Ops", "Upper tail probability: P(X > x) = 1 - CDF(x).", "= SurvivalFunction[ParetoDistribution[1, 2], 2]"),
-        ManualEntry("HazardFunction[dist, x]", "Probability Ops", "Hazard rate: PDF(x) / SurvivalFunction(x).", "= HazardFunction[ExponentialDistribution[2], 1]"),
-        ManualEntry("Mean[dist] / Variance[dist]", "Probability Ops", "Theoretical expected value E[X] or variance Var(X) of distribution.", "= Mean[NormalDistribution[50, 10]]"),
-        ManualEntry("Quantile[dist, q]", "Probability Ops", "Inverse CDF: value x such that CDF(x) = q.", "= Quantile[NormalDistribution[0, 1], 0.975]"),
-        ManualEntry("InverseCDF[dist, q]", "Probability Ops", "Inverse CDF: value x such that CDF(x) = q.", "= InverseCDF[NormalDistribution[0, 1], 0.975]"),
-        ManualEntry("Expectation[dist]", "Probability Ops", "Theoretical expected value E[X] of distribution.", "= Expectation[ParetoDistribution[1, 2]]"),
-        ManualEntry("Moment[dist | list, r] / CentralMoment[dist | list, r]", "Probability Ops", "Theoretical or empirical raw moment E[X^r] or central moment E[(X-μ)^r].", "= Moment[NormalDistribution[0, 1], 2]"),
-
-        // Random Generation
-        ManualEntry("RandomInteger[] / RandomInteger[max] / RandomInteger[{min, max}, [n]]", "Random Generation", "Generates pseudo-random integer(s) in specified range.", "= RandomInteger[{1, 6}, 5]"),
-        ManualEntry("RandomReal[] / RandomReal[max] / RandomReal[{min, max}, [n]]", "Random Generation", "Generates pseudo-random real number(s) in specified range.", "= RandomReal[{0, 10}, 3]"),
-        ManualEntry("RandomChoice[list, [n]]", "Random Generation", "Randomly selects item(s) from a list with replacement.", "= RandomChoice[{10, 20, 30, 40}, 2]"),
-        ManualEntry("RandomSample[list, [n]]", "Random Generation", "Randomly permutes or samples without replacement from a list.", "= RandomSample[Range[10], 4]"),
-        ManualEntry("RandomVariate[dist, [n]]", "Random Generation", "Generates pseudo-random variate(s) from any distribution.", "= Mean[RandomVariate[NormalDistribution[0, 1], 1000]]"),
-
-        // Wolfram Operators & Control Flow
-        ManualEntry("f @ x (Prefix)", "Wolfram Language", "Prefix function application f @ x, equivalent to f[x].", "= Sqrt @ 256"),
-        ManualEntry("x // f (Postfix)", "Wolfram Language", "Postfix pipeline application x // f, equivalent to f[x].", "= {1, 2, 3} // Total"),
-        ManualEntry("f /@ list (Map)", "Wolfram Language", "Maps f over each element of list, equivalent to Map[f, list].", "= Sqrt /@ {4, 9, 16, 25}"),
-        ManualEntry("f @@ expr (Apply)", "Wolfram Language", "Replaces head of expr with f, equivalent to Apply[f, expr].", "= Plus @@ {1, 2, 3, 4}"),
-        ManualEntry("expr /. rule (ReplaceAll)", "Wolfram Language", "Substitutes variables using rules (e.g. x -> 5).", "= x^2 + 2*x + 1 /. x -> 3"),
-        ManualEntry("expr & / # (Pure Function)", "Wolfram Language", "Anonymous pure function with slot # or #1, #2.", "= (#^2) & /@ {1, 2, 3, 4}"),
-        ManualEntry("If[cond, then, [else]]", "Wolfram Language", "Evaluates condition and executes corresponding branch.", "= If[10 > 5, 42, 0]"),
-        ManualEntry("Which[c1, v1, c2, v2, ...]", "Wolfram Language", "Evaluates conditions sequentially, returning first true branch.", "= Which[2 < 0, -1, 2 == 0, 0, 2 > 0, 1]"),
-        ManualEntry("While[test, body]", "Wolfram Language", "Loops while condition is true. Protected with strict timeout safety.", "= s = 0; i = 1; While[i <= 5, s += i; i++]; s"),
-        ManualEntry("For[start, test, incr, body]", "Wolfram Language", "Loops from start while test is true, advancing with incr.", "= s = 0; For[i = 1, i <= 4, i++, s += i^2]; s"),
-        ManualEntry("Do[expr, {i, max}]", "Wolfram Language", "Evaluates expression repeatedly for iterator i.", "= s = 0; Do[s += i, {i, 10}]; s"),
-        ManualEntry("Select[list, crit]", "Wolfram Language", "Filters elements in list satisfying criteria predicate.", "= Select[Range[10], EvenQ]"),
-        ManualEntry("Part[list, i] / list[[i]]", "Wolfram Language", "Extracts i-th element (1-indexed, negative from end).", "= {10, 20, 30}[[2]]"),
-
-        // Launcher Smart Commands
-        ManualEntry("= <expression>", "Launcher Commands", "Evaluates mathematical expressions, statistics, vectors, and distributions.", "= Mean[{12, 18, 25, 40}]"),
-        ManualEntry("w <city | lat, lon>", "Launcher Commands", "Live weather forecast with temperatures, condition, wind, and sunrise/sunset.", "w london"),
-        ManualEntry("sunrise <city | lat, lon>", "Launcher Commands", "Civil sunrise and sunset times in local time.", "sunrise tokyo"),
-        ManualEntry("sunset <city | lat, lon>", "Launcher Commands", "Civil sunset and sunrise times in local time.", "sunset 35.6762, 139.6503"),
-        ManualEntry("st <ticker | index> [range]", "Launcher Commands", "Real-time stock quotes, indices, and charts. Configurable default range or inline: 1d, 5d, 1mo, 6mo, 1y, max.", "st nvda 1mo"),
-        ManualEntry("alarm <time>", "Launcher Commands", "Sets an Android system clock alarm for specified time.", "alarm 7:30 AM"),
-        ManualEntry("timer <duration>", "Launcher Commands", "Starts a system countdown timer.", "timer 5m"),
-        ManualEntry("call <contact>", "Launcher Commands", "Places a phone call or opens dialer for matching contact.", "call Mom"),
-        ManualEntry("pallas settings", "Launcher Commands", "Quickly navigates to Pallas Launcher settings.", "pallas settings")
+    private data class EngineEntryTemplate(
+        val signature: String,
+        val category: String,
+        val description: String,
+        val expression: String
     )
+
+    private val ENGINE_TEMPLATES: List<EngineEntryTemplate> = listOf(
+        // 1. Arithmetic & Number Theory
+        EngineEntryTemplate("Plus[a, b, ...] / a + b", "Arithmetic & Number Theory", "Addition, subtraction, multiplication, and division on numbers or vectors.", "15 + 27"),
+        EngineEntryTemplate("Power[a, b] / a ^ b", "Arithmetic & Number Theory", "Exponentiation of numbers or vectors.", "2^10"),
+        EngineEntryTemplate("Sqrt[x] / CubeRoot[x]", "Arithmetic & Number Theory", "Principal square root and real cube root.", "Sqrt[256]"),
+        EngineEntryTemplate("N[expr, [digits]]", "Arithmetic & Number Theory", "Numerical evaluation rounded to optional significant digits.", "N[Pi, 8]"),
+        EngineEntryTemplate("Abs[x] / Sign[x] / Clip[x, min, max]", "Arithmetic & Number Theory", "Magnitude, sign (-1, 0, 1), and interval clamping.", "Clip[15, 0, 10]"),
+        EngineEntryTemplate("Log[b, x] / Log[x] / Log10[x] / Exp[x]", "Arithmetic & Number Theory", "Logarithm base b (argument order: Log[base, x]), natural log, base-10 log, and exponential.", "Log[2, 64]"),
+        EngineEntryTemplate("Sin[x] / Cos[x] / Tan[x] / Cot[x] / Sec[x] / Csc[x]", "Arithmetic & Number Theory", "Trigonometric functions in radians (use ° for degrees, e.g. 90°).", "Sin[Pi / 2]"),
+        EngineEntryTemplate("ArcSin[x] / ArcCos[x] / ArcTan[x, [y]]", "Arithmetic & Number Theory", "Inverse trigonometric functions; two-argument ArcTan[x, y] returns quadrant-aware angle.", "ArcTan[1, 1]"),
+        EngineEntryTemplate("Sinh[x] / Cosh[x] / Tanh[x] / ArcSinh[x]", "Arithmetic & Number Theory", "Hyperbolic functions and inverse hyperbolic functions (also Coth, Sech, Csch, ArcCosh, ArcTanh).", "Tanh[1]"),
+        EngineEntryTemplate("Gamma[z] / Erf[x] / Beta[a, b] / Sinc[x] / LogisticSigmoid[x]", "Arithmetic & Number Theory", "Special functions: Gamma, LogGamma, Erf/Erfc, Beta, normalized/cardinal Sinc, HarmonicNumber, and logistic sigmoid.", "Gamma[5]"),
+        EngineEntryTemplate("Round[x] / Floor[x] / Ceiling[x]", "Arithmetic & Number Theory", "Nearest integer, floor, and ceiling rounding.", "Round[3.74]"),
+        EngineEntryTemplate("Mod[m, d] / Quotient[m, d] / Divisible[m, d]", "Arithmetic & Number Theory", "Modular remainder (Mathematica sign convention), integer quotient, and divisibility predicate.", "Mod[-1, 5]"),
+        EngineEntryTemplate("GCD[a, b, ...] / LCM[a, b, ...] / PowerMod[a, b, m]", "Arithmetic & Number Theory", "Greatest common divisor, least common multiple, and modular exponentiation a^b mod m.", "PowerMod[2, 10, 1000]"),
+        EngineEntryTemplate("PrimeQ[n] / NextPrime[n] / Prime[k] / PrimePi[x]", "Arithmetic & Number Theory", "Primality test, next prime, k-th prime, and prime-counting function π(x).", "Prime[10]"),
+        EngineEntryTemplate("FactorInteger[n] / Divisors[n]", "Arithmetic & Number Theory", "Prime factorization {{p, e}, ...} and positive divisors list.", "FactorInteger[360]"),
+        EngineEntryTemplate("IntegerDigits[n, [b]] / FromDigits[digits, [b]]", "Arithmetic & Number Theory", "Converts integers to/from digit lists in base b (default 10).", "IntegerDigits[1234]"),
+        EngineEntryTemplate("Fibonacci[n] / Binomial[n, k] / Factorial[n]", "Arithmetic & Number Theory", "Fibonacci numbers, binomial coefficients n choose k, and factorial n!.", "Binomial[52, 5]"),
+
+        // 2. Calculus & Solvers
+        EngineEntryTemplate("Sum[expr, {i, min, max}] / Product[expr, {i, min, max}]", "Calculus & Solvers", "Finite or series sums and products over iterator {i, min, max, [step]}.", "Sum[1/k^2, {k, 1, 100}]"),
+        EngineEntryTemplate("NIntegrate[expr, {x, a, b}]", "Calculus & Solvers", "Adaptive numerical definite integral over interval [a, b].", "NIntegrate[Sin[x]^2, {x, 0, Pi}]"),
+        EngineEntryTemplate("ND[expr, x, x0]", "Calculus & Solvers", "Numerical derivative d/dx at x = x0.", "ND[x^3, x, 2]"),
+        EngineEntryTemplate("FindRoot[expr == rhs, {x, x0}]", "Calculus & Solvers", "Finds numerical root near initial guess x0 or within bracket {x, a, b}.", "FindRoot[Cos[x] == x, {x, 0.7}]"),
+        EngineEntryTemplate("NMinimize[expr, var] / NMaximize[expr, var]", "Calculus & Solvers", "Numerical global optimization over variable x or bounded interval {x, a, b}.", "NMinimize[x^2 - 4*x + 7, x]"),
+
+        // 3. Lists & Linear Algebra
+        EngineEntryTemplate("{x1, x2, ...} (List)", "Lists & Linear Algebra", "List creation with elementwise vector arithmetic.", "{1, 2, 3} * 2"),
+        EngineEntryTemplate("Range[n] / Subdivide[min, max, n] / ConstantArray[c, n]", "Lists & Linear Algebra", "Arithmetic sequences, evenly spaced grids, and constant vectors.", "Range[10]"),
+        EngineEntryTemplate("Table[expr, {i, min, max, [step]}]", "Lists & Linear Algebra", "Generates a list or matrix by evaluating expr over one or more iterators.", "Table[i^2, {i, 5}]"),
+        EngineEntryTemplate("Part[list, i] / list[[i]] / list[[a ;; b]]", "Lists & Linear Algebra", "1-based indexing (negative from end), multi-index [[i, j]], and Span slices [[a ;; b ;; s]].", "Range[10][[3 ;; 7]]"),
+        EngineEntryTemplate("First[list] / Last[list] / Take[list, n] / Drop[list, n]", "Lists & Linear Algebra", "Head, tail, and prefix/suffix slicing.", "Take[Range[10], 4]"),
+        EngineEntryTemplate("Length[list] / Total[list] / Differences[list] / Accumulate[list]", "Lists & Linear Algebra", "Element count, sum, successive differences, and running prefix sums.", "Accumulate[{1, 2, 3, 4}]"),
+        EngineEntryTemplate("Sort[list] / SortBy[list, f] / Reverse[list]", "Lists & Linear Algebra", "Ascending sort, key-function sort, and reversal.", "Sort[{5, 2, 8, 1, 9}]"),
+        EngineEntryTemplate("Flatten[list] / Partition[list, n] / Riffle[list, x]", "Lists & Linear Algebra", "Flattens nested lists, groups into length-n sublists, or interleaves elements.", "Partition[{1, 2, 3, 4, 5, 6}, 2]"),
+        EngineEntryTemplate("Join[l1, l2] / Append[list, x] / Prepend[list, x]", "Lists & Linear Algebra", "Concatenates lists or inserts elements at end/front.", "Join[{1, 2}, {3, 4}]"),
+        EngineEntryTemplate("DeleteDuplicates[list] / Union[a, b] / Intersection[a, b] / Complement[a, b]", "Lists & Linear Algebra", "Deduplication and sorted set operations.", "Intersection[{1, 2, 3}, {2, 3, 4}]"),
+        EngineEntryTemplate("Select[list, crit] / Count[list, crit] / MemberQ[list, x] / Position[list, x]", "Lists & Linear Algebra", "Filters, counts, checks membership, and locates matching positions.", "Select[Range[10], EvenQ]"),
+        EngineEntryTemplate("AllTrue[list, p] / AnyTrue[list, p] / NoneTrue[list, p]", "Lists & Linear Algebra", "Quantified predicate tests over list elements.", "AllTrue[{2, 4, 6}, EvenQ]"),
+        EngineEntryTemplate("Fold[f, x, list] / FoldList[f, x, list]", "Lists & Linear Algebra", "Sequential reduction and intermediate states using binary function f.", "FoldList[Plus, 0, {1, 2, 3}]"),
+        EngineEntryTemplate("Nest[f, expr, n] / NestList[f, expr, n]", "Lists & Linear Algebra", "Iterated function application n times.", "NestList[# * 2 &, 1, 4]"),
+        EngineEntryTemplate("Dot[a, b] / Norm[v] / Cross[u, v]", "Lists & Linear Algebra", "Vector/matrix product, Euclidean norm (p-norm), and 3D vector cross product.", "Dot[{1, 2, 3}, {4, 5, 6}]"),
+        EngineEntryTemplate("Transpose[m] / Tr[m] / Dimensions[m]", "Lists & Linear Algebra", "Matrix transpose, trace, and list/matrix dimensions.", "Transpose[{{1, 2, 3}, {4, 5, 6}}]"),
+        EngineEntryTemplate("Det[m] / Inverse[m] / IdentityMatrix[n] / DiagonalMatrix[v]", "Lists & Linear Algebra", "Matrix determinant, inverse, identity matrix, and diagonal construction.", "Det[{{1, 2}, {3, 4}}]"),
+
+        // 4. Statistics
+        EngineEntryTemplate("Mean[list] / Median[list] / MinMax[list]", "Statistics", "Arithmetic mean, sample median, and {min, max} pair.", "Mean[{2, 4, 6, 8, 10}]"),
+        EngineEntryTemplate("Variance[list] / StandardDeviation[list]", "Statistics", "Sample variance and sample standard deviation (n - 1 denominator).", "StandardDeviation[{2, 4, 4, 4, 5, 5, 7, 9}]"),
+        EngineEntryTemplate("Quantile[list, q] / InterquartileRange[list]", "Statistics", "Empirical quantile q in [0, 1] and IQR (Q3 - Q1).", "Quantile[Range[100], 0.75]"),
+        EngineEntryTemplate("GeometricMean[list] / HarmonicMean[list] / RootMeanSquare[list]", "Statistics", "Pythagorean means and quadratic mean (RMS).", "GeometricMean[{1, 2, 4, 8}]"),
+        EngineEntryTemplate("Skewness[list] / Kurtosis[list]", "Statistics", "Sample asymmetry (3rd) and tail thickness (4th standardized moment).", "Skewness[{1, 2, 2, 3, 4, 5, 9}]"),
+        EngineEntryTemplate("Covariance[list1, list2] / Correlation[list1, list2]", "Statistics", "Sample covariance and Pearson correlation coefficient.", "Correlation[{1, 2, 3}, {2, 4, 6}]"),
+        EngineEntryTemplate("Standardize[list] / MovingAverage[list, r]", "Statistics", "Z-score standardization and sliding-window moving average.", "MovingAverage[{1, 2, 3, 4, 5, 6}, 3]"),
+        EngineEntryTemplate("MaxDrawdown[list] / ExpectedShortfall[src, q] / HillEstimator[list, [k]]", "Statistics", "Peak-to-trough drawdown, CVaR tail expectation, and Pareto tail exponent α.", "MaxDrawdown[{100, 120, 90, 110, 80, 150}]"),
+
+        // 5. Distributions
+        EngineEntryTemplate("NormalDistribution[μ=0, σ=1]", "Distributions", "Continuous Gaussian bell curve with mean μ and standard deviation σ.", "NormalDistribution[100, 15]"),
+        EngineEntryTemplate("UniformDistribution[min=0, max=1]", "Distributions", "Continuous uniform distribution on [min, max].", "UniformDistribution[0, 10]"),
+        EngineEntryTemplate("ExponentialDistribution[λ=1]", "Distributions", "Continuous memoryless decay distribution with rate λ.", "ExponentialDistribution[1.5]"),
+        EngineEntryTemplate("StudentTDistribution[ν]", "Distributions", "Continuous Student's t-distribution with ν degrees of freedom.", "StudentTDistribution[3]"),
+        EngineEntryTemplate("CauchyDistribution[x0=0, γ=1]", "Distributions", "Continuous Lorentz/Cauchy distribution with undefined mean and variance.", "CauchyDistribution[0, 1]"),
+        EngineEntryTemplate("GammaDistribution[α, β=1] / BetaDistribution[α, β]", "Distributions", "Continuous Gamma(α, β) on (0, ∞) and Beta(α, β) on [0, 1].", "BetaDistribution[2, 5]"),
+        EngineEntryTemplate("LogNormalDistribution[μ=0, σ=1]", "Distributions", "Subexponential positive continuous distribution with heavy right tail.", "LogNormalDistribution[0, 1.2]"),
+        EngineEntryTemplate("ParetoDistribution[k=1, α=1] / LevyDistribution[μ=0, c=1]", "Distributions", "Power-law P(X > x) = (k/x)^α and Lévy α = 1/2 stable distribution.", "ParetoDistribution[1, 2]"),
+        EngineEntryTemplate("FrechetDistribution[α, [s=1], [m=0]] / WeibullDistribution[k, [λ=1]]", "Distributions", "Extreme Value Type II (Fréchet) and Weibull extreme-value/reliability models.", "WeibullDistribution[0.7, 1]"),
+        EngineEntryTemplate("PoissonDistribution[μ] / BinomialDistribution[n, p] / GeometricDistribution[p]", "Distributions", "Discrete count, success-trial, and waiting-time distributions.", "BinomialDistribution[20, 0.5]"),
+
+        // 6. Probability & Random
+        EngineEntryTemplate("PDF[dist, x] / CDF[dist, x]", "Probability & Random", "Density/PMF f(x) and cumulative probability P(X ≤ x).", "CDF[NormalDistribution[0, 1], 1.96]"),
+        EngineEntryTemplate("SurvivalFunction[dist, x] / HazardFunction[dist, x]", "Probability & Random", "Upper tail P(X > x) and hazard rate f(x) / S(x).", "SurvivalFunction[ParetoDistribution[1, 2], 2]"),
+        EngineEntryTemplate("InverseCDF[dist, q] / Quantile[dist, q]", "Probability & Random", "Quantile x satisfying CDF(dist, x) = q.", "InverseCDF[NormalDistribution[0, 1], 0.975]"),
+        EngineEntryTemplate("Expectation[dist] / Mean[dist] / Variance[dist]", "Probability & Random", "Theoretical E[X] and Var(X) of a distribution.", "Mean[NormalDistribution[50, 10]]"),
+        EngineEntryTemplate("Moment[dist | list, r] / CentralMoment[dist | list, r]", "Probability & Random", "Raw r-th moment E[X^r] or central r-th moment E[(X - μ)^r].", "Moment[NormalDistribution[0, 1], 2]"),
+        EngineEntryTemplate("RandomInteger[spec, [n]] / RandomReal[spec, [n]]", "Probability & Random", "Generates random integer or real numbers/lists over {min, max} or [0, max].", "RandomInteger[{1, 6}, 5]"),
+        EngineEntryTemplate("RandomChoice[list, [n]] / RandomSample[list, [n]]", "Probability & Random", "Samples items from a list with or without replacement.", "RandomSample[Range[10], 4]"),
+        EngineEntryTemplate("RandomVariate[dist, [n]] / SeedRandom[seed]", "Probability & Random", "Draws random variate(s) from a distribution; optionally sets PRNG seed.", "Mean[RandomVariate[NormalDistribution[0, 1], 1000]]"),
+
+        // 7. Operators & Control Flow
+        EngineEntryTemplate("f @ x (Prefix) / x // f (Postfix)", "Operators & Control Flow", "Prefix f[x] and postfix pipeline x // f application.", "{1, 2, 3} // Total"),
+        EngineEntryTemplate("f /@ list (Map) / f @@ expr (Apply) / f @@@ list", "Operators & Control Flow", "Maps f over elements, replaces head of expr, or applies f at level 1.", "Plus @@@ {{1, 2}, {3, 4}}"),
+        EngineEntryTemplate("f @* g / g /* f (Composition)", "Operators & Control Flow", "Right-to-left (@*) or left-to-right (/*) function composition.", "(Sqrt @* (# + 1 &))[15]"),
+        EngineEntryTemplate("expr & / # (Pure Function)", "Operators & Control Flow", "Anonymous function with positional slot # or #1, #2.", "(#^2) & /@ {1, 2, 3, 4}"),
+        EngineEntryTemplate("expr /. rule / expr //. rule (Replace)", "Operators & Control Flow", "Single-pass ReplaceAll (/.) and fixed-point ReplaceRepeated (//.).", "x^2 + 2*x + 1 /. x -> 3"),
+        EngineEntryTemplate("x = val / f[x_] := expr (Assignment)", "Operators & Control Flow", "Immediate assignment (=) and delayed definition/function (:=).", "f[x_] := x^2 + 1; f[5]"),
+        EngineEntryTemplate("a; b / (* comment *) / % (Compound & Last)", "Operators & Control Flow", "Sequential evaluation (a; b), block comments, and previous output %.", "q = 10; q"),
+        EngineEntryTemplate("Module[{x = v}, body] / With[{...}, body] / Block / Clear", "Operators & Control Flow", "Lexical/local variable scoping and symbol clearing.", "Module[{a = 3, b = 4}, Sqrt[a^2 + b^2]]"),
+        EngineEntryTemplate("If[c, t, f] / Which[...] / Switch[expr, ...]", "Operators & Control Flow", "Conditional branching and pattern/value dispatch.", "Which[2 < 0, -1, 2 == 0, 0, 2 > 0, 1]"),
+        EngineEntryTemplate("While[test, body] / For[start, test, incr, body] / Do[...]", "Operators & Control Flow", "Bounded iteration loops with automatic execution-step safety.", "s = 0; For[i = 1, i <= 4, i++, s += i^2]; s"),
+        EngineEntryTemplate("Return[x] / Break[] / Continue[] / Boole[cond]", "Operators & Control Flow", "Early loop/function control and 1/0 boolean conversion.", "Boole[3 > 2]"),
+        EngineEntryTemplate("Print[expr, ...] / Echo[expr, [label]]", "Operators & Control Flow", "Emits values to the card's console output block; Echo passes its value through.", "q = 10; Print[q^2]; q"),
+        EngineEntryTemplate("a <> b (StringJoin) / ToString / StringLength / ToUpperCase", "Operators & Control Flow", "String concatenation, conversion, length, reversal, and case transforms.", "\"hello\" <> \" world\""),
+
+        // 8. Plotting & Charts
+        EngineEntryTemplate("Plot[f, {x, min, max}]", "Plotting & Charts", "Plots function(s) {f1, f2, ...} or any Distribution object over [min, max].", "Plot[{Sin[x], Cos[x]}, {x, -Pi, Pi}]"),
+        EngineEntryTemplate("LogPlot[f, {x, min, max}] / LogLinearPlot / LogLogPlot", "Plotting & Charts", "2D plots with base-10 logarithmic y, x, or log-log axes.", "LogPlot[Exp[x], {x, 0, 5}]"),
+        EngineEntryTemplate("ParametricPlot[{fx, fy}, {u, min, max}] / PolarPlot", "Plotting & Charts", "Equal-aspect 2D parametric and polar curves.", "ParametricPlot[{Sin[3 t], Cos[2 t]}, {t, 0, 2 Pi}]"),
+        EngineEntryTemplate("ListPlot[data] / ListLinePlot[data]", "Plotting & Charts", "Scatter and line charts from {y1, ...}, {{x1, y1}, ...}, or Table[{i, f[i]}, ...].", "ListLinePlot[Table[Fibonacci[n], {n, 10}]]"),
+        EngineEntryTemplate("ListLogPlot / ListLogLinearPlot / ListLogLogPlot", "Plotting & Charts", "Discrete/line dataset plots on logarithmic axes.", "ListLogPlot[Table[2^n, {n, 10}]]"),
+        EngineEntryTemplate("Histogram[data, [bins], [mode]]", "Plotting & Charts", "Empirical or distribution histogram with Count, Probability, or PDF scaling.", "Histogram[RandomVariate[NormalDistribution[0, 1], 400]]"),
+        EngineEntryTemplate("BarChart[data] / PieChart[data]", "Plotting & Charts", "Vertical bar and pie charts from numeric lists or labeled rules.", "BarChart[{Q1 -> 24, Q2 -> 38, Q3 -> 31, Q4 -> 49}]"),
+        EngineEntryTemplate("BoxWhiskerChart[data]", "Plotting & Charts", "Five-number summary box plot showing median, IQR, whiskers, and outliers.", "BoxWhiskerChart[RandomVariate[LogNormalDistribution[0, 0.6], 200]]")
+    )
+
+    fun manualEntriesFor(configs: Map<String, CommandConfig>): List<ManualEntry> {
+        fun cfg(id: String) = configs[id] ?: CommandConfig.DEFAULTS.getValue(id)
+
+        val mathCfg = cfg("math")
+        val texCfg = cfg("tex")
+        val convertCfg = cfg("convert")
+        val wxCfg = cfg("weather")
+        val solarCfg = cfg("solar")
+        val stockCfg = cfg("stock")
+        val waCfg = cfg("wolfram")
+        val webCfg = cfg("web")
+        val alCfg = cfg("alarm")
+        val timerCfg = cfg("timer")
+        val callCfg = cfg("call")
+
+        val mathPrefix = mathCfg.prefix.ifBlank { "=" }
+        val engineEntries = ENGINE_TEMPLATES.map { t ->
+            ManualEntry(
+                signature = t.signature,
+                category = t.category,
+                description = t.description,
+                example = "$mathPrefix ${t.expression}",
+                isEnabled = true
+            )
+        }
+
+        val commandEntries = listOf(
+            ManualEntry(
+                signature = "${mathCfg.prefix} <expression>",
+                category = "Launcher Commands",
+                description = "Evaluates mathematical expressions, statistics, vectors, and distributions.",
+                example = "${mathCfg.prefix} Mean[{12, 18, 25, 40}]",
+                isEnabled = mathCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${texCfg.prefix} <latex>",
+                category = "Launcher Commands",
+                description = "Renders LaTeX math (with AMS packages) to a crisp preview image you can share, save as PNG, or copy.",
+                example = "${texCfg.prefix} \\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}",
+                isEnabled = texCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${convertCfg.prefix} <query>",
+                category = "Launcher Commands",
+                description = "Converts units and 150+ currencies with cached FX rates. Supports 'convert rates', 'convert USD', 'convert EUR/USD' or 'EURUSD', plus inline '100 km to mi'.",
+                example = "${convertCfg.prefix} 100 usd to inr",
+                isEnabled = convertCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${wxCfg.prefix} <city | lat, lon>",
+                category = "Launcher Commands",
+                description = "Live weather forecast with temperatures, condition, wind, and sunrise/sunset ('weather' also works).",
+                example = "${wxCfg.prefix} london",
+                isEnabled = wxCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${solarCfg.prefix} <city | lat, lon>",
+                category = "Launcher Commands",
+                description = "Civil sunrise and sunset times in local time ('sunrise' and 'sunset' also work).",
+                example = "${solarCfg.prefix} tokyo",
+                isEnabled = solarCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${stockCfg.prefix} <ticker | index> [range]",
+                category = "Launcher Commands",
+                description = "Real-time stock quotes, indices, and charts. Configurable default range or inline: 1d, 5d, 1mo, 6mo, 1y, max.",
+                example = "${stockCfg.prefix} nvda 1mo",
+                isEnabled = stockCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${waCfg.prefix} <query>",
+                category = "Launcher Commands",
+                description = "Queries Wolfram|Alpha Short Answer API (or opens the website depending on Search Settings).",
+                example = "${waCfg.prefix} integrate sin(x)^2",
+                isEnabled = waCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${webCfg.prefix} <terms>",
+                category = "Launcher Commands",
+                description = "Searches your configured web engine in your preferred browser ('query' also works).",
+                example = "${webCfg.prefix} fourier transform",
+                isEnabled = webCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${alCfg.prefix} <time>",
+                category = "Launcher Commands",
+                description = "Sets an Android system clock alarm for the specified time ('alarm' also works).",
+                example = "${alCfg.prefix} 7:30 AM",
+                isEnabled = alCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${timerCfg.prefix} <duration>",
+                category = "Launcher Commands",
+                description = "Starts a system countdown timer (supports h/m/s or HH:MM).",
+                example = "${timerCfg.prefix} 5m",
+                isEnabled = timerCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${callCfg.prefix} <nickname>",
+                category = "Launcher Commands",
+                description = "Calls a saved contact nickname directly ('@name' also fuzzy-searches device and saved contacts).",
+                example = "${callCfg.prefix} Mom",
+                isEnabled = callCfg.enabled
+            ),
+            ManualEntry(
+                signature = "pallas / settings",
+                category = "Launcher Commands",
+                description = "Quickly navigates to Pallas Launcher settings.",
+                example = "pallas",
+                isEnabled = true
+            )
+        )
+
+        return engineEntries + commandEntries
+    }
+
+    val MANUAL_ENTRIES: List<ManualEntry> = manualEntriesFor(CommandConfig.DEFAULTS)
 
     internal val rng = Random()
 
@@ -125,29 +242,102 @@ object MathStatsEngine {
     internal var lastEvaluatedValue: MathValue? = null
 
     private val KNOWN_FUNCS = setOf(
-        "mean", "median", "variance", "standarddeviation", "stddev", "sd", "total", "sum",
-        "length", "range", "reverse", "sort", "first", "last", "take", "drop",
+        "mean", "median", "variance", "standarddeviation", "stddev", "sd", "total", "sum", "product",
+        "length", "range", "reverse", "sort", "sortby", "first", "last", "take", "drop",
         "differences", "accumulate", "count", "quantile", "percentile", "iqr", "interquartilerange",
         "geometricmean", "harmonicmean", "rootmeansquare", "rms", "skewness", "kurtosis",
         "covariance", "correlation", "deleteduplicates",
+        "flatten", "join", "append", "prepend", "partition", "riffle", "subdivide", "constantarray",
+        "minmax", "union", "intersection", "complement", "memberq", "position", "list", "span",
+        "alltrue", "anytrue", "nonetrue", "scan",
+        "dot", "norm", "cross", "transpose", "tr", "dimensions", "identitymatrix", "diagonalmatrix", "det", "inverse",
         "normaldistribution", "uniformdistribution", "exponentialdistribution", "poissondistribution",
         "binomialdistribution", "studenttdistribution", "cauchydistribution", "paretodistribution",
         "levydistribution", "frechetdistribution", "weibulldistribution", "lognormaldistribution",
         "gammadistribution", "betadistribution", "geometricdistribution",
         "pdf", "cdf", "survivalfunction", "hazardfunction", "randomvariate",
-        "randominteger", "randomreal", "randomchoice", "randomsample",
+        "randominteger", "randomreal", "randomchoice", "randomsample", "seedrandom",
         "plus", "subtract", "times", "divide", "power", "sqrt", "cuberoot", "abs", "sign",
         "round", "floor", "ceiling", "mod", "quotient", "divisible", "gcd", "lcm",
-        "factorial", "binomial", "primeq", "nextprime", "fibonacci", "clip", "min", "max",
+        "factorial", "binomial", "primeq", "nextprime", "fibonacci",
+        "factorinteger", "divisors", "prime", "primepi", "powermod", "integerdigits", "fromdigits",
+        "clip", "min", "max", "n",
         "sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan",
-        "sinh", "cosh", "tanh", "exp", "log", "log2", "log10", "ln",
+        "sinh", "cosh", "tanh", "coth", "sech", "csch", "arcsinh", "arccosh", "arctanh", "arccot", "arcsec", "arccsc",
+        "exp", "log", "log2", "log10", "ln",
+        "gamma", "loggamma", "erf", "erfc", "beta", "sinc", "logisticsigmoid", "harmonicnumber", "boole",
+        "nintegrate", "nd", "findroot", "nminimize", "nmaximize",
         "expectation", "moment", "centralmoment", "inversecdf",
         "hillestimator", "expectedshortfall", "cvar", "maxdrawdown",
         "standardize", "movingaverage", "table", "fold", "nest",
-        "if", "which", "while", "for", "do", "select", "map", "apply", "part",
+        "if", "which", "switch", "while", "for", "do", "select", "map", "apply", "part",
+        "module", "block", "with", "function", "clear", "print", "echo",
+        "stringjoin", "tostring", "stringlength", "stringreverse", "touppercase", "tolowercase",
         "evenq", "oddq", "integerq", "positive", "negative", "zeroq",
-        "nestlist", "foldlist", "break", "continue", "return"
+        "nestlist", "foldlist", "break", "continue", "return",
+        "plot", "logplot", "loglinearplot", "loglogplot", "parametricplot", "polarplot",
+        "listplot", "listlineplot", "listlogplot", "listloglinearplot", "listloglogplot",
+        "histogram", "barchart", "piechart", "boxwhiskerchart"
     )
+
+    internal val PAREN_CALL_FUNCS: Set<String> = KNOWN_FUNCS - setOf("n")
+
+    private val FUNC_SYNTAX_REGEX = Regex("\\b([a-zA-Z]+)(?:\\s*\\[|\\(|\\s*@)")
+    private val ASSIGNMENT_REGEX = Regex("^\\s*[a-zA-Z][a-zA-Z0-9$]*(\\s*\\[[^\\]]*\\])?\\s*(:?=)(?!=)")
+
+    private val PLOT_HEAD_REGEX = Regex(
+        "\\b(plot|logplot|loglinearplot|loglogplot|parametricplot|polarplot|listplot|listlineplot|listlogplot|listloglinearplot|listloglogplot|histogram|barchart|piechart|boxwhiskerchart)\\s*(\\[|@|$)",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun containsPlotOrChart(rawInput: String, prefix: String): Boolean {
+        val trimmed = rawInput.trim()
+        val hasPrefix = prefix.isNotEmpty() && (trimmed.startsWith("$prefix ", ignoreCase = true) ||
+                (trimmed.startsWith(prefix, ignoreCase = true) && trimmed.length > prefix.length))
+        val expr = if (hasPrefix) trimmed.substring(prefix.length).trim() else trimmed
+        if (expr.isEmpty()) return false
+        if (PLOT_HEAD_REGEX.containsMatchIn(expr)) return true
+        // Also support postfix e.g. data // ListPlot or data // Histogram
+        val lower = expr.lowercase(Locale.ROOT)
+        if (lower.contains("//")) {
+            return WolframPlotEvaluator.PLOT_FUNCTION_NAMES.any { fn ->
+                lower.contains("//$fn") || lower.contains("// $fn")
+            }
+        }
+        return false
+    }
+
+    fun areDelimitersBalanced(input: String): Boolean {
+        var sq = 0
+        var cu = 0
+        var pa = 0
+        var inQuotes = false
+        for (ch in input) {
+            if (ch == '"') {
+                inQuotes = !inQuotes
+                continue
+            }
+            if (inQuotes) continue
+            when (ch) {
+                '[' -> sq++
+                ']' -> {
+                    sq--
+                    if (sq < 0) return false
+                }
+                '{' -> cu++
+                '}' -> {
+                    cu--
+                    if (cu < 0) return false
+                }
+                '(' -> pa++
+                ')' -> {
+                    pa--
+                    if (pa < 0) return false
+                }
+            }
+        }
+        return !inQuotes && sq == 0 && cu == 0 && pa == 0
+    }
 
     @Synchronized
     fun evaluate(rawInput: String, prefix: String): MathEvalOutcome? {
@@ -157,27 +347,37 @@ object MathStatsEngine {
 
         val expr = if (hasPrefix) trimmed.substring(prefix.length).trim() else trimmed
         if (expr.isEmpty()) return null
+        // Slot markers are only meaningful inside a pure function expression; treating a
+        // lone # as an expression creates a spurious command row in launcher search.
+        if (expr.matches(Regex("#\\d*"))) return null
 
         if (!hasPrefix && !looksLikeMathOrDist(expr)) return null
 
         // Strictly Wolfram Language inspired AST evaluation
-        return tryEvaluateWolframExpression(expr)
+        return tryEvaluateWolframExpression(expr, hasPrefix)
     }
 
     private fun looksLikeMathOrDist(s: String): Boolean {
-        val lower = s.lowercase(Locale.ROOT)
-        if (KNOWN_FUNCS.any { lower.startsWith("$it[") || lower.startsWith("$it ") || lower == it }) return true
+        if (FUNC_SYNTAX_REGEX.findAll(s).any { match ->
+                val fn = match.groupValues[1].lowercase(Locale.ROOT)
+                if (match.value.endsWith("(")) fn in PAREN_CALL_FUNCS else fn in KNOWN_FUNCS
+            }
+        ) return true
+        if (ASSIGNMENT_REGEX.containsMatchIn(s)) return true
         if (s.contains('{') && s.contains('}')) return true
         if (s.contains('%')) return true
-        if (s.contains("/@") || s.contains("@@") || s.contains("//") || s.contains("@") ||
-            s.contains("/.") || s.contains("->") || s.contains("→") || s.contains('&') ||
-            s.contains('#') || s.contains(';') || s.contains("[[")) return true
-        val hasOp = s.any { it in "+-*/^%!<>=&|;" }
+        if (s.contains("/@") || s.contains("@@") || s.contains("//") || s.contains("/*") ||
+            s.contains("@*") || s.contains("@") || s.contains("/.") || s.contains("->") ||
+            s.contains(":>") || s.contains("→") || s.contains(";;") || s.contains("(*") ||
+            s.contains("<>") || s.contains('&') || s.contains('#') || s.contains(';') ||
+            s.contains("[[") || s.contains(":=")
+        ) return true
+        val hasOp = s.any { it in "+-*/^%!<>=&|;°" }
         val hasDigit = s.any { it.isDigit() }
-        return hasDigit && hasOp && s.none { it.isLetter() && it !in "eEpiPI" }
+        return hasDigit && hasOp && s.none { it.isLetter() && it !in "eEpiPI°" }
     }
 
-    private fun tryEvaluateWolframExpression(expr: String): MathEvalOutcome? {
+    private fun tryEvaluateWolframExpression(expr: String, hasPrefix: Boolean = false): MathEvalOutcome? {
         if (expr.length > 1000) return null
         return try {
             val tokens = Tokenizer(expr).tokenize()
@@ -185,14 +385,31 @@ object MathStatsEngine {
             val parser = WolframParser(tokens)
             val ast = parser.parse() ?: return null
 
-            val ctx = ExecutionContext(maxSteps = 10_000, timeoutMs = 150L)
+            val isPlotExpr = PLOT_HEAD_REGEX.containsMatchIn(expr) || expr.contains("//")
+            val ctx = ExecutionContext(
+                maxSteps = if (isPlotExpr) 45_000 else 10_000,
+                timeoutMs = if (isPlotExpr) 350L else 150L
+            )
             lastEvaluatedValue?.let {
                 ctx.env["%"] = it
                 ctx.env["out"] = it
             }
 
-            val result = ast.eval(ctx)
-            lastEvaluatedValue = result
+            val result = try {
+                ast.eval(ctx)
+            } catch (r: ReturnException) {
+                r.value
+            }
+
+            if (result is MathValue.SymbolVal && !hasPrefix && ctx.printedLines.isEmpty()) {
+                return null
+            }
+
+            if (result !is MathValue.NullVal) {
+                lastEvaluatedValue = result
+            }
+            val console = ctx.printedLines.takeIf { it.isNotEmpty() }?.joinToString("\n")
+
             when (result) {
                 is MathValue.NumberVal -> {
                     if (result.value.isNaN()) return null
@@ -203,8 +420,19 @@ object MathStatsEngine {
                         title = expr,
                         primaryValue = displayValue,
                         badge = "Math",
-                        subtitle = "Tap to copy result",
-                        copyText = formatted
+                        subtitle = "",
+                        copyText = formatted,
+                        consoleOutput = console
+                    )
+                }
+                is MathValue.StringVal -> {
+                    MathEvalOutcome(
+                        title = expr,
+                        primaryValue = result.text,
+                        badge = "String",
+                        subtitle = "",
+                        copyText = result.text,
+                        consoleOutput = console
                     )
                 }
                 is MathValue.BooleanVal -> {
@@ -213,8 +441,9 @@ object MathStatsEngine {
                         title = expr,
                         primaryValue = "= $str",
                         badge = "Boolean",
-                        subtitle = "Tap to copy result",
-                        copyText = str
+                        subtitle = "",
+                        copyText = str,
+                        consoleOutput = console
                     )
                 }
                 is MathValue.ListVal -> {
@@ -227,7 +456,37 @@ object MathStatsEngine {
                         primaryValue = fullList,
                         badge = "List (${list.size})",
                         subtitle = "Length: ${list.size} • Total: $sum • Mean: $mean",
-                        copyText = fullList
+                        copyText = fullList,
+                        consoleOutput = console
+                    )
+                }
+                is MathValue.MixedListVal -> {
+                    val display = result.toDisplayString()
+                    val matrix = result.toNumericMatrix()
+                    val badge = if (matrix != null) {
+                        "Matrix (${matrix.size}×${matrix[0].size})"
+                    } else {
+                        "List (${result.items.size})"
+                    }
+                    val subtitle = if (matrix != null) {
+                        val rows = matrix.size
+                        val cols = matrix[0].size
+                        if (rows == cols && rows <= 4) {
+                            val tr = (0 until rows).sumOf { matrix[it][it] }
+                            "Trace: ${fmt(tr)}"
+                        } else {
+                            "${rows}×${cols} matrix"
+                        }
+                    } else {
+                        ""
+                    }
+                    MathEvalOutcome(
+                        title = expr,
+                        primaryValue = display,
+                        badge = badge,
+                        subtitle = subtitle,
+                        copyText = display,
+                        consoleOutput = console
                     )
                 }
                 is MathValue.DistVal -> {
@@ -240,8 +499,9 @@ object MathStatsEngine {
                         title = "${dist.name}[${dist.paramsString}]",
                         primaryValue = "Mean = $meanStr, SD = $sdStr",
                         badge = dist.badge,
-                        subtitle = "Median: $medStr • Var: $varStr • Try PDF[dist, x], CDF[dist, x], RandomVariate[dist]",
-                        copyText = "${dist.name}[${dist.paramsString}]"
+                        subtitle = "Median: $medStr • Var: $varStr",
+                        copyText = "${dist.name}[${dist.paramsString}]",
+                        consoleOutput = console
                     )
                 }
                 is MathValue.ExprVal -> {
@@ -249,8 +509,9 @@ object MathStatsEngine {
                         title = expr,
                         primaryValue = "= ${result.text}",
                         badge = "Formula",
-                        subtitle = "Symbolic formula • Tap to copy",
-                        copyText = result.text
+                        subtitle = "",
+                        copyText = result.text,
+                        consoleOutput = console
                     )
                 }
                 is MathValue.SymbolVal -> {
@@ -258,26 +519,50 @@ object MathStatsEngine {
                         title = expr,
                         primaryValue = result.name,
                         badge = "Symbol",
-                        subtitle = "Undefined symbol",
-                        copyText = result.name
+                        subtitle = "",
+                        copyText = result.name,
+                        consoleOutput = console
                     )
                 }
                 is MathValue.NullVal -> {
-                    MathEvalOutcome(
-                        title = expr,
-                        primaryValue = "= Null",
-                        badge = "Done",
-                        subtitle = "Evaluation completed",
-                        copyText = "Null"
-                    )
+                    if (console != null) {
+                        MathEvalOutcome(
+                            title = expr,
+                            primaryValue = "",
+                            badge = "Print",
+                            subtitle = "",
+                            copyText = console,
+                            consoleOutput = console
+                        )
+                    } else {
+                        MathEvalOutcome(
+                            title = expr,
+                            primaryValue = "= Null",
+                            badge = "Done",
+                            subtitle = "",
+                            copyText = "Null",
+                            consoleOutput = null
+                        )
+                    }
                 }
                 is MathValue.FunctionVal -> {
                     MathEvalOutcome(
                         title = expr,
                         primaryValue = "Function[...]",
                         badge = "Function",
-                        subtitle = "Pure anonymous function",
-                        copyText = expr
+                        subtitle = "",
+                        copyText = expr,
+                        consoleOutput = console
+                    )
+                }
+                is MathValue.DelayedVal -> {
+                    MathEvalOutcome(
+                        title = expr,
+                        primaryValue = ":= ...",
+                        badge = "Rule",
+                        subtitle = "",
+                        copyText = expr,
+                        consoleOutput = console
                     )
                 }
                 is MathValue.RuleVal -> {
@@ -286,8 +571,21 @@ object MathStatsEngine {
                         title = expr,
                         primaryValue = "= $display",
                         badge = "Rule",
-                        subtitle = "Replacement rule • Tap to copy",
-                        copyText = display
+                        subtitle = "",
+                        copyText = display,
+                        consoleOutput = console
+                    )
+                }
+                is MathValue.ChartVal -> {
+                    val c = result.chart
+                    MathEvalOutcome(
+                        title = c.title,
+                        primaryValue = "",
+                        badge = c.badge,
+                        subtitle = c.summary,
+                        copyText = expr,
+                        chart = c,
+                        consoleOutput = console
                     )
                 }
             }

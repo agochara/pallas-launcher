@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Functions
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Palette
@@ -100,7 +101,7 @@ fun MainSettingsPage(
             item {
                 Surface(
                     color = if (isDefault) colorScheme.surfaceContainerHigh else colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(24.dp),
+                    shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -182,7 +183,7 @@ fun MainSettingsPage(
                         onClick = { onNavigate(SettingsSubpage.CLOCK_DATE) }
                     )
                     SettingsNavRow(
-                        title = "Home Screens & Apps",
+                        title = "Screens & Apps",
                         subtitle = "Manage screens, reorder apps, hidden apps",
                         icon = Icons.Default.GridView,
                         containerColor = colorScheme.tertiaryContainer,
@@ -197,10 +198,17 @@ fun MainSettingsPage(
                     )
                     SettingsNavRow(
                         title = "Search",
-                        subtitle = "Search aliases, contact nicknames & quick calling",
+                        subtitle = "Web engine, smart commands, weather, aliases & contacts",
                         icon = Icons.Default.Search,
                         containerColor = colorScheme.primaryContainer,
                         onClick = { onNavigate(SettingsSubpage.SEARCH) }
+                    )
+                    SettingsNavRow(
+                        title = "Math & Computational Engine Guide",
+                        subtitle = "Functions, live commands, math & LaTeX cheatsheets",
+                        icon = Icons.Default.Functions,
+                        containerColor = colorScheme.secondaryContainer,
+                        onClick = { onNavigate(SettingsSubpage.MATH_MANUAL) }
                     )
                     SettingsNavRow(
                         title = "Backup & Restore",

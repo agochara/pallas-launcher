@@ -32,6 +32,9 @@ class ScreenRepository(
     private val _customAppLabels = MutableStateFlow<Map<String, String>>(loadCustomAppLabels())
     val customAppLabels: StateFlow<Map<String, String>> = _customAppLabels.asStateFlow()
 
+    private fun JSONObject.optStringOrNull(key: String): String? =
+        if (has(key) && !isNull(key)) optString(key) else null
+
     private fun loadScreens(): List<HomeScreen> = parseScreens(prefs.getString(KEY_SCREENS, null))
 
     private fun loadCustomAppLabels(): Map<String, String> {
@@ -40,8 +43,9 @@ class ScreenRepository(
             val obj = JSONObject(raw)
             buildMap {
                 obj.keys().forEach { k ->
-                    val v = obj.optString(k).trim()
-                    if (v.isNotEmpty()) put(k, v)
+                    val cleanKey = k.trim()
+                    val v = obj.optStringOrNull(k)?.trim()
+                    if (cleanKey.isNotEmpty() && !v.isNullOrEmpty()) put(cleanKey, v)
                 }
             }
         } catch (_: Exception) {
@@ -92,21 +96,21 @@ class ScreenRepository(
             for (i in 0 until jsonArray.length()) {
                 val screenObj = jsonArray.optJSONObject(i) ?: continue
                 try {
-                    val id = screenObj.optString("id").ifBlank { UUID.randomUUID().toString() }
-                    val name = screenObj.optString("name", "Screen ${i + 1}")
-                    val rawTag = if (screenObj.has("contextTag") && !screenObj.isNull("contextTag")) screenObj.optString("contextTag") else null
+                    val id = screenObj.optStringOrNull("id")?.trim().orEmpty().ifBlank { UUID.randomUUID().toString() }
+                    val name = screenObj.optStringOrNull("name")?.trim().orEmpty().ifBlank { "Screen ${i + 1}" }
+                    val rawTag = screenObj.optStringOrNull("contextTag")
                     val contextTag = rawTag?.trim()?.ifBlank { null }?.takeUnless { it.equals("General", ignoreCase = true) }
                     val appsArray = screenObj.optJSONArray("apps") ?: JSONArray()
                     val apps = mutableListOf<ScreenApp>()
                     for (j in 0 until appsArray.length()) {
                         val appObj = appsArray.optJSONObject(j) ?: continue
-                        val pkg = appObj.optString("packageName")
+                        val pkg = appObj.optStringOrNull("packageName")?.trim().orEmpty()
                         if (pkg.isBlank()) continue
-                        val activity = appObj.optString("activityName")
+                        val activity = appObj.optStringOrNull("activityName")?.trim().orEmpty()
                         val serial = appObj.optLong("userSerialNumber", 0L)
-                        val uniqueKey = appObj.optString("uniqueKey").ifBlank { "$pkg/$activity#$serial" }
-                        val customLabel = if (appObj.has("customLabel") && !appObj.isNull("customLabel")) appObj.optString("customLabel") else null
-                        val defaultLabel = appObj.optString("defaultLabel", "")
+                        val uniqueKey = appObj.optStringOrNull("uniqueKey")?.trim().orEmpty().ifBlank { "$pkg/$activity#$serial" }
+                        val customLabel = appObj.optStringOrNull("customLabel")?.trim()?.ifBlank { null }
+                        val defaultLabel = appObj.optStringOrNull("defaultLabel")?.trim().orEmpty()
                         val handle = if (serial == mySerial || (serial == 0L && mySerial == 0L)) {
                             myHandle
                         } else {
@@ -169,6 +173,21 @@ class ScreenRepository(
     fun replaceAll(newScreens: List<HomeScreen>) {
         if (newScreens.isEmpty()) return
         saveScreens(newScreens)
+    }
+
+    /** Import: replace the global custom app label map atomically. */
+    fun replaceCustomAppLabels(labels: Map<String, String>) {
+        mutateCustomAppLabels {
+            buildMap {
+                labels.forEach { (k, v) ->
+                    val cleanKey = k.trim()
+                    val cleanVal = v.trim()
+                    if (cleanKey.isNotEmpty() && cleanVal.isNotEmpty()) {
+                        put(cleanKey, cleanVal)
+                    }
+                }
+            }
+        }
     }
 
     fun addScreen(name: String, contextTag: String? = null) {
@@ -354,12 +373,23 @@ class ScreenRepository(
         newLabel: String,
         sortOrder: NameLengthSortOrder = NameLengthSortOrder.OFF
     ) {
+        val clean = newLabel.trim()
+        mutateCustomAppLabels { current ->
+            val updated = current.toMutableMap()
+            if (clean.isEmpty()) {
+                updated.remove(uniqueKey)
+            } else {
+                updated[uniqueKey] = clean
+            }
+            updated
+        }
+
         mutateScreens { current ->
             current.map { screen ->
                 if (screen.id == screenId) {
                     val updatedApps = screen.apps.map { app ->
                         if (app.uniqueKey == uniqueKey) {
-                            app.copy(customLabel = newLabel.ifBlank { null })
+                            app.copy(customLabel = clean.ifBlank { null })
                         } else {
                             app
                         }

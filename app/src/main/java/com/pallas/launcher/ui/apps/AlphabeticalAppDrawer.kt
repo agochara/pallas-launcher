@@ -1,7 +1,6 @@
 package com.pallas.launcher.ui.apps
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -93,15 +92,15 @@ import kotlin.math.roundToInt
 //
 //  * The rail lives in the lower ~72% of the screen (thumb zone) and the list starts at ~26% of the screen height,
 //    so both line up and everything is reachable one-handed.
-//  * While you drag on the rail, the list is REPLACED by a preview of just the active letter (what you see is what
-//    you get). The full list only jumps to that letter after you lift your finger.
+//  * While you drag on the rail, the full list scrolls to the active section and remains at that same anchor on release.
 //  * Rail letters bulge inward in a smooth wave around the finger, and a gold bubble follows it.
 //  * Sorting inside a letter uses the usage-score tiers, and the data is frozen while the drawer is open so rows
 //    never reshuffle under your thumb.
 // ---------------------------------------------------------------------------------------------------------------
 
 private const val RECENT_SLOT = "RECENT"
-private val LETTER_ORDER: List<String> = ('A'..'Z').map { it.toString() } + "#"
+private const val NUMERIC_SLOT = "#"
+private val LETTER_ORDER: List<String> = ('A'..'Z').map { it.toString() }
 private const val HYSTERESIS_MARGIN = 0.5
 
 // Layout
@@ -147,10 +146,14 @@ private sealed interface DrawerRow {
 
 private fun bucketOf(app: AppItem): String {
     val c = SearchRanking.normalize(app.label.trim()).firstOrNull()?.uppercaseChar()
-    return if (c != null && c in 'A'..'Z') c.toString() else "#"
+    return if (c != null && c in 'A'..'Z') c.toString() else NUMERIC_SLOT
 }
 
-private fun labelFor(slot: String): String = if (slot == RECENT_SLOT) "Recent" else slot
+private fun labelFor(slot: String): String = when (slot) {
+    RECENT_SLOT -> "Recent"
+    NUMERIC_SLOT -> "#"
+    else -> slot
+}
 
 @Composable
 fun AlphabeticalAppDrawer(
@@ -174,7 +177,7 @@ fun AlphabeticalAppDrawer(
     val density = LocalDensity.current
     val isLeft = edgeScrubPosition == EdgeScrubPosition.LEFT
 
-    // ------------------------------------------------------------------ data (frozen while open)
+    // ------------------------------------------------------------------ data (usage scores frozen while open)
     var frozenInstalledApps by remember { mutableStateOf(installedApps) }
     var frozenFavoriteApps by remember { mutableStateOf(favoriteApps) }
     var frozenUsageScores by remember { mutableStateOf(usageScores) }
@@ -185,6 +188,12 @@ fun AlphabeticalAppDrawer(
             frozenFavoriteApps = favoriteApps
             frozenUsageScores = usageScores
         }
+    }
+
+    LaunchedEffect(installedApps) {
+        frozenInstalledApps = installedApps
+        val visibleByKey = installedApps.associateBy { it.uniqueKey }
+        frozenFavoriteApps = frozenFavoriteApps.mapNotNull { visibleByKey[it.uniqueKey] }
     }
 
     val useFrozen = isOpen && frozenInstalledApps.isNotEmpty()
@@ -220,6 +229,10 @@ fun AlphabeticalAppDrawer(
                 add(DrawerRow.Header(letter, letter))
                 apps.forEach { add(DrawerRow.App(it, letter)) }
             }
+            buckets[NUMERIC_SLOT]?.takeIf { it.isNotEmpty() }?.let { apps ->
+                add(DrawerRow.Header(NUMERIC_SLOT, labelFor(NUMERIC_SLOT)))
+                apps.forEach { add(DrawerRow.App(it, NUMERIC_SLOT)) }
+            }
             if (isEmpty()) {
                 add(DrawerRow.Empty)
             }
@@ -241,6 +254,7 @@ fun AlphabeticalAppDrawer(
                     add(letter)
                 }
             }
+            if (!buckets[NUMERIC_SLOT].isNullOrEmpty()) add(NUMERIC_SLOT)
         }
     }
 
@@ -252,11 +266,17 @@ fun AlphabeticalAppDrawer(
         if (slot == RECENT_SLOT) {
             if (activeFavorites.isNotEmpty()) return RECENT_SLOT
             return LETTER_ORDER.firstOrNull { !buckets[it].isNullOrEmpty() }
+                ?: NUMERIC_SLOT.takeIf { !buckets[it].isNullOrEmpty() }
+        }
+        if (slot == NUMERIC_SLOT) {
+            if (!buckets[NUMERIC_SLOT].isNullOrEmpty()) return NUMERIC_SLOT
+            return LETTER_ORDER.lastOrNull { !buckets[it].isNullOrEmpty() }
         }
         val start = LETTER_ORDER.indexOf(slot).coerceAtLeast(0)
         for (i in start until LETTER_ORDER.size) {
             if (!buckets[LETTER_ORDER[i]].isNullOrEmpty()) return LETTER_ORDER[i]
         }
+        if (!buckets[NUMERIC_SLOT].isNullOrEmpty()) return NUMERIC_SLOT
         for (i in (start - 1) downTo 0) {
             if (!buckets[LETTER_ORDER[i]].isNullOrEmpty()) return LETTER_ORDER[i]
         }
@@ -272,12 +292,12 @@ fun AlphabeticalAppDrawer(
 
     // ------------------------------------------------------------------ state
     var isScrubbing by remember { mutableStateOf(false) }
+    var nextOpenFromRail by remember { mutableStateOf(false) }
     var activeSlot by remember { mutableStateOf("A") }
     var touchYPx by remember { mutableFloatStateOf(0f) }
     var pendingScrollTo by remember { mutableStateOf<String?>(null) }
 
     val fullListState = rememberLazyListState()
-    val scrubListState = rememberLazyListState()
 
     LaunchedEffect(railSlots) {
         if (railSlots.isNotEmpty() && activeSlot !in railSlots) {
@@ -285,21 +305,9 @@ fun AlphabeticalAppDrawer(
         }
     }
 
-    // The preview list: header + the apps of the letter under the finger.
-    val scrubRows: List<DrawerRow> = remember(activeSlot, buckets, activeFavorites) {
-        val resolved = resolveSlot(activeSlot)
-        buildList {
-            if (resolved == null) {
-                add(DrawerRow.Empty)
-            } else {
-                add(DrawerRow.Header(resolved, labelFor(resolved)))
-                appsFor(activeSlot).forEach { add(DrawerRow.App(it, "scrub")) }
-            }
-        }
-    }
-
-    LaunchedEffect(activeSlot, isScrubbing) {
-        if (isScrubbing) scrubListState.scrollToItem(0)
+    // Keep the same full list and anchor under the rail while scrubbing and after release.
+    LaunchedEffect(activeSlot, isScrubbing, isOpen) {
+        if (isOpen && isScrubbing) fullListState.scrollToItem(scrollIndexFor(activeSlot))
     }
 
     // Keep the rail highlight in sync with the full list while the user scrolls it by hand.
@@ -316,21 +324,30 @@ fun AlphabeticalAppDrawer(
         }
     }
 
-    // Re-open at the top every time.
+    // Reset only on opening. Resetting on close makes the list visibly jump to Recent
+    // during the exit animation when an app row is tapped.
     LaunchedEffect(isOpen) {
-        if (!isOpen) {
-            fullListState.scrollToItem(0)
+        if (isOpen) {
+            // Opening and releasing can be coalesced into one composition frame. This
+            // marker survives that transition so a quick release can't reset the list.
+            if (!nextOpenFromRail) {
+                fullListState.scrollToItem(0)
+                railSlots.firstOrNull()?.let { activeSlot = it }
+            }
+            nextOpenFromRail = false
+        } else {
             pendingScrollTo = null
-            railSlots.firstOrNull()?.let { activeSlot = it }
         }
     }
 
-    // Jump the FULL list to the chosen letter only after the finger is lifted.
-    LaunchedEffect(pendingScrollTo, isScrubbing) {
+    // One owner performs the release jump. Keep the scrub preview until the destination
+    // is ready, then reveal the list already positioned at that section.
+    LaunchedEffect(pendingScrollTo) {
         val target = pendingScrollTo
-        if (target != null && !isScrubbing) {
+        if (target != null) {
             fullListState.scrollToItem(scrollIndexFor(target))
             pendingScrollTo = null
+            isScrubbing = false
         }
     }
 
@@ -481,6 +498,7 @@ fun AlphabeticalAppDrawer(
                                     change.consume()
                                     scrubActive = true
                                     isScrubbing = true
+                                    nextOpenFromRail = true
                                     latestOnOpenChange(true)
                                     val localY = (change.position.y - latestRailTopPx).coerceIn(0f, latestRailHeightPx)
                                     activeSlot = slotFor(localY)
@@ -512,15 +530,17 @@ fun AlphabeticalAppDrawer(
                                 update(change.position.y)
                             }
 
-                            isScrubbing = false
                             if (dismissedViaSwipe) {
+                                isScrubbing = false
                                 latestOnDismiss()
                             } else {
                                 val slot = activeSlot
 
                                 if (latestReleaseAction == EdgeScrubReleaseAction.LAUNCH_TOP) {
+                                    isScrubbing = false
                                     val top = latestAppsFor(slot).firstOrNull()
                                     if (top != null) {
+                                        nextOpenFromRail = false
                                         latestOnLaunch(top)
                                         latestOnOpenChange(false)
                                     } else {
@@ -570,21 +590,15 @@ fun AlphabeticalAppDrawer(
                         },
                     contentAlignment = Alignment.TopCenter
                 ) {
-                    Crossfade(
-                        targetState = isScrubbing,
-                        animationSpec = tween(120),
-                        label = "scrub_crossfade"
-                    ) { scrubbing ->
-                        DrawerList(
-                            rows = if (scrubbing) scrubRows else fullRows,
-                            state = if (scrubbing) scrubListState else fullListState,
-                            topInset = topInset,
-                            isLeft = isLeft,
-                            fontScale = fontScale,
-                            onLaunchApp = onLaunchApp,
-                            onAppLongPress = onAppLongPress
-                        )
-                    }
+                    DrawerList(
+                        rows = fullRows,
+                        state = fullListState,
+                        topInset = topInset,
+                        isLeft = isLeft,
+                        fontScale = fontScale,
+                        onLaunchApp = onLaunchApp,
+                        onAppLongPress = onAppLongPress
+                    )
                 }
             }
 

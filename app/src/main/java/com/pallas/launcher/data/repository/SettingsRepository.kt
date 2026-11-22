@@ -9,6 +9,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Settings persistence, reduced to ONE serialization path.
@@ -16,7 +23,7 @@ import java.util.UUID
  *  - The whole [LauncherSettings] lives in prefs as a single JSON blob, written by [SettingsBackup.settingsToJson] -
  *    the exact same code the export file uses. Adding a setting therefore means: add the field to LauncherSettings and
  *    to SettingsBackup.settingsToJson / settingsFromJson. Nothing else. (The round-trip test fails if you forget.)
- *  - Secrets (the Wolfram AppID) live in a SEPARATE prefs file that is excluded from every backup and never exported.
+ *  - The Wolfram AppID lives in a separate, backup-excluded prefs file and is AES-GCM encrypted with an Android Keystore key.
  *  - Every `updateX` below is a one-liner over [update]. They are kept only so MainViewModel / the settings pages
  *    compile unchanged; Phase 2 deletes them in favour of `update { copy(...) }`.
  *  - First launch after this change migrates the old per-key preferences (with the OLD defaults, so nobody's
@@ -50,7 +57,7 @@ class SettingsRepository(context: Context) {
     private fun persist(old: LauncherSettings, new: LauncherSettings) {
         prefs.edit().putString(KEY_SETTINGS_JSON, SettingsBackup.settingsToJson(new).toString()).commit()
         if (new.wolframAppId != old.wolframAppId) {
-            secrets.edit().putString(KEY_WOLFRAM_APP_ID, new.wolframAppId).commit()
+            secrets.edit().putString(KEY_WOLFRAM_APP_ID, encryptSecret(new.wolframAppId)).commit()
         }
     }
 
@@ -69,7 +76,50 @@ class SettingsRepository(context: Context) {
         } else {
             migrateLegacy()
         }
-        return base.copy(wolframAppId = secrets.getString(KEY_WOLFRAM_APP_ID, "") ?: "")
+        val stored = secrets.getString(KEY_WOLFRAM_APP_ID, "") ?: ""
+        val appId = if (stored.startsWith(ENCRYPTED_PREFIX)) decryptSecret(stored) else stored.also {
+            if (it.isNotEmpty()) secrets.edit().putString(KEY_WOLFRAM_APP_ID, encryptSecret(it)).commit()
+        }
+        return base.copy(wolframAppId = appId)
+    }
+
+    private fun secretKey(): java.security.Key {
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (store.getKey(WOLFRAM_KEY_ALIAS, null) as? java.security.Key)?.let { return it }
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(KeyGenParameterSpec.Builder(WOLFRAM_KEY_ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setRandomizedEncryptionRequired(true)
+            .build())
+        return generator.generateKey()
+    }
+
+    private fun encryptSecret(value: String): String {
+        if (value.isEmpty()) return ""
+        return try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+            val payload = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+            ENCRYPTED_PREFIX + Base64.encodeToString(payload, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            android.util.Log.e("SettingsRepository", "Unable to encrypt Wolfram AppID", e)
+            value
+        }
+    }
+
+    private fun decryptSecret(value: String): String = try {
+        val payload = Base64.decode(value.removePrefix(ENCRYPTED_PREFIX), Base64.NO_WRAP)
+        val iv = payload.copyOfRange(0, 12)
+        val ciphertext = payload.copyOfRange(12, payload.size)
+        Cipher.getInstance("AES/GCM/NoPadding").run {
+            init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, iv))
+            String(doFinal(ciphertext), Charsets.UTF_8)
+        }
+    } catch (e: Exception) {
+        android.util.Log.e("SettingsRepository", "Unable to decrypt Wolfram AppID", e)
+        ""
     }
 
     // ------------------------------------------------------------------------------------ legacy migration
@@ -90,7 +140,16 @@ class SettingsRepository(context: Context) {
         val aliases = mutableMapOf<String, String>()
         try {
             val json = JSONObject(prefs.getString(KEY_ALIASES, "{}") ?: "{}")
-            json.keys().forEach { k -> aliases[k] = json.getString(k) }
+            json.keys().forEach { k ->
+                try {
+                    val key = k.lowercase().trim()
+                    val target = if (!json.isNull(k)) json.optString(k).trim() else ""
+                    if (key.isNotEmpty() && target.isNotEmpty()) {
+                        aliases[key] = target
+                    }
+                } catch (_: Exception) {
+                }
+            }
         } catch (_: Exception) {
         }
 
@@ -98,15 +157,16 @@ class SettingsRepository(context: Context) {
         try {
             val arr = JSONArray(prefs.getString(KEY_SEARCH_CONTACTS, "[]") ?: "[]")
             for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                contacts.add(
-                    SearchContact(
-                        id = o.optString("id", UUID.randomUUID().toString()),
-                        nickname = o.getString("nickname"),
-                        name = o.optString("name", ""),
-                        phoneNumber = o.getString("phoneNumber")
-                    )
-                )
+                try {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val nick = if (!o.isNull("nickname")) o.optString("nickname").trim() else ""
+                    val num = if (!o.isNull("phoneNumber")) o.optString("phoneNumber").trim() else ""
+                    if (nick.isEmpty() || num.isEmpty()) continue
+                    val id = if (!o.isNull("id")) o.optString("id").trim().ifBlank { UUID.randomUUID().toString() } else UUID.randomUUID().toString()
+                    val name = if (!o.isNull("name")) o.optString("name").trim() else ""
+                    contacts.add(SearchContact(id = id, nickname = nick, name = name, phoneNumber = num))
+                } catch (_: Exception) {
+                }
             }
         } catch (_: Exception) {
         }
@@ -149,6 +209,8 @@ class SettingsRepository(context: Context) {
             shortSwipeRightAction = gesture(KEY_SWIPE_RIGHT, "dialer"),
             swipeUpAction = gesture(KEY_SWIPE_UP, "search"),
             swipeDownAction = gesture(KEY_SWIPE_DOWN, "notifications"),
+            swipeDownLeftAction = gesture(KEY_SWIPE_DOWN, "notifications"),
+            swipeDownRightAction = gesture(KEY_SWIPE_DOWN, "notifications"),
             doubleTapAction = gesture(KEY_DOUBLE_TAP, "lock_screen"),
             customAliases = aliases,
             searchContacts = contacts,
@@ -174,7 +236,7 @@ class SettingsRepository(context: Context) {
             preferredBrowserPackage = prefs.getString(KEY_BROWSER_PACKAGE, null)?.takeIf { it.isNotBlank() },
             webSearchEngine = enumOf(KEY_WEB_ENGINE, WebSearchEngine.GOOGLE, WebSearchEngine.entries.toTypedArray()),
             commandConfigs = commandConfigs,
-            defaultWeatherCity = prefs.getString(KEY_DEFAULT_WEATHER_CITY, "") ?: "",
+            defaultWeatherCity = prefs.getString(KEY_DEFAULT_WEATHER_CITY, null) ?: LauncherSettings.DEFAULT_WEATHER_CITY,
             wolframAppId = "" // moved to the secrets file below
         )
 
@@ -256,6 +318,8 @@ class SettingsRepository(context: Context) {
         private const val SECRETS_NAME = "pallas_secrets"
         private const val KEY_SETTINGS_JSON = "settings_json_v1"
         private const val KEY_WOLFRAM_APP_ID = "key_wolfram_app_id"
+        private const val WOLFRAM_KEY_ALIAS = "pallas_wolfram_app_id"
+        private const val ENCRYPTED_PREFIX = "enc:v1:"
 
         @Volatile
         private var instance: SettingsRepository? = null

@@ -47,6 +47,8 @@ import com.pallas.launcher.ui.apps.AppIconImage
 fun AppPickerSheet(
     installedApps: List<AppItem>,
     alreadyAddedKeys: Set<String> = emptySet(),
+    title: String = "Add Apps to Screen",
+    singleSelect: Boolean = false,
     onAppsConfirmed: (List<AppItem>) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
@@ -89,12 +91,12 @@ fun AppPickerSheet(
             ) {
                 Column {
                     Text(
-                        text = "Add Apps to Screen",
+                        text = title,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = colorScheme.onSurface
                     )
-                    if (selectedKeys.isNotEmpty()) {
+                    if (!singleSelect && selectedKeys.isNotEmpty()) {
                         Text(
                             text = "${selectedKeys.size} selected",
                             style = MaterialTheme.typography.bodySmall,
@@ -104,7 +106,7 @@ fun AppPickerSheet(
                     }
                 }
 
-                if (selectedKeys.isNotEmpty()) {
+                if (!singleSelect && selectedKeys.isNotEmpty()) {
                     TextButton(onClick = { selectedKeys = emptySet() }) {
                         Text("Clear", color = colorScheme.error)
                     }
@@ -153,17 +155,26 @@ fun AppPickerSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                when {
+                                    isAlreadyAdded -> colorScheme.surfaceContainerHigh.copy(alpha = 0.4f)
+                                    isSelected -> colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                    else -> androidx.compose.ui.graphics.Color.Transparent
+                                }
+                            )
                             .then(
                                 if (isAlreadyAdded) {
-                                    Modifier.background(colorScheme.surfaceContainerHigh.copy(alpha = 0.4f))
-                                } else if (isSelected) {
-                                    Modifier.background(colorScheme.primaryContainer.copy(alpha = 0.5f))
+                                    Modifier
                                 } else {
                                     Modifier.clickable {
-                                        selectedKeys = if (isSelected) {
-                                            selectedKeys - app.uniqueKey
+                                        if (singleSelect) {
+                                            onAppsConfirmed(listOf(app))
                                         } else {
-                                            selectedKeys + app.uniqueKey
+                                            selectedKeys = if (isSelected) {
+                                                selectedKeys - app.uniqueKey
+                                            } else {
+                                                selectedKeys + app.uniqueKey
+                                            }
                                         }
                                     }
                                 }
@@ -190,7 +201,7 @@ fun AppPickerSheet(
                             )
                         }
 
-                        if (!isAlreadyAdded) {
+                        if (!singleSelect && !isAlreadyAdded) {
                             Checkbox(
                                 checked = isSelected,
                                 onCheckedChange = { checked ->
@@ -206,36 +217,40 @@ fun AppPickerSheet(
                 }
             }
 
-            // Bottom action confirmation bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp)
+            if (!singleSelect) {
+                // Bottom action confirmation bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Cancel")
-                }
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("Cancel")
+                    }
 
-                Button(
-                    onClick = {
-                        val chosen = installedApps.filter { selectedKeys.contains(it.uniqueKey) }
-                        onAppsConfirmed(chosen)
-                    },
-                    enabled = selectedKeys.isNotEmpty(),
-                    modifier = Modifier.weight(1.5f),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text(
-                        if (selectedKeys.isEmpty()) "Add Apps"
-                        else "Add (${selectedKeys.size})"
-                    )
+                    Button(
+                        onClick = {
+                            val chosen = installedApps.filter { selectedKeys.contains(it.uniqueKey) }
+                            onAppsConfirmed(chosen)
+                        },
+                        enabled = selectedKeys.isNotEmpty(),
+                        modifier = Modifier.weight(1.5f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text(
+                            if (selectedKeys.isEmpty()) "Add Apps"
+                            else "Add (${selectedKeys.size})"
+                        )
+                    }
                 }
+            } else {
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
@@ -251,6 +266,8 @@ fun AppPickerSheet(
     AppPickerSheet(
         installedApps = installedApps,
         alreadyAddedKeys = emptySet(),
+        title = "Choose App",
+        singleSelect = true,
         onAppsConfirmed = { list -> list.firstOrNull()?.let(onAppSelected) },
         onDismiss = onDismiss,
         modifier = modifier

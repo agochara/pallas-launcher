@@ -64,9 +64,17 @@ fun AppearanceSettingsPage(
                 SettingsGroup {
                     SettingsSwitchRow(
                         title = "Wallpaper scrim",
-                        subtitle = "Soft gradient so text stays readable on bright wallpapers",
+                        subtitle = "Add a soft gradient behind the home screen",
                         checked = settings.showWallpaperScrim,
                         onCheckedChange = { viewModel.updateSettings { copy(showWallpaperScrim = it) } }
+                    )
+                    SettingsSliderRow(
+                        title = "Scrim strength",
+                        persistedValue = settings.wallpaperScrimStrength,
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(wallpaperScrimStrength = value) } },
+                        valueRange = 0f..1f,
+                        steps = 9,
+                        enabled = settings.showWallpaperScrim
                     )
                     SettingsSegmentedRow(
                         title = "Text shadow",
@@ -84,16 +92,16 @@ fun AppearanceSettingsPage(
                 }
 
                 Text(
-                    text = "Auto adds a soft shadow only when your wallpaper would make the text hard to read.",
+                    text = "Text shadow follows wallpaper contrast when set to Auto. Scrim strength is available while the wallpaper scrim is on.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp)
                 )
 
                 SettingsSectionHeader("Typography")
                 SettingsGroup {
                     SettingsSliderRow(
-                        title = "Clock & Date",
+                        title = "Clock & Date size",
                         persistedValue = settings.appFontScale,
                         onValueChangeFinished = { value -> viewModel.updateSettings { copy(appFontScale = value) } },
                         valueRange = 0.8f..1.3f,
@@ -103,8 +111,8 @@ fun AppearanceSettingsPage(
                         title = "Labels in Screens",
                         persistedValue = settings.screensFontScale,
                         onValueChangeFinished = { value -> viewModel.updateSettings { copy(screensFontScale = value) } },
-                        valueRange = 0.8f..1.3f,
-                        steps = 4
+                        valueRange = 0.7f..1.5f,
+                        steps = 7
                     )
                     SettingsSliderRow(
                         title = "Labels in App List",

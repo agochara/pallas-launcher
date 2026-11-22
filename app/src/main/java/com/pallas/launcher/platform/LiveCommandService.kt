@@ -1,9 +1,9 @@
 package com.pallas.launcher.platform
 
 import android.net.Uri
-import android.util.LruCache
 import com.pallas.launcher.domain.search.LauncherSearchResult
 import com.pallas.launcher.domain.search.SmartCommandType
+import com.pallas.launcher.domain.search.UnitConverterEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -42,35 +42,42 @@ object LiveCommandService {
 
     private data class HttpOutcome(val body: String?, val error: String?)
 
-    private val responseCache = LruCache<String, Pair<Long, String>>(64)
+    private val responseCache = object : LinkedHashMap<String, Pair<Long, String>>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, String>>?): Boolean = size > 64
+    }
     private const val CACHE_TTL_MS = 60_000L
 
     fun clearCache() {
         synchronized(responseCache) {
-            responseCache.evictAll()
+            responseCache.clear()
         }
     }
 
     private fun httpGetDetailed(urlStr: String, attempts: Int = 2): HttpOutcome {
-        responseCache.get(urlStr)?.let { (stamp, body) ->
-            if (System.currentTimeMillis() - stamp < CACHE_TTL_MS) return HttpOutcome(body, null)
+        synchronized(responseCache) {
+            responseCache[urlStr]?.let { (stamp, body) ->
+                if (System.currentTimeMillis() - stamp < CACHE_TTL_MS) return HttpOutcome(body, null)
+            }
         }
         var lastError: String? = null
         repeat(attempts) {
-            val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 8000
-                readTimeout = 8000
-                setRequestProperty(
-                    "User-Agent",
-                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-                )
-                setRequestProperty("Accept", "application/json,text/plain,*/*")
-            }
+            var conn: HttpURLConnection? = null
             try {
+                conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 8000
+                    readTimeout = 8000
+                    setRequestProperty(
+                        "User-Agent",
+                        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                    )
+                    setRequestProperty("Accept", "application/json,text/plain,*/*")
+                }
                 val code = conn.responseCode
                 if (code in 200..299) {
                     val body = conn.inputStream.bufferedReader().use { r -> r.readText() }
-                    responseCache.put(urlStr, System.currentTimeMillis() to body)
+                    synchronized(responseCache) {
+                        responseCache[urlStr] = System.currentTimeMillis() to body
+                    }
                     return HttpOutcome(body, null)
                 }
                 lastError = "HTTP $code"
@@ -82,7 +89,7 @@ object LiveCommandService {
             } catch (e: Exception) {
                 lastError = e.javaClass.simpleName
             } finally {
-                conn.disconnect()
+                conn?.disconnect()
             }
         }
         return HttpOutcome(null, lastError)
@@ -150,14 +157,7 @@ object LiveCommandService {
                 }
             }
 
-            val curSymbol = when (currency.uppercase(Locale.ROOT)) {
-                "INR" -> "₹"
-                "USD" -> "$"
-                "EUR" -> "€"
-                "GBP" -> "£"
-                "JPY" -> "¥"
-                else -> if (currency.isNotEmpty()) "$currency " else ""
-            }
+            val curSymbol = if (currency.isNotBlank()) UnitConverterEngine.currencySymbol(currency) else ""
 
             val change = if (!price.isNaN() && !prevClose.isNaN() && prevClose != 0.0) price - prevClose else 0.0
             val pct = if (!prevClose.isNaN() && prevClose != 0.0) (change / prevClose) * 100.0 else 0.0
@@ -171,7 +171,7 @@ object LiveCommandService {
                 primaryValue = if (price.isNaN()) "—" else "$curSymbol${String.format(Locale.US, "%,.2f", price)}",
                 badgeText = badge,
                 isBadgePositive = change >= 0,
-                subtitle = "$symbol • $exchange ($effectiveRange) • Tap to open chart",
+                subtitle = "$symbol • $exchange ($effectiveRange)",
                 sparkline = if (showSparkline) closes else emptyList(),
                 execute = { ctx ->
                     SystemActionsManager.openUrl(ctx, "https://finance.yahoo.com/quote/${Uri.encode(symbol)}")
@@ -208,22 +208,24 @@ object LiveCommandService {
                 id = "weather_no_city",
                 type = if (isSolarOnly) SmartCommandType.SOLAR else SmartCommandType.WEATHER,
                 title = if (isSolarOnly) "Sunrise & Sunset" else "Weather",
-                subtitle = "Pass a city (e.g. 'w london') or set a default city in Search Settings"
+                subtitle = "No city specified"
             )
         }
 
-        val coordMatch = Regex("""^\s*([+-]?\d+(?:\.\d+)?)\s*[, ]\s*([+-]?\d+(?:\.\d+)?)\s*$""").matchEntire(city)
+        val coordMatch = Regex("""^\s*([+-]?\d+(?:\.\d+)?)°?\s*(?:[,;]\s*|\s+)([+-]?\d+(?:\.\d+)?)°?\s*$""").matchEntire(city)
         val locationData: Triple<Double, Double, String> = if (coordMatch != null) {
             val cLat = coordMatch.groupValues[1].toDoubleOrNull()
             val cLon = coordMatch.groupValues[2].toDoubleOrNull()
-            if (cLat != null && cLon != null && cLat in -90.0..90.0 && cLon in -180.0..180.0) {
-                Triple(cLat, cLon, "${String.format(Locale.US, "%.3f", cLat)}°, ${String.format(Locale.US, "%.3f", cLon)}°")
-            } else {
-                null
+            if (cLat == null || cLon == null || cLat !in -90.0..90.0 || cLon !in -180.0..180.0) {
+                return@withContext LauncherSearchResult.RichCard(
+                    id = "weather_err_coords",
+                    type = if (isSolarOnly) SmartCommandType.SOLAR else SmartCommandType.WEATHER,
+                    title = city,
+                    subtitle = "Invalid coordinates (latitude -90..90, longitude -180..180)"
+                )
             }
+            Triple(cLat, cLon, "${String.format(Locale.US, "%.4f", cLat)}°, ${String.format(Locale.US, "%.4f", cLon)}°")
         } else {
-            null
-        } ?: run {
             val geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=${Uri.encode(city)}&count=1&language=en&format=json"
             val geoOutcome = httpGetDetailed(geoUrl)
             val loc = try {
@@ -308,7 +310,7 @@ object LiveCommandService {
                 id = "wa_no_key",
                 type = SmartCommandType.WOLFRAM,
                 title = "Wolfram Alpha",
-                subtitle = "Add your free Wolfram AppID in Search Settings to enable 'wa' queries"
+                subtitle = "Wolfram AppID not configured"
             )
         }
         val url = "https://api.wolframalpha.com/v1/result?i=${Uri.encode(query)}&appid=${Uri.encode(appId)}"
@@ -322,7 +324,7 @@ object LiveCommandService {
                 primaryValue = answer,
                 badgeText = "Wolfram",
                 isBadgePositive = true,
-                subtitle = "Tap to open full Wolfram|Alpha analysis",
+                subtitle = "",
                 execute = { ctx ->
                     SystemActionsManager.openUrl(ctx, "https://www.wolframalpha.com/input?i=${Uri.encode(query)}")
                 }
@@ -332,7 +334,7 @@ object LiveCommandService {
                 id = "wa_err_$query",
                 type = SmartCommandType.WOLFRAM,
                 title = query,
-                subtitle = "Wolfram could not compute a short answer (${outcome.error ?: "no result"}) • Tap to open in browser",
+                subtitle = "No short answer (${outcome.error ?: "unavailable"})",
                 execute = { ctx ->
                     SystemActionsManager.openUrl(ctx, "https://www.wolframalpha.com/input?i=${Uri.encode(query)}")
                 }

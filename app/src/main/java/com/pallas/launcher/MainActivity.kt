@@ -6,6 +6,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -19,6 +21,7 @@ import com.pallas.launcher.ui.theme.PallasLauncherTheme
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+    private var contactsPermissionRequestedAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,6 +31,14 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val settings by viewModel.settings.collectAsState()
+            val contactsPermissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { granted ->
+                if (granted) {
+                    viewModel.refreshDeviceContacts()
+                    viewModel.onSearchQueryChanged(viewModel.searchQuery.value)
+                }
+            }
             
             val isDark = when (settings.themeMode) {
                 com.pallas.launcher.domain.model.ThemeMode.DARK -> true
@@ -70,7 +81,13 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = Color.Transparent
                 ) {
-                    PallasHomeScreen(viewModel = viewModel)
+                    PallasHomeScreen(
+                        viewModel = viewModel,
+                        onRequestContactsPermission = {
+                            contactsPermissionRequestedAt = android.os.SystemClock.elapsedRealtime()
+                            contactsPermissionLauncher.launch(android.Manifest.permission.READ_CONTACTS)
+                        }
+                    )
                 }
             }
         }
@@ -78,7 +95,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.onResume()
+        val preserveSearch = contactsPermissionRequestedAt != 0L &&
+            android.os.SystemClock.elapsedRealtime() - contactsPermissionRequestedAt < 10_000L
+        viewModel.onResume(preserveSearch = preserveSearch)
+        contactsPermissionRequestedAt = 0L
     }
 
     override fun onNewIntent(intent: Intent) {

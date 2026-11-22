@@ -9,6 +9,8 @@ enum class SmartCommandType {
     CALL,
     WEB_SEARCH,
     MATH_STATS,
+    LATEX,
+    CONVERT,
     FINANCE,
     WEATHER,
     SOLAR,
@@ -42,12 +44,15 @@ sealed interface LauncherSearchResult {
         val type: SmartCommandType,
         val title: String,
         val primaryValue: String = "",
+        val latexSource: String? = null,
+        val chart: MathChartData? = null,
         val badgeText: String? = null,
         val isBadgePositive: Boolean? = null,
         val subtitle: String = "",
         val sparkline: List<Float> = emptyList(),
         val isLoading: Boolean = false,
         val hasInfoManual: Boolean = false,
+        val consoleOutput: String? = null,
         val execute: (Context) -> Unit = {}
     ) : LauncherSearchResult
 
@@ -71,7 +76,7 @@ val LauncherSearchResult.isEnterEligible: Boolean
     get() = when (this) {
         is LauncherSearchResult.App, is LauncherSearchResult.ContactCall -> true
         is LauncherSearchResult.Command -> !id.endsWith("_hint")
-        is LauncherSearchResult.RichCard -> !isLoading && primaryValue.isNotEmpty()
+        is LauncherSearchResult.RichCard -> !isLoading && (primaryValue.isNotEmpty() || !latexSource.isNullOrBlank() || chart != null)
     }
 
 /** Tapping these must NOT dismiss search (they have nothing to run). */
@@ -80,6 +85,8 @@ val LauncherSearchResult.isInertOnTap: Boolean
         is LauncherSearchResult.RichCard -> isLoading
         is LauncherSearchResult.Command ->
             id.endsWith("_hint") && (type == SmartCommandType.MATH_STATS ||
+                type == SmartCommandType.LATEX ||
+                type == SmartCommandType.CONVERT ||
                 type == SmartCommandType.FINANCE || type == SmartCommandType.WOLFRAM)
         else -> false
     }

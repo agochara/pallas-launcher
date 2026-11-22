@@ -15,17 +15,26 @@ sealed interface GestureAction {
     data object None : GestureAction
 
     companion object {
-        fun fromString(value: String): GestureAction = when {
-            value == "search" -> OpenSearch
-            value == "drawer" -> OpenAppDrawer
-            value == "notifications" -> OpenNotifications
-            value == "quick_settings" -> OpenQuickSettings
-            value == "camera" -> OpenCamera
-            value == "dialer" -> OpenDialer
-            value == "lock_screen" || value == "lock" -> LockScreen
-            value.startsWith("app:") -> LaunchApp(value.removePrefix("app:"))
-            else -> None
+        fun fromStringOrNull(value: String): GestureAction? {
+            val clean = value.trim()
+            return when {
+                clean == "search" -> OpenSearch
+                clean == "drawer" -> OpenAppDrawer
+                clean == "notifications" -> OpenNotifications
+                clean == "quick_settings" -> OpenQuickSettings
+                clean == "camera" -> OpenCamera
+                clean == "dialer" -> OpenDialer
+                clean == "lock_screen" || clean == "lock" -> LockScreen
+                clean == "none" -> None
+                clean.startsWith("app:") -> {
+                    val key = clean.removePrefix("app:").trim()
+                    if (key.isEmpty()) null else LaunchApp(key)
+                }
+                else -> null
+            }
         }
+
+        fun fromString(value: String): GestureAction = fromStringOrNull(value) ?: None
 
         fun toString(action: GestureAction): String = when (action) {
             is OpenSearch -> "search"

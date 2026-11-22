@@ -24,6 +24,7 @@ import com.pallas.launcher.ui.settings.components.SettingsSectionHeader
 import com.pallas.launcher.ui.settings.components.SettingsSegmentedRow
 import com.pallas.launcher.ui.settings.components.SettingsSliderRow
 import com.pallas.launcher.ui.settings.components.SettingsSwitchRow
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,13 +67,6 @@ fun ClockDateSettingsPage(
                         onSelected = { viewModel.updateSettings { copy(clockHorizontalAlignment = it) } },
                         label = { it.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
                     )
-                    SettingsSliderRow(
-                        title = "Clock Scale",
-                        persistedValue = settings.appFontScale,
-                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(appFontScale = value) } },
-                        valueRange = 0.8f..1.3f,
-                        steps = 4
-                    )
                 }
 
                 SettingsSectionHeader("Clock Spacing")
@@ -80,34 +74,38 @@ fun ClockDateSettingsPage(
                     SettingsSliderRow(
                         title = "Left Padding",
                         persistedValue = settings.clockPaddingLeftDp.toFloat(),
-                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingLeftDp = value.toInt()) } },
-                        valueRange = 0f..64f,
-                        steps = 15,
-                        valueFormat = { "${it.toInt()} dp" }
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingLeftDp = value.roundToInt()) } },
+                        valueRange = 0f..160f,
+                        steps = 0,
+                        valueFormat = { "${it.roundToInt()} dp" },
+                        stepIncrement = 1f
                     )
                     SettingsSliderRow(
                         title = "Right Padding",
                         persistedValue = settings.clockPaddingRightDp.toFloat(),
-                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingRightDp = value.toInt()) } },
-                        valueRange = 0f..64f,
-                        steps = 15,
-                        valueFormat = { "${it.toInt()} dp" }
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingRightDp = value.roundToInt()) } },
+                        valueRange = 0f..160f,
+                        steps = 0,
+                        valueFormat = { "${it.roundToInt()} dp" },
+                        stepIncrement = 1f
                     )
                     SettingsSliderRow(
                         title = "Top Padding",
                         persistedValue = settings.clockPaddingTopDp.toFloat(),
-                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingTopDp = value.toInt()) } },
-                        valueRange = 0f..64f,
-                        steps = 15,
-                        valueFormat = { "${it.toInt()} dp" }
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingTopDp = value.roundToInt()) } },
+                        valueRange = 0f..160f,
+                        steps = 0,
+                        valueFormat = { "${it.roundToInt()} dp" },
+                        stepIncrement = 1f
                     )
                     SettingsSliderRow(
                         title = "Bottom Padding",
                         persistedValue = settings.clockPaddingBottomDp.toFloat(),
-                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingBottomDp = value.toInt()) } },
-                        valueRange = 0f..64f,
-                        steps = 15,
-                        valueFormat = { "${it.toInt()} dp" }
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockPaddingBottomDp = value.roundToInt()) } },
+                        valueRange = 0f..160f,
+                        steps = 0,
+                        valueFormat = { "${it.roundToInt()} dp" },
+                        stepIncrement = 1f
                     )
                 }
 
@@ -115,31 +113,31 @@ fun ClockDateSettingsPage(
                 SettingsGroup {
                     SettingsSwitchRow(
                         title = "Show Clock",
-                        subtitle = "Display the digital clock on the home screen.",
+                        subtitle = "Display the digital clock on the home screen",
                         checked = settings.showClock,
                         onCheckedChange = { viewModel.updateSettings { copy(showClock = it) } }
                     )
                     SettingsSwitchRow(
                         title = "24-Hour Time",
-                        subtitle = "Display time in 24-hour military format instead of AM/PM.",
+                        subtitle = "Use 24-hour clock format (e.g. 14:30)",
                         checked = settings.is24HourClock,
                         onCheckedChange = { viewModel.updateSettings { copy(is24HourClock = it) } }
                     )
                     SettingsSwitchRow(
                         title = "Show Date",
-                        subtitle = "Show current date below the clock time.",
+                        subtitle = "Show current date below the clock time",
                         checked = settings.showDate,
                         onCheckedChange = { viewModel.updateSettings { copy(showDate = it) } }
                     )
                     SettingsSwitchRow(
                         title = "Show Battery Level",
-                        subtitle = "Show current device battery percentage beside date.",
+                        subtitle = "Show battery percentage beside the date",
                         checked = settings.showBattery,
                         onCheckedChange = { viewModel.updateSettings { copy(showBattery = it) } }
                     )
                 }
 
-                Spacer(modifier = Modifier.height(28.dp))
+                Spacer(modifier = Modifier.height(32.dp))
             }
         }
     }

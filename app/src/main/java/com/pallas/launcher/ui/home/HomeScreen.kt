@@ -1,6 +1,8 @@
 package com.pallas.launcher.ui.home
 
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -83,6 +85,7 @@ import kotlin.math.roundToInt
 @Composable
 fun PallasHomeScreen(
     viewModel: MainViewModel,
+    onRequestContactsPermission: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val configuration = LocalConfiguration.current
@@ -102,6 +105,7 @@ fun PallasHomeScreen(
     val overlay by viewModel.overlay.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
+    var contactPermissionRequested by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
     val pagerOffsetX = remember { Animatable(0f) }
@@ -185,6 +189,8 @@ fun PallasHomeScreen(
             GestureContainer(
                 onSwipeUp = { viewModel.executeGesture(settings.swipeUpAction) },
                 onSwipeDown = { viewModel.executeGesture(settings.swipeDownAction) },
+                onSwipeDownLeft = { viewModel.executeGesture(settings.swipeDownLeftAction) },
+                onSwipeDownRight = { viewModel.executeGesture(settings.swipeDownRightAction) },
                 onShortSwipeLeft = { viewModel.executeGesture(settings.shortSwipeLeftAction) },
                 onShortSwipeRight = { viewModel.executeGesture(settings.shortSwipeRightAction) },
                 onLongSwipeLeft = { viewModel.onScreenSwiped(1) },
@@ -238,8 +244,8 @@ fun PallasHomeScreen(
                                 Brush.verticalGradient(
                                     colors = listOf(
                                         Color.Transparent,
-                                        Color.Black.copy(alpha = 0.15f),
-                                        Color.Black.copy(alpha = 0.45f)
+                                        Color.Black.copy(alpha = 0.15f * settings.wallpaperScrimStrength),
+                                        Color.Black.copy(alpha = 0.45f * settings.wallpaperScrimStrength)
                                     )
                                 )
                             )
@@ -439,8 +445,19 @@ fun PallasHomeScreen(
             LauncherSearchOverlay(
                 query = searchQuery,
                 results = searchResults,
-                onQueryChange = { viewModel.onSearchQueryChanged(it) },
+                onQueryChange = {
+                    if (it.startsWith("@") && !contactPermissionRequested) {
+                        contactPermissionRequested = true
+                        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+                            onRequestContactsPermission()
+                        }
+                    } else if (!it.startsWith("@")) {
+                        contactPermissionRequested = false
+                    }
+                    viewModel.onSearchQueryChanged(it)
+                },
                 onResultClick = { viewModel.launchSearchResult(it) },
+                onSearchSubmit = { viewModel.submitWolframQuery() },
                 onAppLongPress = { app ->
                     val existingOnScreen = currentScreen?.apps?.firstOrNull { it.uniqueKey == app.uniqueKey }
                     val screenApp = existingOnScreen ?: ScreenApp(
@@ -487,18 +504,20 @@ fun PallasHomeScreen(
         }
 
         (overlay as? LauncherOverlay.AppOptions)?.app?.let { app ->
-            val shortcuts = remember(app.packageName, app.userHandle) {
-                viewModel.getShortcutsForApp(app.packageName, app.userHandle)
+            val isOnHomeScreen = currentScreen?.apps?.any { it.uniqueKey == app.uniqueKey } == true
+            val isHiddenFromAppList = settings.hiddenFromAppList.contains(app.uniqueKey) ||
+                settings.hiddenFromAppList.contains(app.packageName)
+            val currentAlias = remember(app.uniqueKey, app.packageName, settings.customAliases) {
+                settings.customAliases.entries.firstOrNull { (_, target) ->
+                    target == app.uniqueKey || target == app.packageName
+                }?.key
             }
 
             AppOptionsModal(
                 app = app,
-                shortcuts = shortcuts,
-                isOnHomeScreen = currentScreen?.apps?.any { it.uniqueKey == app.uniqueKey } == true,
-                onLaunchShortcut = { shortcutId, userHandle ->
-                    viewModel.launchShortcut(app.packageName, shortcutId, userHandle)
-                    viewModel.dismissAppOptions(forceCloseAll = true)
-                },
+                isOnHomeScreen = isOnHomeScreen,
+                isHiddenFromAppList = isHiddenFromAppList,
+                currentAlias = currentAlias,
                 onOpenAppInfo = {
                     viewModel.openAppInfo(app.packageName, app.activityName, app.userHandle)
                     viewModel.dismissAppOptions(forceCloseAll = true)
@@ -529,8 +548,13 @@ fun PallasHomeScreen(
                     }
                     viewModel.dismissAppOptions()
                 },
-                onHideFromAppList = {
-                    viewModel.hideFromAppList(app.uniqueKey)
+                onToggleHideFromAppList = {
+                    if (isHiddenFromAppList) {
+                        viewModel.unhideFromAppList(app.uniqueKey)
+                        viewModel.unhideFromAppList(app.packageName)
+                    } else {
+                        viewModel.hideFromAppList(app.uniqueKey)
+                    }
                     viewModel.dismissAppOptions()
                 },
                 onHideApp = {
@@ -597,14 +621,10 @@ fun PallasHomeScreen(
                 title = { Text(text = "Set Alias for '${app.displayLabel}'", color = colorScheme.onSurface) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "Type an abbreviation (e.g. 'wa', 'calc', 'm'):",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colorScheme.onSurfaceVariant
-                        )
                         OutlinedTextField(
                             value = aliasText,
                             onValueChange = { aliasText = it },
+                            placeholder = { Text("Abbreviation") },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(

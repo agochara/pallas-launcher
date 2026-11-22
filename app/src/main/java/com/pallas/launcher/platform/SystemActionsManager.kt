@@ -29,12 +29,10 @@ object SystemActionsManager {
         )
         for (intent in intents) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (intent.resolveActivity(context.packageManager) != null) {
-                try {
-                    context.startActivity(intent)
-                    return
-                } catch (_: Exception) {}
-            }
+            try {
+                context.startActivity(intent)
+                return
+            } catch (_: Exception) {}
         }
         Toast.makeText(context, "Clock app not found", Toast.LENGTH_SHORT).show()
     }
