@@ -495,36 +495,41 @@ object UnitConverterEngine {
         put("€", "EUR"); put("eur", "EUR"); put("euro", "EUR"); put("euros", "EUR")
         put("£", "GBP"); put("gbp", "GBP"); put("quid", "GBP"); put("sterling", "GBP")
         put("british pound", "GBP"); put("british pounds", "GBP"); put("pound sterling", "GBP")
-        put("₹", "INR"); put("inr", "INR"); put("rs", "INR"); put("rupee", "INR"); put("rupees", "INR")
-        put("indian rupee", "INR"); put("indian rupees", "INR")
-        put("¥", "JPY"); put("jpy", "JPY"); put("yen", "JPY"); put("japanese yen", "JPY")
-        put("cny", "CNY"); put("rmb", "CNY"); put("yuan", "CNY"); put("renminbi", "CNY")
+        put("uk pound", "GBP"); put("uk pounds", "GBP")
+        put("₹", "INR"); put("inr", "INR"); put("rs", "INR"); put("rs.", "INR"); put("rupee", "INR"); put("rupees", "INR")
+        put("rupiya", "INR"); put("indian rupee", "INR"); put("indian rupees", "INR")
+        put("¥", "JPY"); put("jpy", "JPY"); put("yen", "JPY"); put("yens", "JPY"); put("japanese yen", "JPY")
+        put("cny", "CNY"); put("rmb", "CNY"); put("yuan", "CNY"); put("yuans", "CNY"); put("renminbi", "CNY"); put("chinese yuan", "CNY")
         put("c$", "CAD"); put("ca$", "CAD"); put("cad", "CAD"); put("canadian dollar", "CAD"); put("canadian dollars", "CAD")
         put("a$", "AUD"); put("au$", "AUD"); put("aud", "AUD"); put("australian dollar", "AUD"); put("australian dollars", "AUD")
-        put("chf", "CHF"); put("franc", "CHF"); put("francs", "CHF"); put("swiss franc", "CHF"); put("swiss francs", "CHF")
+        put("chf", "CHF"); put("sfr", "CHF"); put("franc", "CHF"); put("francs", "CHF"); put("swiss franc", "CHF"); put("swiss francs", "CHF")
         put("hk$", "HKD"); put("hkd", "HKD")
         put("s$", "SGD"); put("sgd", "SGD")
         put("nz$", "NZD"); put("nzd", "NZD")
-        put("₩", "KRW"); put("krw", "KRW"); put("won", "KRW")
+        put("₩", "KRW"); put("krw", "KRW"); put("won", "KRW"); put("wons", "KRW"); put("korean won", "KRW"); put("south korean won", "KRW")
         put("₺", "TRY"); put("tl", "TRY"); put("lira", "TRY"); put("turkish lira", "TRY")
         put("₪", "ILS"); put("ils", "ILS"); put("nis", "ILS"); put("shekel", "ILS"); put("shekels", "ILS")
         put("r$", "BRL"); put("brl", "BRL"); put("real", "BRL"); put("reais", "BRL")
         put("mx$", "MXN"); put("mxn", "MXN"); put("peso", "MXN"); put("pesos", "MXN")
-        put("aed", "AED"); put("dhs", "AED"); put("dirham", "AED"); put("dirhams", "AED")
+        put("aed", "AED"); put("dhs", "AED"); put("dirham", "AED"); put("dirhams", "AED"); put("uae dirham", "AED"); put("uae dirhams", "AED")
         put("sar", "SAR"); put("riyal", "SAR"); put("riyals", "SAR")
         put("₦", "NGN"); put("ngn", "NGN"); put("naira", "NGN")
-        put("฿", "THB"); put("thb", "THB"); put("baht", "THB")
-        put("rm", "MYR"); put("myr", "MYR"); put("ringgit", "MYR")
-        put("rp", "IDR"); put("idr", "IDR"); put("rupiah", "IDR")
+        put("฿", "THB"); put("thb", "THB"); put("baht", "THB"); put("bhat", "THB"); put("bahts", "THB"); put("bhats", "THB")
+        put("thai baht", "THB"); put("thai bhat", "THB")
+        put("rm", "MYR"); put("myr", "MYR"); put("ringgit", "MYR"); put("ringgits", "MYR")
+        put("rp", "IDR"); put("idr", "IDR"); put("rupiah", "IDR"); put("rupiahs", "IDR")
         put("₱", "PHP"); put("php", "PHP")
         put("₫", "VND"); put("vnd", "VND"); put("dong", "VND")
+        put("bdt", "BDT"); put("taka", "BDT")
         put("nt$", "TWD"); put("twd", "TWD")
-        put("₽", "RUB"); put("rub", "RUB"); put("ruble", "RUB"); put("rubles", "RUB")
+        put("₽", "RUB"); put("rub", "RUB"); put("ruble", "RUB"); put("rubles", "RUB"); put("rouble", "RUB"); put("roubles", "RUB")
         put("₴", "UAH"); put("uah", "UAH"); put("hryvnia", "UAH")
         put("zł", "PLN"); put("zl", "PLN"); put("pln", "PLN"); put("zloty", "PLN")
         put("kč", "CZK"); put("czk", "CZK"); put("koruna", "CZK")
         put("ft_huf", "HUF"); put("huf", "HUF"); put("forint", "HUF")
         put("rand", "ZAR"); put("zar", "ZAR")
+        put("xau", "XAU"); put("gold", "XAU")
+        put("xag", "XAG"); put("silver", "XAG")
         put("₿", "BTC"); put("btc", "BTC"); put("bitcoin", "BTC"); put("bitcoins", "BTC")
         put("Ξ", "ETH"); put("eth", "ETH"); put("ether", "ETH"); put("ethereum", "ETH")
         put("sol", "SOL"); put("solana", "SOL")
@@ -551,6 +556,13 @@ object UnitConverterEngine {
     fun currencyName(code: String): String {
         val upper = code.uppercase(Locale.ROOT)
         return CURRENCIES[upper]?.name ?: upper
+    }
+
+    fun allSupportedCurrencies(): List<CurrencyMeta> {
+        val liveKeys = CurrencyRateService.getAllRatesSnapshot().keys
+        val extra = liveKeys.filterNot { CURRENCIES.containsKey(it) }
+            .map { code -> CurrencyMeta(code = code, name = code, symbol = "$code ") }
+        return (CURRENCIES.values + extra).sortedBy { it.code }
     }
 
     // =========================================================================
@@ -668,8 +680,16 @@ object UnitConverterEngine {
         // B. Compound source units (e.g., "5ft 10in to cm", "11st 4lb to kg", "5lb 8oz to g")
         evaluateCompoundToTarget(leftRaw, targetClean)?.let { return it }
 
-        // C. Parse `<value> <fromUnit>` from leftRaw
-        val parsedSource = parseAmountAndUnitToken(leftRaw) ?: return null
+        // C. Parse `<value> <fromUnit>` from leftRaw; if absent, check bare currency-to-currency (`thb to inr`, `baht to rs`)
+        val parsedSource = parseAmountAndUnitToken(leftRaw)
+        if (parsedSource == null) {
+            val fromCur = resolveCurrencyWithContext(leftRaw, targetClean)
+            val toCur = resolveCurrencyWithContext(targetClean, leftRaw)
+            if (fromCur != null && toCur != null && fromCur != toCur) {
+                return buildPairResultOrAmount(null, fromCur, toCur)
+            }
+            return null
+        }
         val (amount, fromToken, caseSensitiveFrom) = parsedSource
 
         // D. Check Currency conversion first (or disambiguate `pound` / `pounds`)
@@ -790,7 +810,14 @@ object UnitConverterEngine {
         val unitMatch = resolveSingleUnit(unitToken, caseSensitiveToken)
         val currencyMatch = resolveCurrencyCode(unitToken)
 
-        val preferCurrency = unitMatch == null || unitToken.lowercase(Locale.ROOT) in setOf("$", "€", "£", "₹", "¥", "₩", "₺", "₽", "₦", "฿", "₱", "₫", "₪", "₿", "usd", "eur", "inr", "gbp", "jpy", "cad", "aud", "chf", "cny", "krw", "aed", "sar", "sgd", "hkd", "nzd", "brl", "mxn", "zar", "try", "rub", "btc", "eth", "sol", "dollar", "dollars", "euro", "euros", "rupee", "rupees", "yen")
+        val preferCurrency = unitMatch == null || unitToken.lowercase(Locale.ROOT) in setOf(
+            "$", "€", "£", "₹", "¥", "₩", "₺", "₽", "₦", "฿", "₱", "₫", "₪", "₿",
+            "usd", "eur", "inr", "gbp", "jpy", "cad", "aud", "chf", "cny", "krw", "aed", "sar", "sgd",
+            "hkd", "nzd", "brl", "mxn", "zar", "try", "rub", "thb", "btc", "eth", "sol",
+            "dollar", "dollars", "euro", "euros", "rupee", "rupees", "rs", "yen",
+            "baht", "bhat", "yuan", "rmb", "franc", "francs", "won", "dirham", "dirhams",
+            "ringgit", "rupiah", "dong", "lira", "shekel", "ruble"
+        )
 
         if (currencyMatch != null && preferCurrency) {
             return buildMultiCurrencyOverview(amount, currencyMatch)
@@ -838,6 +865,11 @@ object UnitConverterEngine {
 
     private val NUMBER_WITH_MULTIPLIER_AND_UNIT = Regex(
         """^\s*([+-]?\d[\d,]*(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(?:(k|m|b|t|lakh|lakhs|lac|lacs|crore|crores|cr|million|billion)\s+)?(.+?)\s*$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val LEADING_CURRENCY_CODE_NUMBER = Regex(
+        """^\s*([a-zA-Z.]{2,10})\s+([+-]?\d[\d,]*(?:\.\d+)?)\s*(k|m|b|t|lakh|lakhs|lac|lacs|crore|crores|cr|million|billion)?\s*$""",
         RegexOption.IGNORE_CASE
     )
 
@@ -890,21 +922,36 @@ object UnitConverterEngine {
         }
 
         // Case 3: Number + optional multiplier + unit (e.g. "100k usd", "100 km", "72°F", "10 lakh inr")
-        val m = NUMBER_WITH_MULTIPLIER_AND_UNIT.matchEntire(trimmed) ?: return null
-        val baseNum = m.groupValues[1].replace(",", "").toDoubleOrNull() ?: return null
-        val maybeMult = m.groupValues[2]
-        val restUnit = m.groupValues[3].trim()
+        val m = NUMBER_WITH_MULTIPLIER_AND_UNIT.matchEntire(trimmed)
+        if (m != null) {
+            val baseNum = m.groupValues[1].replace(",", "").toDoubleOrNull() ?: return null
+            val maybeMult = m.groupValues[2]
+            val restUnit = m.groupValues[3].trim()
 
-        if (maybeMult.isNotEmpty()) {
-            val multFactor = multiplierValue(maybeMult)
-            if (multFactor != null && (resolveSingleUnit(restUnit.lowercase(Locale.ROOT), restUnit) != null || resolveCurrencyCode(restUnit) != null)) {
-                return Triple(baseNum * multFactor, restUnit.lowercase(Locale.ROOT), restUnit)
+            if (maybeMult.isNotEmpty()) {
+                val multFactor = multiplierValue(maybeMult)
+                if (multFactor != null && (resolveSingleUnit(restUnit.lowercase(Locale.ROOT), restUnit) != null || resolveCurrencyCode(restUnit) != null)) {
+                    return Triple(baseNum * multFactor, restUnit.lowercase(Locale.ROOT), restUnit)
+                }
+                val fullUnit = "$maybeMult $restUnit".trim()
+                return Triple(baseNum, fullUnit.lowercase(Locale.ROOT), fullUnit)
             }
-            val fullUnit = "$maybeMult $restUnit".trim()
-            return Triple(baseNum, fullUnit.lowercase(Locale.ROOT), fullUnit)
+
+            return Triple(baseNum, restUnit.lowercase(Locale.ROOT), restUnit)
         }
 
-        return Triple(baseNum, restUnit.lowercase(Locale.ROOT), restUnit)
+        // Case 4: Leading currency word/code + number (e.g. "rs 500", "usd 100", "thb 1000")
+        LEADING_CURRENCY_CODE_NUMBER.matchEntire(trimmed)?.let { lc ->
+            val token = lc.groupValues[1].trim()
+            if (resolveCurrencyCode(token) != null) {
+                val num = lc.groupValues[2].replace(",", "").toDoubleOrNull() ?: return null
+                val multStr = lc.groupValues[3]
+                val mult = if (multStr.isNotEmpty()) multiplierValue(multStr) ?: 1.0 else 1.0
+                return Triple(num * mult, token.lowercase(Locale.ROOT), token)
+            }
+        }
+
+        return null
     }
 
     // =========================================================================
@@ -914,10 +961,10 @@ object UnitConverterEngine {
     private fun resolveCurrencyWithContext(tokenRaw: String, otherSideRaw: String): String? {
         val clean = tokenRaw.trim().lowercase(Locale.ROOT)
         val otherClean = otherSideRaw.trim().lowercase(Locale.ROOT)
-        if (clean in setOf("pound", "pounds", "lb", "lbs")) {
+        if (clean in setOf("pound", "pounds", "lb", "lbs", "uk pound", "uk pounds")) {
             // "pound" / "pounds" is GBP only if the other side is a known currency (not a mass unit)
-            if (clean in setOf("pound", "pounds")) {
-                val otherCur = CURRENCY_ALIASES[otherClean]
+            if (clean in setOf("pound", "pounds", "uk pound", "uk pounds")) {
+                val otherCur = resolveCurrencyCode(otherClean)
                 if (otherCur != null) return "GBP"
             }
             return null
@@ -1662,6 +1709,8 @@ object UnitConverterEngine {
         }
     }
 
+    fun formatRate(r: Double): String = fmtRate(r)
+
     private fun fmtRate(r: Double): String {
         val a = abs(r)
         return when {
@@ -1671,7 +1720,7 @@ object UnitConverterEngine {
         }
     }
 
-    private fun formatRateFreshness(updatedMs: Long): String {
+    fun formatRateFreshness(updatedMs: Long): String {
         if (updatedMs <= 0L) return "Cached FX rates"
         val elapsedMin = ((System.currentTimeMillis() - updatedMs).coerceAtLeast(0L)) / 60_000L
         return when {

@@ -1,11 +1,16 @@
 package com.pallas.launcher
 
 import com.pallas.launcher.domain.model.AppItem
+import com.pallas.launcher.domain.model.CommandConfig
 import com.pallas.launcher.domain.model.SearchContact
+import com.pallas.launcher.domain.search.AsyncCommandRequest
 import com.pallas.launcher.domain.search.LauncherSearchResult
 import com.pallas.launcher.domain.search.SearchEngine
 import com.pallas.launcher.domain.search.SmartCommandEngine
 import com.pallas.launcher.domain.search.SmartCommandType
+import com.pallas.launcher.domain.search.isEnterEligible
+import com.pallas.launcher.domain.search.isInertOnTap
+import com.pallas.launcher.platform.LiveCommandService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -386,5 +391,100 @@ class SmartCommandsAndContactsTests {
         assertEquals("st", settings.commandConfigs["stock"]?.prefix)
         assertEquals("wa", settings.commandConfigs["wolfram"]?.prefix)
         assertEquals("tex", settings.commandConfigs["tex"]?.prefix)
+    }
+
+    @Test
+    fun testCallVsAtContactSeparation() {
+        val savedPinned = listOf(
+            SearchContact(nickname = "Mom", name = "Mary Smith", phoneNumber = "+1111111111")
+        )
+        val deviceContacts = listOf(
+            SearchContact(nickname = "Alice", name = "Alice Cooper", phoneNumber = "+2222222222"),
+            SearchContact(nickname = "Bob", name = "Bob Marley", phoneNumber = "+3333333333")
+        )
+
+        // `call` must strictly ignore deviceContacts and only display saved nicknamed contacts
+        val callAlice = SmartCommandEngine.evaluateCommands(
+            rawQuery = "call Alice",
+            contacts = savedPinned,
+            deviceContacts = deviceContacts
+        ).immediateResults
+        assertTrue(callAlice.none { it is LauncherSearchResult.ContactCall })
+
+        val bareCall = SmartCommandEngine.evaluateCommands(
+            rawQuery = "call",
+            contacts = savedPinned,
+            deviceContacts = deviceContacts
+        ).immediateResults.filterIsInstance<LauncherSearchResult.ContactCall>()
+        assertEquals(1, bareCall.size)
+        assertEquals("Mom", bareCall.single().nickname)
+
+        // `@` must search both savedPinned and full deviceContacts
+        val atAlice = SmartCommandEngine.evaluateCommands(
+            rawQuery = "@Alice",
+            contacts = savedPinned,
+            deviceContacts = deviceContacts
+        ).immediateResults.filterIsInstance<LauncherSearchResult.ContactCall>()
+        assertEquals(1, atAlice.size)
+        assertEquals("Alice Cooper", atAlice.single().contactName)
+
+        val bareAt = SmartCommandEngine.evaluateCommands(
+            rawQuery = "@",
+            contacts = savedPinned,
+            deviceContacts = deviceContacts
+        ).immediateResults.filterIsInstance<LauncherSearchResult.ContactCall>()
+        assertEquals(3, bareAt.size)
+    }
+
+    @Test
+    fun testWikiCommandAndParsers() {
+        val bare = SmartCommandEngine.evaluateCommands("wiki", emptyList())
+        assertNull(bare.asyncRequest)
+        val hint = bare.immediateResults.single() as LauncherSearchResult.Command
+        assertEquals(SmartCommandType.WIKI, hint.type)
+        assertTrue(hint.isInertOnTap)
+        assertFalse(hint.isEnterEligible)
+
+        val active = SmartCommandEngine.evaluateCommands("wiki Richard Feynman", emptyList())
+        assertTrue(active.asyncRequest is AsyncCommandRequest.Wiki)
+        assertEquals("Richard Feynman", (active.asyncRequest as AsyncCommandRequest.Wiki).query)
+        val loadingCard = active.immediateResults.single() as LauncherSearchResult.RichCard
+        assertEquals(SmartCommandType.WIKI, loadingCard.type)
+
+        val customCfg = CommandConfig.DEFAULTS.toMutableMap().apply {
+            this["wiki"] = getValue("wiki").copy(prefix = "wk")
+        }
+        val customEval = SmartCommandEngine.evaluateCommands("wk Euler", emptyList(), configs = customCfg)
+        assertTrue(customEval.asyncRequest is AsyncCommandRequest.Wiki)
+        assertEquals("Euler", (customEval.asyncRequest as AsyncCommandRequest.Wiki).query)
+
+        val disabledCfg = CommandConfig.DEFAULTS.toMutableMap().apply {
+            this["wiki"] = getValue("wiki").copy(enabled = false)
+        }
+        val disabledEval = SmartCommandEngine.evaluateCommands("wiki Euler", emptyList(), configs = disabledCfg)
+        assertNull(disabledEval.asyncRequest)
+        assertTrue(disabledEval.immediateResults.isEmpty())
+
+        // Title encoding & JSON parsers
+        assertEquals("Richard_Feynman", LiveCommandService.encodeWikiTitle("Richard   Feynman"))
+        val parsedSummary = LiveCommandService.parseWikipediaSummaryJson(
+            """{"title":"Richard Feynman","description":"American theoretical physicist","extract":"Richard Phillips Feynman was an American theoretical physicist.","content_urls":{"desktop":{"page":"https://en.wikipedia.org/wiki/Richard_Feynman"}}}""",
+            "Feynman"
+        )
+        assertNotNull(parsedSummary)
+        assertEquals("Richard Feynman", parsedSummary!!.title)
+        assertEquals("American theoretical physicist", parsedSummary.description)
+        assertEquals("https://en.wikipedia.org/wiki/Richard_Feynman", parsedSummary.articleUrl)
+
+        val disambigMissingExtract = LiveCommandService.parseWikipediaSummaryJson(
+            """{"title":"Foo","extract":""}""",
+            "Foo"
+        )
+        assertNull(disambigMissingExtract)
+
+        val opensearchFirst = LiveCommandService.parseOpenSearchFirstTitle(
+            """["feynmn",["Richard Feynman","Feynman diagram"],[],[]]"""
+        )
+        assertEquals("Richard Feynman", opensearchFirst)
     }
 }

@@ -41,13 +41,14 @@ object LocationHelper {
 
     @SuppressLint("MissingPermission")
     suspend fun getCurrentLocation(context: Context): Pair<Double, Double>? = withContext(Dispatchers.IO) {
-        if (!hasLocationPermission(context)) return@withContext null
+        val appContext = context.applicationContext
+        if (!hasLocationPermission(appContext)) return@withContext null
 
-        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        val lm = appContext.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
             ?: return@withContext null
 
         val hasFine = ContextCompat.checkSelfPermission(
-            context,
+            appContext,
             Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
@@ -77,16 +78,20 @@ object LocationHelper {
             suspendCancellableCoroutine { continuation ->
                 val cancellationSignal = CancellationSignal()
                 continuation.invokeOnCancellation { cancellationSignal.cancel() }
+                val allProvs = try { lm.allProviders } catch (_: Exception) { emptyList() }
+                val enabledProvs = try { lm.getProviders(true) } catch (_: Exception) { emptyList() }
                 val provider = when {
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                        lm.allProviders.contains(LocationManager.FUSED_PROVIDER) &&
+                        allProvs.contains(LocationManager.FUSED_PROVIDER) &&
                         lm.isProviderEnabled(LocationManager.FUSED_PROVIDER) -> LocationManager.FUSED_PROVIDER
                     lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
                     hasFine && lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-                    else -> lm.getProviders(true).firstOrNull() ?: LocationManager.PASSIVE_PROVIDER
+                    else -> enabledProvs.firstOrNull {
+                        hasFine || (it != LocationManager.GPS_PROVIDER && it != LocationManager.PASSIVE_PROVIDER)
+                    } ?: LocationManager.NETWORK_PROVIDER
                 }
                 try {
-                    lm.getCurrentLocation(provider, cancellationSignal, context.mainExecutor) { location ->
+                    lm.getCurrentLocation(provider, cancellationSignal, appContext.mainExecutor) { location ->
                         if (continuation.isActive) continuation.resume(location)
                     }
                 } catch (e: Exception) {
@@ -100,10 +105,11 @@ object LocationHelper {
     }
 
     suspend fun reverseGeocode(context: Context, lat: Double, lon: Double): String? = withContext(Dispatchers.IO) {
+        val appContext = context.applicationContext
         withTimeoutOrNull(3000L) {
             try {
                 if (Geocoder.isPresent()) {
-                    val geocoder = Geocoder(context, Locale.getDefault())
+                    val geocoder = Geocoder(appContext, Locale.getDefault())
                     val addresses: List<Address>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         suspendCancellableCoroutine { cont ->
                             try {

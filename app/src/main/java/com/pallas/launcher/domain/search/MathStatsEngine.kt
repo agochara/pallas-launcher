@@ -128,10 +128,21 @@ object MathStatsEngine {
         val solarCfg = cfg("solar")
         val stockCfg = cfg("stock")
         val waCfg = cfg("wolfram")
+        val wikiCfg = cfg("wiki")
+        val tzCfg = cfg("tz")
+        val defCfg = cfg("def")
+        val noteCfg = cfg("note")
+        val qrCfg = cfg("qr")
+        val emiCfg = cfg("emi")
         val webCfg = cfg("web")
         val alCfg = cfg("alarm")
         val timerCfg = cfg("timer")
         val callCfg = cfg("call")
+        val filesCfg = cfg("files")
+        val calCfg = cfg("calendar")
+        val flCfg = cfg("flashlight")
+        val dndCfg = cfg("dnd")
+        val appSearchCfg = cfg("app_search")
 
         val mathPrefix = mathCfg.prefix.ifBlank { "=" }
         val engineEntries = ENGINE_TEMPLATES.map { t ->
@@ -195,6 +206,62 @@ object MathStatsEngine {
                 isEnabled = waCfg.enabled
             ),
             ManualEntry(
+                signature = "${wikiCfg.prefix} <topic>",
+                category = "Launcher Commands",
+                description = "Fetches a concise Wikipedia summary card. Tap to open the article or copy the summary.",
+                example = "${wikiCfg.prefix} Euler's identity",
+                isEnabled = wikiCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${tzCfg.prefix} <city | zone> / <time> <zone>",
+                category = "Launcher Commands",
+                description = "Offline world clock showing current local time, UTC offset, offset difference, or converted time across zones.",
+                example = "${tzCfg.prefix} nyc",
+                isEnabled = tzCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${defCfg.prefix} <word>",
+                category = "Launcher Commands",
+                description = "Fetches word definitions, phonetic pronunciation, and example usage.",
+                example = "${defCfg.prefix} ephemeral",
+                isEnabled = defCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${noteCfg.prefix} <text>",
+                category = "Launcher Commands",
+                description = "Appends a timestamped Markdown note to your Quick Capture inbox (type '${noteCfg.prefix}' alone to view inbox).",
+                example = "${noteCfg.prefix} Read Feynman Ch. 4",
+                isEnabled = noteCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${qrCfg.prefix} <text | url | wifi>",
+                category = "Launcher Commands",
+                description = "Generates a scannable offline QR code inline. Tap to enlarge, save PNG, or share.",
+                example = "${qrCfg.prefix} https://example.com",
+                isEnabled = qrCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${emiCfg.prefix} <principal> <rate%> <tenure>",
+                category = "Launcher Commands",
+                description = "Computes monthly loan EMI, total interest payable, and an amortization milestone schedule.",
+                example = "${emiCfg.prefix} 500000 8.5 5y",
+                isEnabled = emiCfg.enabled
+            ),
+            ManualEntry(
+                signature = "days to <date> / today + 90d",
+                category = "Launcher Commands",
+                description = "Date arithmetic without a prefix: days until/since/between dates, weekday lookup, or add/subtract d/w/m/y.",
+                example = "days to 15 may",
+                isEnabled = true
+            ),
+            ManualEntry(
+                signature = "#RRGGBB / rgb(...) / hex <n> / bin <n>",
+                category = "Launcher Commands",
+                description = "Color & Base Inspector without a prefix: live swatch with RGB/HSL/contrast or instant hex/bin/oct/dec conversion.",
+                example = "#D4AF37",
+                isEnabled = true
+            ),
+            ManualEntry(
                 signature = "${webCfg.prefix} <terms>",
                 category = "Launcher Commands",
                 description = "Searches your configured web engine in your preferred browser ('query' also works).",
@@ -218,15 +285,64 @@ object MathStatsEngine {
             ManualEntry(
                 signature = "${callCfg.prefix} <nickname>",
                 category = "Launcher Commands",
-                description = "Calls a saved contact nickname directly ('@name' also fuzzy-searches device and saved contacts).",
+                description = "Calls favorite/pinned contacts with saved nicknames only ('@name' searches the full device contacts list).",
                 example = "${callCfg.prefix} Mom",
                 isEnabled = callCfg.enabled
             ),
             ManualEntry(
-                signature = "pallas / settings",
+                signature = "focus [profile] [duration] [+ dnd] / give up",
+                category = "Launcher Commands",
+                description = "Hides non-profile screens and apps (via negativa). Supports durations like '60', '3h', '+ dnd', and 'focus off' / 'give up' to end.",
+                example = "focus 60m",
+                isEnabled = true
+            ),
+            ManualEntry(
+                signature = "${filesCfg.prefix}<filename>",
+                category = "Launcher Commands",
+                description = "Fast local file search across Downloads, Documents, and media using Android's indexed MediaStore.",
+                example = "${filesCfg.prefix}report",
+                isEnabled = filesCfg.enabled
+            ),
+            ManualEntry(
+                signature = "show cal / ${calCfg.prefix} / agenda",
+                category = "Launcher Commands",
+                description = "Displays an offline 7-day calendar agenda inline using Android's CalendarContract.",
+                example = "show cal",
+                isEnabled = calCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${flCfg.prefix} [on | off]",
+                category = "Launcher Commands",
+                description = "Instant hardware flashlight toggle.",
+                example = flCfg.prefix,
+                isEnabled = flCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${dndCfg.prefix} [on | off]",
+                category = "Launcher Commands",
+                description = "Instant Android Do Not Disturb toggle.",
+                example = dndCfg.prefix,
+                isEnabled = dndCfg.enabled
+            ),
+            ManualEntry(
+                signature = "${appSearchCfg.prefix}<app> <query>",
+                category = "Launcher Commands",
+                description = "Searches directly inside installed apps: yt (YouTube), az (Amazon), sp (Spotify), gm (Maps), play, rd (Reddit), gh (GitHub), x.",
+                example = "${appSearchCfg.prefix}yt linear algebra",
+                isEnabled = appSearchCfg.enabled
+            ),
+            ManualEntry(
+                signature = "pallas [engine | cheatsheets | <topic> | <formula>]",
+                category = "Launcher Commands",
+                description = "Jumps to Settings, Guide tabs, specific cheatsheets (e.g. 'pallas stats', 'pallas info theory'), formulas ('pallas jensen'), Atlas, Notebook, or Studio.",
+                example = "pallas stats",
+                isEnabled = true
+            ),
+            ManualEntry(
+                signature = "settings",
                 category = "Launcher Commands",
                 description = "Quickly navigates to Pallas Launcher settings.",
-                example = "pallas",
+                example = "settings",
                 isEnabled = true
             )
         )
@@ -236,7 +352,9 @@ object MathStatsEngine {
 
     val MANUAL_ENTRIES: List<ManualEntry> = manualEntriesFor(CommandConfig.DEFAULTS)
 
-    internal val rng = Random()
+    private val threadLocalRng = ThreadLocal.withInitial { Random() }
+    internal val rng: Random
+        get() = threadLocalRng.get() ?: Random()
 
     @Volatile
     internal var lastEvaluatedValue: MathValue? = null
@@ -277,7 +395,8 @@ object MathStatsEngine {
         "nestlist", "foldlist", "break", "continue", "return",
         "plot", "logplot", "loglinearplot", "loglogplot", "parametricplot", "polarplot",
         "listplot", "listlineplot", "listlogplot", "listloglinearplot", "listloglogplot",
-        "histogram", "barchart", "piechart", "boxwhiskerchart"
+        "histogram", "barchart", "piechart", "boxwhiskerchart",
+        "texform"
     )
 
     internal val PAREN_CALL_FUNCS: Set<String> = KNOWN_FUNCS - setOf("n")
@@ -339,7 +458,6 @@ object MathStatsEngine {
         return !inQuotes && sq == 0 && cu == 0 && pa == 0
     }
 
-    @Synchronized
     fun evaluate(rawInput: String, prefix: String): MathEvalOutcome? {
         val trimmed = rawInput.trim()
         val hasPrefix = prefix.isNotEmpty() && (trimmed.startsWith("$prefix ", ignoreCase = true) ||
@@ -377,6 +495,13 @@ object MathStatsEngine {
         return hasDigit && hasOp && s.none { it.isLetter() && it !in "eEpiPI°" }
     }
 
+    data class KernelEvalResult(
+        val outcome: MathEvalOutcome?,
+        val latexOutput: String? = null,
+        val errorMessage: String? = null,
+        val updatedRng: Random = rng
+    )
+
     private fun tryEvaluateWolframExpression(expr: String, hasPrefix: Boolean = false): MathEvalOutcome? {
         if (expr.length > 1000) return null
         return try {
@@ -409,186 +534,7 @@ object MathStatsEngine {
                 lastEvaluatedValue = result
             }
             val console = ctx.printedLines.takeIf { it.isNotEmpty() }?.joinToString("\n")
-
-            when (result) {
-                is MathValue.NumberVal -> {
-                    if (result.value.isNaN()) return null
-                    val formatted = fmt(result.value)
-                    val isProb = ast is MathNode.CallNode && ast.funcName.lowercase(Locale.ROOT) in setOf("cdf", "survivalfunction")
-                    val displayValue = if (isProb) "= ${fmtProb(result.value)}" else "= $formatted"
-                    MathEvalOutcome(
-                        title = expr,
-                        primaryValue = displayValue,
-                        badge = "Math",
-                        subtitle = "",
-                        copyText = formatted,
-                        consoleOutput = console
-                    )
-                }
-                is MathValue.StringVal -> {
-                    MathEvalOutcome(
-                        title = expr,
-                        primaryValue = result.text,
-                        badge = "String",
-                        subtitle = "",
-                        copyText = result.text,
-                        consoleOutput = console
-                    )
-                }
-                is MathValue.BooleanVal -> {
-                    val str = if (result.value) "True" else "False"
-                    MathEvalOutcome(
-                        title = expr,
-                        primaryValue = "= $str",
-                        badge = "Boolean",
-                        subtitle = "",
-                        copyText = str,
-                        consoleOutput = console
-                    )
-                }
-                is MathValue.ListVal -> {
-                    val list = result.elements
-                    val fullList = if (list.isEmpty()) "{}" else list.joinToString(", ", prefix = "{", postfix = "}") { fmt(it) }
-                    val sum = if (list.isNotEmpty()) fmt(list.sum()) else "0"
-                    val mean = if (list.isNotEmpty()) fmt(list.average()) else "0"
-                    MathEvalOutcome(
-                        title = expr,
-                        primaryValue = fullList,
-                        badge = "List (${list.size})",
-                        subtitle = "Length: ${list.size} • Total: $sum • Mean: $mean",
-                        copyText = fullList,
-                        consoleOutput = console
-                    )
-                }
-                is MathValue.MixedListVal -> {
-                    val display = result.toDisplayString()
-                    val matrix = result.toNumericMatrix()
-                    val badge = if (matrix != null) {
-                        "Matrix (${matrix.size}×${matrix[0].size})"
-                    } else {
-                        "List (${result.items.size})"
-                    }
-                    val subtitle = if (matrix != null) {
-                        val rows = matrix.size
-                        val cols = matrix[0].size
-                        if (rows == cols && rows <= 4) {
-                            val tr = (0 until rows).sumOf { matrix[it][it] }
-                            "Trace: ${fmt(tr)}"
-                        } else {
-                            "${rows}×${cols} matrix"
-                        }
-                    } else {
-                        ""
-                    }
-                    MathEvalOutcome(
-                        title = expr,
-                        primaryValue = display,
-                        badge = badge,
-                        subtitle = subtitle,
-                        copyText = display,
-                        consoleOutput = console
-                    )
-                }
-                is MathValue.DistVal -> {
-                    val dist = result.dist
-                    val meanStr = if (dist.mean().isNaN()) "undefined" else fmt(dist.mean())
-                    val sdStr = if (dist.standardDeviation().isNaN()) "undefined" else fmt(dist.standardDeviation())
-                    val medStr = if (dist.median().isNaN()) "undefined" else fmt(dist.median())
-                    val varStr = if (dist.variance().isNaN()) "undefined" else fmt(dist.variance())
-                    MathEvalOutcome(
-                        title = "${dist.name}[${dist.paramsString}]",
-                        primaryValue = "Mean = $meanStr, SD = $sdStr",
-                        badge = dist.badge,
-                        subtitle = "Median: $medStr • Var: $varStr",
-                        copyText = "${dist.name}[${dist.paramsString}]",
-                        consoleOutput = console
-                    )
-                }
-                is MathValue.ExprVal -> {
-                    MathEvalOutcome(
-                        title = expr,
-                        primaryValue = "= ${result.text}",
-                        badge = "Formula",
-                        subtitle = "",
-                        copyText = result.text,
-                        consoleOutput = console
-                    )
-                }
-                is MathValue.SymbolVal -> {
-                    MathEvalOutcome(
-                        title = expr,
-                        primaryValue = result.name,
-                        badge = "Symbol",
-                        subtitle = "",
-                        copyText = result.name,
-                        consoleOutput = console
-                    )
-                }
-                is MathValue.NullVal -> {
-                    if (console != null) {
-                        MathEvalOutcome(
-                            title = expr,
-                            primaryValue = "",
-                            badge = "Print",
-                            subtitle = "",
-                            copyText = console,
-                            consoleOutput = console
-                        )
-                    } else {
-                        MathEvalOutcome(
-                            title = expr,
-                            primaryValue = "= Null",
-                            badge = "Done",
-                            subtitle = "",
-                            copyText = "Null",
-                            consoleOutput = null
-                        )
-                    }
-                }
-                is MathValue.FunctionVal -> {
-                    MathEvalOutcome(
-                        title = expr,
-                        primaryValue = "Function[...]",
-                        badge = "Function",
-                        subtitle = "",
-                        copyText = expr,
-                        consoleOutput = console
-                    )
-                }
-                is MathValue.DelayedVal -> {
-                    MathEvalOutcome(
-                        title = expr,
-                        primaryValue = ":= ...",
-                        badge = "Rule",
-                        subtitle = "",
-                        copyText = expr,
-                        consoleOutput = console
-                    )
-                }
-                is MathValue.RuleVal -> {
-                    val display = result.toDisplayString()
-                    MathEvalOutcome(
-                        title = expr,
-                        primaryValue = "= $display",
-                        badge = "Rule",
-                        subtitle = "",
-                        copyText = display,
-                        consoleOutput = console
-                    )
-                }
-                is MathValue.ChartVal -> {
-                    val c = result.chart
-                    MathEvalOutcome(
-                        title = c.title,
-                        primaryValue = "",
-                        badge = c.badge,
-                        subtitle = c.summary,
-                        copyText = expr,
-                        chart = c,
-                        consoleOutput = console
-                    )
-                }
-            }
+            formatOutcome(expr, result, ast, console)
         } catch (e: ComputationLimitException) {
             MathEvalOutcome(
                 title = expr,
@@ -599,6 +545,439 @@ object MathStatsEngine {
             )
         } catch (_: Throwable) {
             null
+        }
+    }
+
+    fun evaluateInKernel(
+        rawInput: String,
+        env: MutableMap<String, MathValue>,
+        maxSteps: Int = 100_000,
+        timeoutMs: Long = 1500L,
+        rng: Random = this.rng
+    ): KernelEvalResult {
+        val trimmed = rawInput.trim()
+        val expr = if (trimmed.startsWith("=") && !trimmed.startsWith("==")) {
+            trimmed.substring(1).trim()
+        } else {
+            trimmed
+        }
+        if (expr.isEmpty()) {
+            return KernelEvalResult(outcome = null, errorMessage = "Empty expression", updatedRng = rng)
+        }
+        if (expr.length > 10_000) {
+            return KernelEvalResult(outcome = null, errorMessage = "Expression exceeds 10,000 character limit", updatedRng = rng)
+        }
+
+        val texInner = extractTeXFormInner(expr)
+        if (texInner != null) {
+            if (texInner.isEmpty()) {
+                return KernelEvalResult(outcome = null, errorMessage = "TeXForm requires an expression", updatedRng = rng)
+            }
+            return try {
+                val tokens = Tokenizer(texInner).tokenize()
+                if (tokens.isEmpty()) {
+                    return KernelEvalResult(outcome = null, errorMessage = "Syntax error — empty TeXForm argument", updatedRng = rng)
+                }
+                val ast = WolframParser(tokens).parse()
+                    ?: return KernelEvalResult(outcome = null, errorMessage = "Syntax error — check brackets or expression", updatedRng = rng)
+                val ctx = ExecutionContext(
+                    maxSteps = maxSteps,
+                    timeoutMs = timeoutMs,
+                    env = env,
+                    rng = rng,
+                    isolated = true
+                )
+                val result = try {
+                    ast.eval(ctx)
+                } catch (r: ReturnException) {
+                    r.value
+                }
+                if (result !is MathValue.NullVal) {
+                    env["%"] = result
+                    env["out"] = result
+                }
+                val console = ctx.printedLines.takeIf { it.isNotEmpty() }?.joinToString("\n")
+                val tex = mathValueToLatex(result)
+                KernelEvalResult(
+                    outcome = MathEvalOutcome(
+                        title = expr,
+                        primaryValue = tex,
+                        badge = "LaTeX",
+                        subtitle = "",
+                        copyText = tex,
+                        consoleOutput = console
+                    ),
+                    latexOutput = tex,
+                    updatedRng = ctx.rng
+                )
+            } catch (e: ComputationLimitException) {
+                KernelEvalResult(outcome = null, errorMessage = e.message ?: "Computation timed out", updatedRng = rng)
+            } catch (t: Throwable) {
+                KernelEvalResult(outcome = null, errorMessage = t.message?.takeIf { it.isNotBlank() } ?: "Evaluation error", updatedRng = rng)
+            }
+        }
+
+        return try {
+            val tokens = Tokenizer(expr).tokenize()
+            if (tokens.isEmpty()) {
+                return KernelEvalResult(outcome = null, errorMessage = "Syntax error — check expression", updatedRng = rng)
+            }
+            val ast = WolframParser(tokens).parse()
+                ?: return KernelEvalResult(outcome = null, errorMessage = "Syntax error — check brackets or expression", updatedRng = rng)
+            val ctx = ExecutionContext(
+                maxSteps = maxSteps,
+                timeoutMs = timeoutMs,
+                env = env,
+                rng = rng,
+                isolated = true
+            )
+            val result = try {
+                ast.eval(ctx)
+            } catch (r: ReturnException) {
+                r.value
+            }
+            if (result !is MathValue.NullVal) {
+                env["%"] = result
+                env["out"] = result
+            }
+            val console = ctx.printedLines.takeIf { it.isNotEmpty() }?.joinToString("\n")
+            val outcome = formatOutcome(expr, result, ast, console)
+                ?: return KernelEvalResult(outcome = null, errorMessage = "Result is undefined (NaN)", updatedRng = ctx.rng)
+            KernelEvalResult(
+                outcome = outcome,
+                latexOutput = null,
+                errorMessage = null,
+                updatedRng = ctx.rng
+            )
+        } catch (e: ComputationLimitException) {
+            KernelEvalResult(outcome = null, errorMessage = e.message ?: "Computation timed out", updatedRng = rng)
+        } catch (t: Throwable) {
+            KernelEvalResult(outcome = null, errorMessage = t.message?.takeIf { it.isNotBlank() } ?: "Evaluation error", updatedRng = rng)
+        }
+    }
+
+    private fun extractTeXFormInner(expr: String): String? {
+        // 1. Prefix TeXForm[...]
+        if (expr.length >= 9 && expr.substring(0, 7).equals("texform", ignoreCase = true)) {
+            var idx = 7
+            while (idx < expr.length && expr[idx].isWhitespace()) idx++
+            if (idx < expr.length && expr[idx] == '[') {
+                var depth = 0
+                var inQuotes = false
+                var i = idx
+                while (i < expr.length) {
+                    val ch = expr[i]
+                    if (ch == '"' && (i == 0 || expr[i - 1] != '\\')) {
+                        inQuotes = !inQuotes
+                    } else if (!inQuotes) {
+                        if (ch == '[') depth++
+                        else if (ch == ']') {
+                            depth--
+                            if (depth == 0) {
+                                return if (i == expr.length - 1) {
+                                    expr.substring(idx + 1, i).trim()
+                                } else {
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    i++
+                }
+            }
+        }
+
+        // 2. Postfix ... // TeXForm (check last top-level //)
+        var sq = 0
+        var cu = 0
+        var pa = 0
+        var inQuotes = false
+        var lastSlashSlash = -1
+        var i = 0
+        while (i < expr.length - 1) {
+            val ch = expr[i]
+            if (ch == '"' && (i == 0 || expr[i - 1] != '\\')) {
+                inQuotes = !inQuotes
+                i++
+                continue
+            }
+            if (!inQuotes) {
+                when (ch) {
+                    '[' -> sq++
+                    ']' -> sq--
+                    '{' -> cu++
+                    '}' -> cu--
+                    '(' -> pa++
+                    ')' -> pa--
+                    '/' -> if (sq == 0 && cu == 0 && pa == 0 && expr[i + 1] == '/') {
+                        lastSlashSlash = i
+                        i += 2
+                        continue
+                    }
+                }
+            }
+            i++
+        }
+        if (lastSlashSlash > 0) {
+            val suffix = expr.substring(lastSlashSlash + 2).trim()
+            if (suffix.equals("texform", ignoreCase = true)) {
+                return expr.substring(0, lastSlashSlash).trim()
+            }
+        }
+        return null
+    }
+
+    fun mathValueToLatex(value: MathValue): String = when (value) {
+        is MathValue.NumberVal -> {
+            val v = value.value
+            when {
+                v.isNaN() -> "\\text{NaN}"
+                v == Double.POSITIVE_INFINITY -> "\\infty"
+                v == Double.NEGATIVE_INFINITY -> "-\\infty"
+                else -> {
+                    val s = fmt(v)
+                    val eIdx = s.indexOfAny(charArrayOf('e', 'E'))
+                    if (eIdx > 0) {
+                        val mantissa = s.substring(0, eIdx).trimEnd('0').trimEnd('.')
+                        val rawExp = s.substring(eIdx + 1)
+                        val expSign = if (rawExp.startsWith("-")) "-" else ""
+                        val expDigits = rawExp.trimStart('+', '-').trimStart('0').ifEmpty { "0" }
+                        "$mantissa \\times 10^{$expSign$expDigits}"
+                    } else {
+                        s
+                    }
+                }
+            }
+        }
+        is MathValue.BooleanVal -> if (value.value) "\\text{True}" else "\\text{False}"
+        is MathValue.StringVal -> {
+            val escaped = buildString(value.text.length) {
+                for (ch in value.text) {
+                    when (ch) {
+                        '\\' -> append("\\textbackslash{}")
+                        '{', '}', '%', '_', '&', '#', '$' -> append('\\').append(ch)
+                        else -> append(ch)
+                    }
+                }
+            }
+            "\\text{$escaped}"
+        }
+        is MathValue.ListVal -> {
+            val inner = value.elements.joinToString(", ") { mathValueToLatex(MathValue.NumberVal(it)) }
+            "\\left\\{ $inner \\right\\}"
+        }
+        is MathValue.MixedListVal -> {
+            val matrix = value.toNumericMatrix()
+            if (matrix != null) {
+                val rows = matrix.joinToString(" \\\\ ") { row ->
+                    row.joinToString(" & ") { mathValueToLatex(MathValue.NumberVal(it)) }
+                }
+                "\\begin{pmatrix} $rows \\end{pmatrix}"
+            } else {
+                val inner = value.items.joinToString(", ") { mathValueToLatex(it) }
+                "\\left\\{ $inner \\right\\}"
+            }
+        }
+        is MathValue.DistVal -> "\\operatorname{${value.dist.name}}\\left(${value.dist.paramsString}\\right)"
+        is MathValue.ExprVal -> value.text
+        is MathValue.SymbolVal -> when (value.name.lowercase(Locale.ROOT)) {
+            "pi", "π" -> "\\pi"
+            "e" -> "e"
+            "infinity", "inf", "∞" -> "\\infty"
+            else -> value.name
+        }
+        is MathValue.RuleVal -> "${value.lhs} \\to ${mathValueToLatex(value.rhs)}"
+        is MathValue.NullVal -> "\\text{Null}"
+        is MathValue.FunctionVal -> "\\text{Function[...]}"
+        is MathValue.DelayedVal -> "\\text{Delayed[...]}"
+        is MathValue.ChartVal -> "\\text{${value.chart.title}}"
+    }
+
+    private fun formatOutcome(
+        expr: String,
+        result: MathValue,
+        ast: MathNode?,
+        console: String?
+    ): MathEvalOutcome? = when (result) {
+        is MathValue.NumberVal -> {
+            if (result.value.isNaN()) {
+                null
+            } else {
+                val formatted = fmt(result.value)
+                val isProb = ast is MathNode.CallNode && ast.funcName.lowercase(Locale.ROOT) in setOf("cdf", "survivalfunction")
+                val displayValue = if (isProb) "= ${fmtProb(result.value)}" else "= $formatted"
+                MathEvalOutcome(
+                    title = expr,
+                    primaryValue = displayValue,
+                    badge = "Math",
+                    subtitle = "",
+                    copyText = formatted,
+                    consoleOutput = console
+                )
+            }
+        }
+        is MathValue.StringVal -> {
+            MathEvalOutcome(
+                title = expr,
+                primaryValue = result.text,
+                badge = "String",
+                subtitle = "",
+                copyText = result.text,
+                consoleOutput = console
+            )
+        }
+        is MathValue.BooleanVal -> {
+            val str = if (result.value) "True" else "False"
+            MathEvalOutcome(
+                title = expr,
+                primaryValue = "= $str",
+                badge = "Boolean",
+                subtitle = "",
+                copyText = str,
+                consoleOutput = console
+            )
+        }
+        is MathValue.ListVal -> {
+            val list = result.elements
+            val fullList = if (list.isEmpty()) "{}" else list.joinToString(", ", prefix = "{", postfix = "}") { fmt(it) }
+            val sum = if (list.isNotEmpty()) fmt(list.sum()) else "0"
+            val mean = if (list.isNotEmpty()) fmt(list.average()) else "0"
+            MathEvalOutcome(
+                title = expr,
+                primaryValue = fullList,
+                badge = "List (${list.size})",
+                subtitle = "Length: ${list.size} • Total: $sum • Mean: $mean",
+                copyText = fullList,
+                consoleOutput = console
+            )
+        }
+        is MathValue.MixedListVal -> {
+            val display = result.toDisplayString()
+            val matrix = result.toNumericMatrix()
+            val badge = if (matrix != null) {
+                "Matrix (${matrix.size}×${matrix[0].size})"
+            } else {
+                "List (${result.items.size})"
+            }
+            val subtitle = if (matrix != null) {
+                val rows = matrix.size
+                val cols = matrix[0].size
+                if (rows == cols && rows <= 4) {
+                    val tr = (0 until rows).sumOf { matrix[it][it] }
+                    "Trace: ${fmt(tr)}"
+                } else {
+                    "${rows}×${cols} matrix"
+                }
+            } else {
+                ""
+            }
+            MathEvalOutcome(
+                title = expr,
+                primaryValue = display,
+                badge = badge,
+                subtitle = subtitle,
+                copyText = display,
+                consoleOutput = console
+            )
+        }
+        is MathValue.DistVal -> {
+            val dist = result.dist
+            val meanStr = if (dist.mean().isNaN()) "undefined" else fmt(dist.mean())
+            val sdStr = if (dist.standardDeviation().isNaN()) "undefined" else fmt(dist.standardDeviation())
+            val medStr = if (dist.median().isNaN()) "undefined" else fmt(dist.median())
+            val varStr = if (dist.variance().isNaN()) "undefined" else fmt(dist.variance())
+            MathEvalOutcome(
+                title = "${dist.name}[${dist.paramsString}]",
+                primaryValue = "Mean = $meanStr, SD = $sdStr",
+                badge = dist.badge,
+                subtitle = "Median: $medStr • Var: $varStr",
+                copyText = "${dist.name}[${dist.paramsString}]",
+                consoleOutput = console
+            )
+        }
+        is MathValue.ExprVal -> {
+            MathEvalOutcome(
+                title = expr,
+                primaryValue = "= ${result.text}",
+                badge = "Formula",
+                subtitle = "",
+                copyText = result.text,
+                consoleOutput = console
+            )
+        }
+        is MathValue.SymbolVal -> {
+            MathEvalOutcome(
+                title = expr,
+                primaryValue = result.name,
+                badge = "Symbol",
+                subtitle = "",
+                copyText = result.name,
+                consoleOutput = console
+            )
+        }
+        is MathValue.NullVal -> {
+            if (console != null) {
+                MathEvalOutcome(
+                    title = expr,
+                    primaryValue = "",
+                    badge = "Print",
+                    subtitle = "",
+                    copyText = console,
+                    consoleOutput = console
+                )
+            } else {
+                MathEvalOutcome(
+                    title = expr,
+                    primaryValue = "= Null",
+                    badge = "Done",
+                    subtitle = "",
+                    copyText = "Null",
+                    consoleOutput = null
+                )
+            }
+        }
+        is MathValue.FunctionVal -> {
+            MathEvalOutcome(
+                title = expr,
+                primaryValue = "Function[...]",
+                badge = "Function",
+                subtitle = "",
+                copyText = expr,
+                consoleOutput = console
+            )
+        }
+        is MathValue.DelayedVal -> {
+            MathEvalOutcome(
+                title = expr,
+                primaryValue = ":= ...",
+                badge = "Rule",
+                subtitle = "",
+                copyText = expr,
+                consoleOutput = console
+            )
+        }
+        is MathValue.RuleVal -> {
+            val display = result.toDisplayString()
+            MathEvalOutcome(
+                title = expr,
+                primaryValue = "= $display",
+                badge = "Rule",
+                subtitle = "",
+                copyText = display,
+                consoleOutput = console
+            )
+        }
+        is MathValue.ChartVal -> {
+            val c = result.chart
+            MathEvalOutcome(
+                title = c.title,
+                primaryValue = "",
+                badge = c.badge,
+                subtitle = c.summary,
+                copyText = expr,
+                chart = c,
+                consoleOutput = console
+            )
         }
     }
 

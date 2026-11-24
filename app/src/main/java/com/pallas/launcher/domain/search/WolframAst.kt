@@ -317,7 +317,8 @@ class ExecutionContext(
     val timeoutMs: Long = 150L,
     val env: MutableMap<String, MathValue> = mutableMapOf(),
     val printedLines: MutableList<String> = mutableListOf(),
-    var rng: java.util.Random = MathStatsEngine.rng
+    var rng: java.util.Random = MathStatsEngine.rng,
+    val isolated: Boolean = false
 ) {
     val startTime = System.currentTimeMillis()
     var steps = 0
@@ -404,7 +405,7 @@ sealed interface MathNode {
     object OutNode : MathNode {
         override fun eval(ctx: ExecutionContext): MathValue {
             ctx.tick()
-            return ctx.env["%"] ?: ctx.env["out"] ?: MathStatsEngine.lastEvaluatedValue ?: MathValue.NumberVal(0.0)
+            return ctx.env["%"] ?: ctx.env["out"] ?: (if (ctx.isolated) null else MathStatsEngine.lastEvaluatedValue) ?: MathValue.NumberVal(0.0)
         }
     }
 
@@ -432,7 +433,7 @@ sealed interface MathNode {
                 "true" -> MathValue.BooleanVal(true)
                 "false" -> MathValue.BooleanVal(false)
                 "null" -> MathValue.NullVal
-                "%", "out" -> ctx.env["%"] ?: ctx.env["out"] ?: MathStatsEngine.lastEvaluatedValue ?: MathValue.NumberVal(0.0)
+                "%", "out" -> ctx.env["%"] ?: ctx.env["out"] ?: (if (ctx.isolated) null else MathStatsEngine.lastEvaluatedValue) ?: MathValue.NumberVal(0.0)
                 else -> MathValue.SymbolVal(name)
             }
         }

@@ -107,6 +107,15 @@ fun ClockDateSettingsPage(
                         valueFormat = { "${it.roundToInt()} dp" },
                         stepIncrement = 1f
                     )
+                    SettingsSliderRow(
+                        title = "Clock–Date Spacing",
+                        persistedValue = settings.clockDateSpacingDp.toFloat(),
+                        onValueChangeFinished = { value -> viewModel.updateSettings { copy(clockDateSpacingDp = value.roundToInt()) } },
+                        valueRange = 0f..48f,
+                        steps = 0,
+                        valueFormat = { "${it.roundToInt()} dp" },
+                        stepIncrement = 1f
+                    )
                 }
 
                 SettingsSectionHeader("Format & Metadata")

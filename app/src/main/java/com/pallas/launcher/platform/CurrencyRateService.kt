@@ -5,6 +5,10 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -177,6 +181,11 @@ object CurrencyRateService {
 
     private val ratesPerUsd = ConcurrentHashMap<String, Double>(BASELINE_USD_RATES)
 
+    private val _ratesVersion = MutableStateFlow(0)
+    val ratesVersion: StateFlow<Int> = _ratesVersion.asStateFlow()
+
+    fun getAllRatesSnapshot(): Map<String, Double> = HashMap(ratesPerUsd)
+
     fun init(context: Context) {
         val appContext = context.applicationContext
         if (prefs == null) {
@@ -203,6 +212,7 @@ object CurrencyRateService {
                 ratesPerUsd.putAll(loaded)
                 ratesPerUsd["USD"] = 1.0
                 lastUpdatedMs = stamp
+                _ratesVersion.update { it + 1 }
             }
         } catch (_: Exception) {
         }
@@ -257,12 +267,14 @@ object CurrencyRateService {
         }
         ratesPerUsd["USD"] = 1.0
         lastUpdatedMs = timestampMs
+        _ratesVersion.update { it + 1 }
     }
 
     fun resetToBaselineForTest() {
         ratesPerUsd.clear()
         ratesPerUsd.putAll(BASELINE_USD_RATES)
         lastUpdatedMs = 0L
+        _ratesVersion.update { it + 1 }
     }
 
     /** Triggers a silent, non-blocking refresh if not already in flight. */
@@ -312,6 +324,7 @@ object CurrencyRateService {
             val now = System.currentTimeMillis()
             lastUpdatedMs = now
             saveToPrefs(ratesPerUsd, now)
+            _ratesVersion.update { it + 1 }
             true
         } else {
             false
@@ -344,10 +357,12 @@ object CurrencyRateService {
             if (price.isFinite() && price > 0.0) {
                 if (from == "USD") {
                     ratesPerUsd[to] = price
-                    saveToPrefs(ratesPerUsd, System.currentTimeMillis())
+                    saveToPrefs(ratesPerUsd, lastUpdatedMs)
+                    _ratesVersion.update { it + 1 }
                 } else if (to == "USD") {
                     ratesPerUsd[from] = 1.0 / price
-                    saveToPrefs(ratesPerUsd, System.currentTimeMillis())
+                    saveToPrefs(ratesPerUsd, lastUpdatedMs)
+                    _ratesVersion.update { it + 1 }
                 }
                 price
             } else null

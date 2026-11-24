@@ -9,36 +9,60 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Process
+import android.os.SystemClock
 import android.os.UserHandle
 import android.provider.ContactsContract
+import android.provider.MediaStore
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pallas.launcher.data.repository.AppRepository
 import com.pallas.launcher.data.repository.AppUsageTracker
+import com.pallas.launcher.data.repository.FocusModeManager
+import com.pallas.launcher.data.repository.FocusState
+import com.pallas.launcher.data.repository.MacroScheduler
+import com.pallas.launcher.data.repository.QuickCaptureRepository
 import com.pallas.launcher.data.repository.ScreenRepository
 import com.pallas.launcher.data.repository.SettingsRepository
 import com.pallas.launcher.domain.model.AppItem
+import com.pallas.launcher.domain.model.FocusProfile
 import com.pallas.launcher.domain.model.GestureAction
 import com.pallas.launcher.domain.model.HomeScreen
 import com.pallas.launcher.domain.model.LauncherSettings
-import com.pallas.launcher.domain.model.WolframRequestTrigger
-import com.pallas.launcher.domain.model.WolframSubmitMode
+import com.pallas.launcher.domain.model.MacroRoutine
 import com.pallas.launcher.domain.model.NameLengthSortOrder
 import com.pallas.launcher.domain.model.ScreenApp
+import com.pallas.launcher.domain.model.WolframRequestTrigger
+import com.pallas.launcher.domain.model.WolframSubmitMode
 import com.pallas.launcher.domain.search.AsyncCommandRequest
+import com.pallas.launcher.domain.search.CALENDAR_GRANT_PERMISSION_ID
+import com.pallas.launcher.domain.search.FILES_GRANT_PERMISSION_ID
+import com.pallas.launcher.domain.search.FOCUS_OFF_COMMAND_ID
+import com.pallas.launcher.domain.search.FOCUS_ON_COMMAND_ID
+import com.pallas.launcher.domain.search.FOCUS_SETUP_COMMAND_ID
 import com.pallas.launcher.domain.search.LauncherSearchResult
+import com.pallas.launcher.domain.search.MACRO_COMMAND_PREFIX
 import com.pallas.launcher.domain.search.MathStatsEngine
+import com.pallas.launcher.domain.search.PALLAS_NAV_PREFIX
+import com.pallas.launcher.domain.search.PallasTarget
+import com.pallas.launcher.domain.search.QUICK_CAPTURE_INBOX_ID
 import com.pallas.launcher.domain.search.SETTINGS_COMMAND_ID
 import com.pallas.launcher.domain.search.SearchEngine
+import com.pallas.launcher.domain.search.SmartCommandEngine
 import com.pallas.launcher.domain.search.SmartCommandType
 import com.pallas.launcher.domain.search.WebSearchConfig
 import com.pallas.launcher.domain.search.isInertOnTap
 import com.pallas.launcher.platform.BatteryManagerHelper
 import com.pallas.launcher.platform.BrowserHelper
+import com.pallas.launcher.platform.CalendarAgendaService
 import com.pallas.launcher.platform.CurrencyRateService
 import com.pallas.launcher.platform.LiveCommandService
+import com.pallas.launcher.platform.LocalFileSearchService
+import com.pallas.launcher.platform.MacroExecutor
 import com.pallas.launcher.platform.SystemActionsManager
+import com.pallas.launcher.ui.apps.AppIconHelper
+import com.pallas.launcher.ui.apps.AppIconShape
+import com.pallas.launcher.ui.settings.SettingsSubpage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -63,7 +87,17 @@ sealed interface LauncherOverlay {
     data object None : LauncherOverlay
     data object Drawer : LauncherOverlay
     data object Search : LauncherOverlay
-    data object Settings : LauncherOverlay
+    data class Settings(
+        val initialSubpage: SettingsSubpage = SettingsSubpage.MAIN,
+        val guideTab: Int = 0,
+        val guideTopicId: String? = null,
+        val guideFormulaTitle: String? = null,
+        val launchId: Long = System.nanoTime()
+    ) : LauncherOverlay
+    data class LatexStudio(val initialContent: String? = null, val launchId: Long = System.nanoTime()) : LauncherOverlay
+    data class Notebook(val initialExpression: String? = null, val launchId: Long = System.nanoTime()) : LauncherOverlay
+    data object WorldAtlas : LauncherOverlay
+    data object QuickCaptureInbox : LauncherOverlay
     data object AppPicker : LauncherOverlay
     data class AppOptions(val app: ScreenApp, val returnToDrawer: Boolean = false) : LauncherOverlay
     data class SetAlias(val app: ScreenApp, val returnToDrawer: Boolean = false) : LauncherOverlay
@@ -78,14 +112,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val settingsRepository = SettingsRepository.getInstance(context)
     val appRepository = AppRepository.getInstance(context)
     private val screenRepository = ScreenRepository.getInstance(context)
+    private val quickCaptureRepository = QuickCaptureRepository.getInstance(context)
+    private val focusModeManager = FocusModeManager.getInstance(context)
+    private val macroScheduler = MacroScheduler(context)
 
     private val uiPrefs = context.getSharedPreferences("pallas_ui_state", Context.MODE_PRIVATE)
 
     val screens: StateFlow<List<HomeScreen>> = screenRepository.screens
     val customAppLabels: StateFlow<Map<String, String>> = screenRepository.customAppLabels
     val settings: StateFlow<LauncherSettings> = settingsRepository.settings
+    val focusState: StateFlow<FocusState> = focusModeManager.state
 
-    val installedApps: StateFlow<List<AppItem>> =
+    val activeFocusProfile: StateFlow<FocusProfile?> =
+        combine(focusState, settings) { fs, s ->
+            if (!fs.isActive) null
+            else s.focusProfiles.firstOrNull { it.id == fs.activeProfileId }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private val focusAllowedAppKeys: StateFlow<Set<String>?> =
+        combine(activeFocusProfile, screenRepository.screens) { profile, screenList ->
+            if (profile == null) null
+            else {
+                val screenKeys = screenList
+                    .filter { it.id in profile.allowedScreenIds }
+                    .flatMap { it.apps }
+                    .map { it.uniqueKey }
+                (screenKeys + profile.allowedAppKeys).toSet()
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val allInstalledApps: StateFlow<List<AppItem>> =
         combine(appRepository.installedApps, screenRepository.customAppLabels, screenRepository.screens) { apps, globalCustom, screenList ->
             val screenCustom = screenList.flatMap { it.apps }
                 .filter { !it.customLabel.isNullOrBlank() }
@@ -99,6 +155,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (!custom.isNullOrBlank()) app.copy(label = custom) else app
                 }
             }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, appRepository.installedApps.value)
+
+    val installedApps: StateFlow<List<AppItem>> =
+        combine(allInstalledApps, focusAllowedAppKeys) { apps, allowedKeys ->
+            if (allowedKeys == null) apps
+            else apps.filter { it.uniqueKey in allowedKeys || it.packageName in allowedKeys }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, appRepository.installedApps.value)
 
     val isAppsLoaded: StateFlow<Boolean> = appRepository.isLoaded
@@ -119,23 +181,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val appUsageScores: StateFlow<Map<String, Double>> = appUsageTracker.usageScoresSnapshot
 
     val displayScreens: StateFlow<List<HomeScreen>> =
-        combine(screenRepository.screens, settingsRepository.settings.map { it.nameLengthSortOrder }.distinctUntilChanged()) { list, order ->
-            if (order == NameLengthSortOrder.OFF) list
-            else list.map { it.copy(apps = screenRepository.sortAppsByNameLength(it.apps, order)) }
+        combine(
+            screenRepository.screens,
+            settingsRepository.settings.map { it.nameLengthSortOrder }.distinctUntilChanged(),
+            activeFocusProfile,
+            allInstalledApps
+        ) { list, order, profile, allApps ->
+            val focusFiltered = if (profile == null) {
+                list
+            } else {
+                val selectedScreens = list.filter { it.id in profile.allowedScreenIds }
+                if (selectedScreens.isNotEmpty()) {
+                    selectedScreens
+                } else {
+                    val byKey = allApps.associateBy { it.uniqueKey }
+                    val extraApps = profile.allowedAppKeys.mapNotNull { key ->
+                        byKey[key]?.let { app ->
+                            ScreenApp(
+                                uniqueKey = app.uniqueKey,
+                                packageName = app.packageName,
+                                activityName = app.activityName,
+                                customLabel = null,
+                                defaultLabel = app.label,
+                                userSerialNumber = app.userSerialNumber,
+                                userHandle = app.userHandle
+                            )
+                        }
+                    }
+                    listOf(HomeScreen(id = "focus_virtual", name = profile.name, apps = extraApps))
+                }
+            }
+            if (order == NameLengthSortOrder.OFF) focusFiltered
+            else focusFiltered.map { it.copy(apps = screenRepository.sortAppsByNameLength(it.apps, order)) }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, screenRepository.screens.value)
 
     private fun savedScreenIndex(): Int {
         val id = uiPrefs.getString(KEY_CURRENT_SCREEN_ID, null) ?: return 0
-        return screenRepository.screens.value.indexOfFirst { it.id == id }.coerceAtLeast(0)
+        return displayScreens.value.indexOfFirst { it.id == id }.coerceAtLeast(0)
     }
 
     private fun persistCurrentScreen() {
-        val id = screens.value.getOrNull(_currentScreenIndex.value)?.id ?: return
+        val id = displayScreens.value.getOrNull(_currentScreenIndex.value)?.id ?: return
+        if (id == "focus_virtual") return
         uiPrefs.edit().putString(KEY_CURRENT_SCREEN_ID, id).apply()
     }
 
     private val _currentScreenIndex = MutableStateFlow(savedScreenIndex())
-    val currentScreenIndex: StateFlow<Int> = combine(_currentScreenIndex, screenRepository.screens) { index, screenList ->
+    val currentScreenIndex: StateFlow<Int> = combine(_currentScreenIndex, displayScreens) { index, screenList ->
         if (screenList.isEmpty()) 0
         else index.coerceIn(0, screenList.size - 1)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, _currentScreenIndex.value)
@@ -210,21 +302,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
                 val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
                 if (level >= 0 && scale > 0) {
-                    _batteryLevel.value = (level * 100 / scale)
-                    updateTimeAndDate()
+                    val pct = level * 100 / scale
+                    if (pct != _batteryLevel.value) {
+                        _batteryLevel.value = pct
+                    }
                 }
             }
         }
     }
 
+    private fun syncFocusAndRunEnterMacro() {
+        val scheduledActivated = focusModeManager.syncState(settings.value)
+        if (scheduledActivated != null) {
+            runOnEnterMacro(scheduledActivated)
+        }
+    }
+
+    private fun runOnEnterMacro(profile: FocusProfile) {
+        val macroId = profile.onEnterMacroId ?: return
+        settings.value.macros.firstOrNull { it.id == macroId }?.let { executeMacro(it) }
+    }
+
     private val timeTickReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
             updateTimeAndDate()
+            syncFocusAndRunEnterMacro()
+            runDueScheduledMacros()
         }
     }
 
     init {
         CurrencyRateService.init(context)
+        syncFocusAndRunEnterMacro()
+        runDueScheduledMacros()
         ContextCompat.registerReceiver(
             context,
             batteryReceiver,
@@ -247,34 +357,74 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             settings.collect {
                 updateTimeAndDate()
+                syncFocusAndRunEnterMacro()
             }
         }
 
         viewModelScope.launch {
-            screens.collect { screenList ->
+            displayScreens.collect { screenList ->
                 if (screenList.isEmpty()) return@collect
                 val savedId = uiPrefs.getString(KEY_CURRENT_SCREEN_ID, null)
                 val byId = savedId?.let { id -> screenList.indexOfFirst { it.id == id } } ?: -1
                 _currentScreenIndex.value = if (byId >= 0) byId else _currentScreenIndex.value.coerceIn(0, screenList.size - 1)
-                persistCurrentScreen()
+                if (activeFocusProfile.value == null) {
+                    persistCurrentScreen()
+                }
             }
         }
 
         viewModelScope.launch {
-            combine(appRepository.installedApps, settings, screens, customAppLabels) { apps, s, screenList, globalCustom ->
+            combine(
+                appRepository.installedApps,
+                settings.map { it.customAliases }.distinctUntilChanged(),
+                screens,
+                customAppLabels,
+                focusAllowedAppKeys
+            ) { apps, aliases, screenList, globalCustom, allowedKeys ->
+                val filteredApps = if (allowedKeys == null) apps
+                else apps.filter { it.uniqueKey in allowedKeys || it.packageName in allowedKeys }
                 val screenCustom = screenList.flatMap { it.apps }
                     .filter { !it.customLabel.isNullOrBlank() }
                     .associate { it.uniqueKey to it.customLabel!! }
-                Triple(apps, s.customAliases, screenCustom + globalCustom)
+                Triple(filteredApps, aliases, screenCustom + globalCustom)
             }.distinctUntilChanged().collect { (apps, aliases, custom) -> searchEngine.updateIndex(apps, aliases, custom) }
         }
 
         viewModelScope.launch {
-            installedApps.collect { apps ->
+            allInstalledApps.collect { apps ->
                 if (apps.isNotEmpty()) {
-                    appUsageTracker.migratePackageKeysToUniqueKeys(apps)
-                    settingsRepository.migrateHiddenApps(apps)
+                    if (!startupMigrationsDone) {
+                        startupMigrationsDone = true
+                        appUsageTracker.migratePackageKeysToUniqueKeys(apps)
+                        settingsRepository.migrateHiddenApps(apps)
+                    }
+                    prewarmIcons(apps)
                 }
+            }
+        }
+    }
+
+    private var startupMigrationsDone = false
+    private var lastContactsRefreshElapsedMs = 0L
+    private var iconsPrewarmed = false
+    private fun prewarmIcons(apps: List<AppItem>) {
+        if (iconsPrewarmed) return
+        iconsPrewarmed = true
+        viewModelScope.launch(Dispatchers.Default) {
+            val homeKeys = screenRepository.screens.value.flatMap { it.apps }.map { it.uniqueKey }.toSet()
+            val recentKeys = appUsageTracker.recentAppKeys.value.take(12).toSet()
+            val priorityKeys = homeKeys + recentKeys
+            val toWarm = apps.filter { it.uniqueKey in priorityKeys }.take(24)
+            for (app in toWarm) {
+                AppIconHelper.getAppIcon(
+                    context = context,
+                    packageName = app.packageName,
+                    activityName = app.activityName,
+                    userHandle = app.userHandle,
+                    userSerialNumber = app.userSerialNumber,
+                    uniqueKey = app.uniqueKey,
+                    iconShape = AppIconShape.CIRCLE
+                )
             }
         }
     }
@@ -285,7 +435,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onScreenSwiped(direction: Int) {
-        val screenList = screens.value
+        val screenList = displayScreens.value
         if (screenList.size <= 1) return
         val current = _currentScreenIndex.value.coerceIn(0, screenList.size - 1)
 
@@ -302,7 +452,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setScreenIndex(index: Int) {
-        if (index in screens.value.indices) {
+        if (index in displayScreens.value.indices) {
             _screenSwipeDirection.value = if (index >= _currentScreenIndex.value) 1 else -1
             _currentScreenIndex.value = index
             persistCurrentScreen()
@@ -324,7 +474,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openSearch() {
+        if (_overlay.value !is LauncherOverlay.Search) {
+            liveCommandJob?.cancel()
+            liveCommandJob = null
+            _searchQuery.value = ""
+            _searchResults.value = emptyList()
+        }
         _overlay.value = LauncherOverlay.Search
+        syncFocusAndRunEnterMacro()
     }
 
     fun closeSearch() {
@@ -341,13 +498,79 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (active) openSearch() else closeSearch()
     }
 
-    fun openSettings() {
-        _overlay.value = LauncherOverlay.Settings
+    fun openSettings(
+        initialSubpage: SettingsSubpage = SettingsSubpage.MAIN,
+        guideTab: Int = 0,
+        guideTopicId: String? = null,
+        guideFormulaTitle: String? = null
+    ) {
+        _overlay.value = LauncherOverlay.Settings(
+            initialSubpage = initialSubpage,
+            guideTab = guideTab,
+            guideTopicId = guideTopicId,
+            guideFormulaTitle = guideFormulaTitle
+        )
     }
 
     fun closeSettings() {
         if (_overlay.value is LauncherOverlay.Settings) {
             _currentScreenIndex.value = savedScreenIndex()
+            _overlay.value = LauncherOverlay.None
+        }
+    }
+
+    fun openLatexStudio(initialContent: String? = null) {
+        liveCommandJob?.cancel()
+        liveCommandJob = null
+        _searchQuery.value = ""
+        _searchResults.value = emptyList()
+        _overlay.value = LauncherOverlay.LatexStudio(initialContent = initialContent)
+    }
+
+    fun closeLatexStudio() {
+        if (_overlay.value is LauncherOverlay.LatexStudio) {
+            _overlay.value = LauncherOverlay.None
+        }
+    }
+
+    fun openNotebook(initialExpression: String? = null) {
+        liveCommandJob?.cancel()
+        liveCommandJob = null
+        _searchQuery.value = ""
+        _searchResults.value = emptyList()
+        _overlay.value = LauncherOverlay.Notebook(initialExpression = initialExpression)
+    }
+
+    fun closeNotebook() {
+        if (_overlay.value is LauncherOverlay.Notebook) {
+            _overlay.value = LauncherOverlay.None
+        }
+    }
+
+    fun openAtlas() {
+        liveCommandJob?.cancel()
+        liveCommandJob = null
+        _searchQuery.value = ""
+        _searchResults.value = emptyList()
+        _overlay.value = LauncherOverlay.WorldAtlas
+    }
+
+    fun closeAtlas() {
+        if (_overlay.value is LauncherOverlay.WorldAtlas) {
+            _overlay.value = LauncherOverlay.None
+        }
+    }
+
+    fun openQuickCaptureInbox() {
+        liveCommandJob?.cancel()
+        liveCommandJob = null
+        _searchQuery.value = ""
+        _searchResults.value = emptyList()
+        _overlay.value = LauncherOverlay.QuickCaptureInbox
+    }
+
+    fun closeQuickCaptureInbox() {
+        if (_overlay.value is LauncherOverlay.QuickCaptureInbox) {
             _overlay.value = LauncherOverlay.None
         }
     }
@@ -418,6 +641,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onSearchQueryChanged(query: String) {
+        if (_overlay.value !is LauncherOverlay.Search) return
         _searchQuery.value = query
         liveCommandJob?.cancel()
         liveCommandJob = null
@@ -426,42 +650,161 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val s = settings.value
-        val contacts = mergeSearchContacts(s.searchContacts, deviceContacts.value)
+        val capturedNotes = quickCaptureRepository.notes.value
+        val fs = focusState.value
+        val activeProfile = activeFocusProfile.value
+        val webConfig = webSearchConfig(s)
         val (rawImmediate, asyncRequest) = searchEngine.searchAll(
-            query,
-            contacts,
-            webSearchConfig(s),
-            s.commandConfigs,
-            s.defaultWeatherCity
+            rawQuery = query,
+            contacts = s.searchContacts,
+            webSearch = webConfig,
+            configs = s.commandConfigs,
+            defaultWeatherCity = s.defaultWeatherCity,
+            deviceContacts = deviceContacts.value,
+            is24HourClock = s.is24HourClock,
+            dateArithmeticEnabled = s.dateArithmeticEnabled,
+            colorBaseInspectorEnabled = s.colorBaseInspectorEnabled,
+            quickCaptureCount = capturedNotes.size,
+            quickCapturePreview = capturedNotes.firstOrNull()?.text.orEmpty(),
+            focusProfiles = s.focusProfiles,
+            defaultFocusProfileId = s.defaultFocusProfileId,
+            isFocusActive = fs.isActive,
+            activeFocusProfile = activeProfile,
+            focusAllowedAppKeys = focusAllowedAppKeys.value,
+            macros = s.macros,
+            isDndEnabled = SystemActionsManager.isDndEnabled(context),
+            hasCalendarPermission = CalendarAgendaService.hasCalendarPermission(context),
+            hasFileSearchPermission = LocalFileSearchService.hasFileSearchAccess(context)
         )
-        val waQuery = wolframArgument(query, s)
-        val immediate = if (waQuery != null && asyncRequest is AsyncCommandRequest.Wolfram) {
+        val browserPkg = webConfig.browserPackage
+        val waDelaySec = s.wolframIdleDelaySeconds.coerceIn(1, 5)
+        val wikiDefDelaySec = s.wikiDefIdleDelaySeconds.coerceIn(1, 5)
+        val stockWxDelaySec = s.stockWeatherIdleDelaySeconds.coerceIn(1, 5)
+
+        val immediate = rawImmediate.map { item ->
+            if (item !is LauncherSearchResult.RichCard) return@map item
             when {
-                s.wolframSubmitMode == WolframSubmitMode.WEBSITE -> rawImmediate.map {
-                    if (it is LauncherSearchResult.RichCard && it.type == SmartCommandType.WOLFRAM && it.isLoading) {
-                        it.copy(
+                item.type == SmartCommandType.WOLFRAM && asyncRequest is AsyncCommandRequest.Wolfram -> {
+                    val waArg = asyncRequest.query
+                    when {
+                        s.wolframSubmitMode == WolframSubmitMode.WEBSITE -> item.copy(
+                            id = "wa_web_$waArg",
                             isLoading = false,
-                            primaryValue = "Open in browser",
+                            primaryValue = "Wolfram|Alpha",
                             subtitle = "",
                             execute = { ctx ->
-                                SystemActionsManager.openUrl(ctx, "https://www.wolframalpha.com/input?i=${android.net.Uri.encode(waQuery)}")
+                                SystemActionsManager.openUrl(
+                                    ctx,
+                                    "https://www.wolframalpha.com/input?i=${android.net.Uri.encode(waArg)}",
+                                    browserPkg
+                                )
                             }
                         )
-                    } else it
-                }
-                s.wolframRequestTrigger == WolframRequestTrigger.ENTER -> rawImmediate.map {
-                    if (it is LauncherSearchResult.RichCard && it.type == SmartCommandType.WOLFRAM && it.isLoading) {
-                        it.copy(
+                        s.wolframRequestTrigger == WolframRequestTrigger.ENTER -> item.copy(
+                            id = "wa_pending_$waArg",
                             isLoading = false,
-                            primaryValue = "Query Wolfram|Alpha",
+                            primaryValue = "Wolfram|Alpha",
                             subtitle = "",
                             execute = {}
                         )
-                    } else it
+                        else -> item.copy(
+                            id = "wa_waiting_$waArg",
+                            isLoading = true,
+                            primaryValue = "",
+                            subtitle = "querying Wolfram|Alpha in ${waDelaySec}s…"
+                        )
+                    }
                 }
-                else -> rawImmediate
+                item.type == SmartCommandType.WIKI && asyncRequest is AsyncCommandRequest.Wiki -> {
+                    val wikiArg = asyncRequest.query
+                    if (s.wikiDefRequestTrigger == WolframRequestTrigger.ENTER) {
+                        item.copy(
+                            id = "wiki_pending_$wikiArg",
+                            isLoading = false,
+                            primaryValue = "Wikipedia",
+                            subtitle = "",
+                            badgeText = "Wikipedia",
+                            isBadgePositive = true,
+                            execute = {}
+                        )
+                    } else {
+                        item.copy(
+                            id = "wiki_waiting_$wikiArg",
+                            isLoading = true,
+                            primaryValue = "",
+                            subtitle = "fetching Wikipedia in ${wikiDefDelaySec}s…"
+                        )
+                    }
+                }
+                item.type == SmartCommandType.DEFINE && asyncRequest is AsyncCommandRequest.Define -> {
+                    val defWord = asyncRequest.word
+                    if (s.wikiDefRequestTrigger == WolframRequestTrigger.ENTER) {
+                        item.copy(
+                            id = "def_pending_$defWord",
+                            isLoading = false,
+                            primaryValue = "Dictionary",
+                            subtitle = "",
+                            badgeText = "Define",
+                            isBadgePositive = true,
+                            execute = {}
+                        )
+                    } else {
+                        item.copy(
+                            id = "def_waiting_$defWord",
+                            isLoading = true,
+                            primaryValue = "",
+                            subtitle = "looking up definition in ${wikiDefDelaySec}s…"
+                        )
+                    }
+                }
+                item.type == SmartCommandType.FINANCE && asyncRequest is AsyncCommandRequest.Finance -> {
+                    val finArg = asyncRequest.query
+                    if (s.stockWeatherRequestTrigger == WolframRequestTrigger.ENTER) {
+                        item.copy(
+                            id = "fin_pending_$finArg",
+                            isLoading = false,
+                            primaryValue = "Markets",
+                            subtitle = "Press Enter or tap to fetch ${finArg.uppercase()}",
+                            badgeText = "Stock",
+                            isBadgePositive = true,
+                            execute = {}
+                        )
+                    } else {
+                        item.copy(
+                            id = "fin_waiting_$finArg",
+                            isLoading = true,
+                            primaryValue = "",
+                            subtitle = "fetching market quote in ${stockWxDelaySec}s…"
+                        )
+                    }
+                }
+                (item.type == SmartCommandType.WEATHER || item.type == SmartCommandType.SOLAR) &&
+                    asyncRequest is AsyncCommandRequest.Weather -> {
+                    val cityArg = asyncRequest.city
+                    val isSolar = asyncRequest.isSolarOnly
+                    val keyPrefix = if (isSolar) "solar" else "wx"
+                    if (s.stockWeatherRequestTrigger == WolframRequestTrigger.ENTER) {
+                        item.copy(
+                            id = "${keyPrefix}_pending_$cityArg",
+                            isLoading = false,
+                            primaryValue = if (isSolar) "Sunrise & Sunset" else "Weather",
+                            subtitle = "Press Enter or tap for $cityArg",
+                            badgeText = if (isSolar) "Solar" else "Weather",
+                            isBadgePositive = true,
+                            execute = {}
+                        )
+                    } else {
+                        item.copy(
+                            id = "${keyPrefix}_waiting_$cityArg",
+                            isLoading = true,
+                            primaryValue = "",
+                            subtitle = if (isSolar) "calculating solar times in ${stockWxDelaySec}s…" else "fetching weather in ${stockWxDelaySec}s…"
+                        )
+                    }
+                }
+                else -> item
             }
-        } else rawImmediate
+        }
         _searchResults.value = immediate
 
         if (immediate.any { it is LauncherSearchResult.RichCard && it.type == SmartCommandType.CONVERT } &&
@@ -476,22 +819,108 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         if (s.autoLaunchSingleMatch && asyncRequest == null && query.trim().length >= 2) {
             val only = immediate.singleOrNull()
-            if (only is LauncherSearchResult.App && only.score >= AUTO_LAUNCH_MIN_SCORE) {
+            if (only is LauncherSearchResult.App &&
+                only.score >= AUTO_LAUNCH_MIN_SCORE &&
+                !SmartCommandEngine.hasPotentialCommandOrAliasMatch(
+                    rawQuery = query,
+                    configs = s.commandConfigs,
+                    activeFocusProfile = activeProfile,
+                    macros = s.macros,
+                    customAliases = s.customAliases,
+                    contacts = s.searchContacts,
+                    matchedAppUniqueKey = only.app.uniqueKey,
+                    matchedAppPackage = only.app.packageName
+                )
+            ) {
                 launchSearchResult(only)
                 return
             }
         }
 
-        if (asyncRequest != null && (asyncRequest !is AsyncCommandRequest.Wolfram ||
-                (s.wolframRequestTrigger == WolframRequestTrigger.IDLE && s.wolframSubmitMode == WolframSubmitMode.API))) {
+        val shouldAutoFetch = when (asyncRequest) {
+            null -> false
+            is AsyncCommandRequest.Wolfram ->
+                s.wolframSubmitMode == WolframSubmitMode.API && s.wolframRequestTrigger == WolframRequestTrigger.IDLE
+            is AsyncCommandRequest.Wiki, is AsyncCommandRequest.Define ->
+                s.wikiDefRequestTrigger == WolframRequestTrigger.IDLE
+            is AsyncCommandRequest.Finance, is AsyncCommandRequest.Weather ->
+                s.stockWeatherRequestTrigger == WolframRequestTrigger.IDLE
+            else -> true
+        }
+        if (asyncRequest != null && shouldAutoFetch) {
             liveCommandJob = viewModelScope.launch {
                 val debounceMs = when (asyncRequest) {
-                    is AsyncCommandRequest.Wolfram -> s.wolframIdleDelaySeconds * 1000L
+                    is AsyncCommandRequest.Wolfram -> waDelaySec * 1000L
+                    is AsyncCommandRequest.Wiki, is AsyncCommandRequest.Define -> wikiDefDelaySec * 1000L
+                    is AsyncCommandRequest.Finance, is AsyncCommandRequest.Weather -> stockWxDelaySec * 1000L
                     is AsyncCommandRequest.MathPlot -> 260L
-                    else -> 180L
+                    is AsyncCommandRequest.LocalFiles -> 140L
+                    is AsyncCommandRequest.CalendarAgenda -> 0L
                 }
-                delay(debounceMs)
+                if (debounceMs > 0L) delay(debounceMs)
                 if (_searchQuery.value != query) return@launch
+                when (asyncRequest) {
+                    is AsyncCommandRequest.Wolfram -> {
+                        _searchResults.value = _searchResults.value.map { cur ->
+                            if (cur is LauncherSearchResult.RichCard && cur.type == SmartCommandType.WOLFRAM) {
+                                cur.copy(id = "wa_fetching_${asyncRequest.query}", isLoading = true, subtitle = "querying Wolfram|Alpha…")
+                            } else cur
+                        }
+                    }
+                    is AsyncCommandRequest.Wiki -> {
+                        _searchResults.value = _searchResults.value.map { cur ->
+                            if (cur is LauncherSearchResult.RichCard && cur.type == SmartCommandType.WIKI) {
+                                cur.copy(id = "wiki_fetching_${asyncRequest.query}", isLoading = true, subtitle = "fetching Wikipedia summary…")
+                            } else cur
+                        }
+                    }
+                    is AsyncCommandRequest.Define -> {
+                        _searchResults.value = _searchResults.value.map { cur ->
+                            if (cur is LauncherSearchResult.RichCard && cur.type == SmartCommandType.DEFINE) {
+                                cur.copy(id = "def_fetching_${asyncRequest.word}", isLoading = true, subtitle = "looking up definition…")
+                            } else cur
+                        }
+                    }
+                    is AsyncCommandRequest.Finance -> {
+                        _searchResults.value = _searchResults.value.map { cur ->
+                            if (cur is LauncherSearchResult.RichCard && cur.type == SmartCommandType.FINANCE) {
+                                cur.copy(id = "fin_fetching_${asyncRequest.query}", isLoading = true, subtitle = "fetching market quote…")
+                            } else cur
+                        }
+                    }
+                    is AsyncCommandRequest.Weather -> {
+                        val keyPrefix = if (asyncRequest.isSolarOnly) "solar" else "wx"
+                        val cardType = if (asyncRequest.isSolarOnly) SmartCommandType.SOLAR else SmartCommandType.WEATHER
+                        _searchResults.value = _searchResults.value.map { cur ->
+                            if (cur is LauncherSearchResult.RichCard && cur.type == cardType) {
+                                cur.copy(
+                                    id = "${keyPrefix}_fetching_${asyncRequest.city}",
+                                    isLoading = true,
+                                    subtitle = if (asyncRequest.isSolarOnly) "calculating solar times…" else "fetching current conditions…"
+                                )
+                            } else cur
+                        }
+                    }
+                    else -> Unit
+                }
+                if (asyncRequest is AsyncCommandRequest.LocalFiles) {
+                    val files = LocalFileSearchService.searchFiles(context, asyncRequest.query)
+                    if (_searchQuery.value != query) return@launch
+                    _searchResults.value = _searchResults.value.flatMap { cur ->
+                        if (cur is LauncherSearchResult.RichCard && cur.type == SmartCommandType.FILE && cur.isLoading) {
+                            if (files.isNotEmpty()) files
+                            else listOf(
+                                LauncherSearchResult.RichCard(
+                                    id = "files_empty_${asyncRequest.query}",
+                                    type = SmartCommandType.FILE,
+                                    title = "Files matching \"${asyncRequest.query}\"",
+                                    subtitle = "No matching files found"
+                                )
+                            )
+                        } else listOf(cur)
+                    }
+                    return@launch
+                }
                 val resolved = resolveLiveCommand(asyncRequest)
                 if (_searchQuery.value != query) return@launch
                 _searchResults.value = _searchResults.value.map { current ->
@@ -501,7 +930,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Handles Enter/search-button for explicit Wolfram queries or pending debounced plot evaluations; all other searches keep normal selection behavior. */
+    /** Handles Enter or card tap for deferred/pending API lookups (Wolfram, Wikipedia, Dictionary) and Math plots. */
     fun submitWolframQuery(): Boolean {
         val loadingPlot = _searchResults.value.firstOrNull {
             it is LauncherSearchResult.RichCard && it.type == SmartCommandType.MATH_STATS && it.isLoading
@@ -522,47 +951,163 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val s = settings.value
         val query = _searchQuery.value
-        val argument = wolframArgument(query, s) ?: return false
+
+        triggerDeferredApiCard(
+            query = query,
+            cardType = SmartCommandType.WIKI,
+            prefixKey = "wiki_fetching_",
+            pendingKey = "wiki_pending_",
+            waitingKey = "wiki_waiting_",
+            loadingSubtitle = "fetching Wikipedia summary…"
+        ) {
+            val arg = commandArgument(query, s, "wiki") ?: return@triggerDeferredApiCard null
+            AsyncCommandRequest.Wiki(arg) to "wiki_fetching_$arg"
+        }?.let { return it }
+
+        triggerDeferredApiCard(
+            query = query,
+            cardType = SmartCommandType.DEFINE,
+            prefixKey = "def_fetching_",
+            pendingKey = "def_pending_",
+            waitingKey = "def_waiting_",
+            loadingSubtitle = "looking up definition…"
+        ) {
+            val arg = commandArgument(query, s, "def") ?: return@triggerDeferredApiCard null
+            AsyncCommandRequest.Define(arg) to "def_fetching_$arg"
+        }?.let { return it }
+
+        triggerDeferredApiCard(
+            query = query,
+            cardType = SmartCommandType.FINANCE,
+            prefixKey = "fin_fetching_",
+            pendingKey = "fin_pending_",
+            waitingKey = "fin_waiting_",
+            loadingSubtitle = "fetching market quote…"
+        ) {
+            val arg = commandArgument(query, s, "stock") ?: return@triggerDeferredApiCard null
+            AsyncCommandRequest.Finance(arg) to "fin_fetching_$arg"
+        }?.let { return it }
+
+        triggerDeferredApiCard(
+            query = query,
+            cardType = SmartCommandType.WEATHER,
+            prefixKey = "wx_fetching_",
+            pendingKey = "wx_pending_",
+            waitingKey = "wx_waiting_",
+            loadingSubtitle = "fetching current conditions…"
+        ) {
+            val fallbackCity = s.defaultWeatherCity.trim().ifEmpty { LauncherSettings.DEFAULT_WEATHER_CITY }
+            val arg = commandArgument(query, s, "weather")
+                ?: bareOrPrefixedArg(query, "weather")
+                ?: return@triggerDeferredApiCard null
+            val city = arg.ifEmpty { fallbackCity }
+            AsyncCommandRequest.Weather(city, isSolarOnly = false) to "wx_fetching_$city"
+        }?.let { return it }
+
+        triggerDeferredApiCard(
+            query = query,
+            cardType = SmartCommandType.SOLAR,
+            prefixKey = "solar_fetching_",
+            pendingKey = "solar_pending_",
+            waitingKey = "solar_waiting_",
+            loadingSubtitle = "calculating solar times…"
+        ) {
+            val fallbackCity = s.defaultWeatherCity.trim().ifEmpty { LauncherSettings.DEFAULT_WEATHER_CITY }
+            val arg = commandArgument(query, s, "solar")
+                ?: bareOrPrefixedArg(query, "sunrise")
+                ?: bareOrPrefixedArg(query, "sunset")
+                ?: return@triggerDeferredApiCard null
+            val city = arg.ifEmpty { fallbackCity }
+            AsyncCommandRequest.Weather(city, isSolarOnly = true) to "solar_fetching_$city"
+        }?.let { return it }
+
+        val waArg = commandArgument(query, s, "wolfram") ?: return false
         if (s.wolframSubmitMode == WolframSubmitMode.WEBSITE) {
             liveCommandJob?.cancel()
             dismissOverlay()
-            SystemActionsManager.openUrl(context, "https://www.wolframalpha.com/input?i=${android.net.Uri.encode(argument)}")
+            SystemActionsManager.openUrl(
+                context,
+                "https://www.wolframalpha.com/input?i=${android.net.Uri.encode(waArg)}",
+                webSearchConfig(s).browserPackage
+            )
             return true
         }
+        return triggerDeferredApiCard(
+            query = query,
+            cardType = SmartCommandType.WOLFRAM,
+            prefixKey = "wa_fetching_",
+            pendingKey = "wa_pending_",
+            waitingKey = "wa_waiting_",
+            loadingSubtitle = "querying Wolfram|Alpha…"
+        ) {
+            AsyncCommandRequest.Wolfram(waArg) to "wa_fetching_$waArg"
+        } ?: false
+    }
+
+    private fun triggerDeferredApiCard(
+        query: String,
+        cardType: SmartCommandType,
+        prefixKey: String,
+        pendingKey: String,
+        waitingKey: String,
+        loadingSubtitle: String,
+        buildRequestAndFetchingId: () -> Pair<AsyncCommandRequest, String>?
+    ): Boolean? {
         val currentCard = _searchResults.value.firstOrNull {
-            it is LauncherSearchResult.RichCard && it.type == SmartCommandType.WOLFRAM
-        } as? LauncherSearchResult.RichCard ?: return true
-        val isPendingOrLoading = currentCard.isLoading || currentCard.id.startsWith("wa_loading_")
-        if (!isPendingOrLoading) {
-            return false
-        }
+            it is LauncherSearchResult.RichCard && it.type == cardType
+        } as? LauncherSearchResult.RichCard ?: return null
+        if (currentCard.id.startsWith(prefixKey)) return true
+        val canTrigger = currentCard.isLoading ||
+            currentCard.id.startsWith(pendingKey) ||
+            currentCard.id.startsWith(waitingKey)
+        if (!canTrigger) return false
+
+        val (request, fetchingId) = buildRequestAndFetchingId() ?: return false
         liveCommandJob?.cancel()
         _searchResults.value = _searchResults.value.map { current ->
-            if (current is LauncherSearchResult.RichCard && current.type == SmartCommandType.WOLFRAM) {
-                current.copy(isLoading = true, primaryValue = "", subtitle = "querying Wolfram|Alpha…")
+            if (current is LauncherSearchResult.RichCard && current.type == cardType) {
+                current.copy(id = fetchingId, isLoading = true, primaryValue = "", subtitle = loadingSubtitle)
             } else current
         }
         liveCommandJob = viewModelScope.launch {
-            val resolved = resolveLiveCommand(AsyncCommandRequest.Wolfram(argument))
+            val resolved = resolveLiveCommand(request)
             if (_searchQuery.value != query) return@launch
             _searchResults.value = _searchResults.value.map { current ->
-                if (current is LauncherSearchResult.RichCard && current.type == SmartCommandType.WOLFRAM) resolved else current
+                if (current is LauncherSearchResult.RichCard && current.type == cardType) resolved else current
             }
         }
         return true
     }
 
-    private fun wolframArgument(query: String, s: LauncherSettings): String? {
-        val prefix = s.commandConfigs["wolfram"]?.takeIf { it.enabled }?.prefix?.trim().orEmpty()
+    private fun bareOrPrefixedArg(query: String, keyword: String): String? {
+        val trimmed = query.trim()
+        if (trimmed.equals(keyword, ignoreCase = true)) return ""
+        if (trimmed.startsWith("$keyword ", ignoreCase = true)) return trimmed.drop(keyword.length + 1).trim()
+        return null
+    }
+
+    private fun commandArgument(query: String, s: LauncherSettings, commandId: String): String? {
+        val prefix = s.commandConfigs[commandId]?.takeIf { it.enabled }?.prefix?.trim().orEmpty()
         if (prefix.isEmpty()) return null
         val trimmed = query.trim()
         if (!trimmed.startsWith(prefix, ignoreCase = true)) return null
-        if (trimmed.length > prefix.length && !trimmed[prefix.length].isWhitespace()) return null
+        val isSymbolPrefix = prefix.all { !it.isLetterOrDigit() }
+        if (!isSymbolPrefix && trimmed.length > prefix.length && !trimmed[prefix.length].isWhitespace()) return null
+        if ((commandId == "weather" || commandId == "solar") && trimmed.length == prefix.length) return ""
         return trimmed.drop(prefix.length).trim().takeIf { it.isNotEmpty() }
     }
 
-    fun refreshDeviceContacts() {
+    fun refreshDeviceContacts(force: Boolean = false) {
         if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (!force &&
+            lastContactsRefreshElapsedMs != 0L &&
+            deviceContacts.value.isNotEmpty() &&
+            nowElapsed - lastContactsRefreshElapsedMs < CONTACTS_REFRESH_TTL_MS
+        ) {
+            return
+        }
+        lastContactsRefreshElapsedMs = nowElapsed
         viewModelScope.launch(Dispatchers.IO) {
             val loaded = runCatching {
                 val contacts = mutableListOf<SearchContact>()
@@ -590,7 +1135,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
-                contacts.distinctBy { it.phoneNumber.filter(Char::isDigit) }
+                contacts.distinctBy { it.phoneNumber.filter(Char::isDigit).ifEmpty { it.phoneNumber } }
             }.getOrDefault(emptyList())
             deviceContacts.value = loaded
             withContext(Dispatchers.Main) {
@@ -599,24 +1144,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun mergeSearchContacts(saved: List<SearchContact>, device: List<SearchContact>): List<SearchContact> {
-        val savedNumbers = saved.map { it.phoneNumber.filter(Char::isDigit) }.filter { it.isNotEmpty() }.toSet()
-        return saved + device.filter { it.phoneNumber.filter(Char::isDigit) !in savedNumbers }
-    }
-
-    private suspend fun resolveLiveCommand(request: AsyncCommandRequest): LauncherSearchResult.RichCard =
-        when (request) {
+    private suspend fun resolveLiveCommand(request: AsyncCommandRequest): LauncherSearchResult.RichCard {
+        val browserPkg = webSearchConfig(settings.value).browserPackage
+        return when (request) {
             is AsyncCommandRequest.Finance -> LiveCommandService.fetchMarketQuote(
                 rawQuery = request.query,
                 range = settings.value.stockDefaultRange,
                 interval = settings.value.stockDefaultInterval,
-                showSparkline = settings.value.stockShowSparkline
+                showSparkline = settings.value.stockShowSparkline,
+                browserPackage = browserPkg
             )
             is AsyncCommandRequest.Weather -> LiveCommandService.fetchWeatherOrSolar(request.city, request.isSolarOnly)
-            is AsyncCommandRequest.Wolfram -> LiveCommandService.fetchWolframShortAnswer(request.query, settings.value.wolframAppId)
+            is AsyncCommandRequest.Wolfram -> LiveCommandService.fetchWolframShortAnswer(
+                query = request.query,
+                appId = settings.value.wolframAppId,
+                browserPackage = browserPkg
+            )
+            is AsyncCommandRequest.Wiki -> LiveCommandService.fetchWikipediaSummary(request.query, browserPkg)
+            is AsyncCommandRequest.Define -> LiveCommandService.fetchDefinition(request.word, browserPkg)
+            is AsyncCommandRequest.CalendarAgenda -> CalendarAgendaService.fetchAgendaCard(context, settings.value.is24HourClock)
+            is AsyncCommandRequest.LocalFiles -> LauncherSearchResult.RichCard(
+                id = "files_unused",
+                type = SmartCommandType.FILE,
+                title = "Files"
+            )
             is AsyncCommandRequest.MathPlot -> withContext(Dispatchers.Default) {
                 val out = MathStatsEngine.evaluate(request.rawInput, request.prefix)
                     ?: MathStatsEngine.evaluate(request.rawInput, "")
+                val cleanPlotInput = request.rawInput.trim().let { t ->
+                    if (request.prefix.isNotEmpty() && t.startsWith(request.prefix, ignoreCase = true)) {
+                        t.substring(request.prefix.length).trim()
+                    } else t
+                }
                 if (out != null) {
                     LauncherSearchResult.RichCard(
                         id = "cmd_math_${out.title}",
@@ -629,6 +1188,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         isBadgePositive = true,
                         subtitle = out.subtitle,
                         hasInfoManual = false,
+                        rawInput = cleanPlotInput,
                         execute = { ctx ->
                             val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                             cm?.setPrimaryClip(ClipData.newPlainText("Pallas Math", out.copyText))
@@ -646,6 +1206,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
 
     private val browserLabelCache = HashMap<String, String?>()
 
@@ -656,39 +1217,191 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun launchSearchResult(result: LauncherSearchResult) {
-        if (result.isInertOnTap) return
         if (result is LauncherSearchResult.RichCard &&
-            result.type == SmartCommandType.WOLFRAM &&
-            result.id.startsWith("wa_loading_")
+            (result.id.startsWith("wa_pending_") ||
+                result.id.startsWith("wa_waiting_") ||
+                result.id.startsWith("wiki_pending_") ||
+                result.id.startsWith("wiki_waiting_") ||
+                result.id.startsWith("def_pending_") ||
+                result.id.startsWith("def_waiting_") ||
+                result.id.startsWith("fin_pending_") ||
+                result.id.startsWith("fin_waiting_") ||
+                result.id.startsWith("wx_pending_") ||
+                result.id.startsWith("wx_waiting_") ||
+                result.id.startsWith("solar_pending_") ||
+                result.id.startsWith("solar_waiting_"))
         ) {
             submitWolframQuery()
             return
         }
+        if (result.isInertOnTap) return
         dismissOverlay()
         when (result) {
             is LauncherSearchResult.App -> {
                 launchApp(result.app.packageName, result.app.activityName, result.app.userHandle)
             }
             is LauncherSearchResult.Command -> {
-                if (result.id == SETTINGS_COMMAND_ID) openSettings() else result.execute(context)
+                when {
+                    result.id == SETTINGS_COMMAND_ID -> openSettings()
+                    result.id.startsWith(PALLAS_NAV_PREFIX) -> {
+                        val target = PallasTarget.decode(result.id.removePrefix(PALLAS_NAV_PREFIX))
+                        when (target) {
+                            PallasTarget.SettingsMain, null -> openSettings()
+                            PallasTarget.FocusSettings -> openSettings(SettingsSubpage.FOCUS_MODE)
+                            PallasTarget.MacrosSettings -> openSettings(SettingsSubpage.MACROS)
+                            PallasTarget.WorldAtlas -> openAtlas()
+                            PallasTarget.Notebook -> openNotebook()
+                            PallasTarget.LatexStudio -> openLatexStudio()
+                            is PallasTarget.GuideTab -> openSettings(
+                                initialSubpage = SettingsSubpage.MATH_MANUAL,
+                                guideTab = target.tabIndex
+                            )
+                            is PallasTarget.Cheatsheet -> openSettings(
+                                initialSubpage = SettingsSubpage.MATH_MANUAL,
+                                guideTab = 1,
+                                guideTopicId = target.topicId,
+                                guideFormulaTitle = target.formulaTitle
+                            )
+                        }
+                    }
+                    result.id == QUICK_CAPTURE_INBOX_ID -> openQuickCaptureInbox()
+                    result.id == FOCUS_SETUP_COMMAND_ID -> openSettings(SettingsSubpage.FOCUS_MODE)
+                    result.id == FOCUS_OFF_COMMAND_ID -> {
+                        focusModeManager.deactivate(settings.value, isManualDismiss = true)
+                    }
+                    result.id.startsWith(FOCUS_ON_COMMAND_ID) -> {
+                        val parts = result.id.removePrefix("$FOCUS_ON_COMMAND_ID:").split(":")
+                        val profileId = parts.getOrNull(0).orEmpty()
+                        val secs = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                        val dndOverride = when (parts.getOrNull(2)) {
+                            "true" -> true
+                            "false" -> false
+                            else -> null
+                        }
+                        val profile = settings.value.focusProfiles.firstOrNull { it.id == profileId }
+                            ?: settings.value.defaultFocusProfileId?.let { defId ->
+                                settings.value.focusProfiles.firstOrNull { it.id == defId }
+                            }
+                            ?: settings.value.focusProfiles.firstOrNull()
+                        if (profile != null) {
+                            val willDnd = dndOverride ?: profile.syncDnd
+                            if ((willDnd || profile.muteRinger) && !SystemActionsManager.isDndAccessGranted(context)) {
+                                SystemActionsManager.openDndAccessSettings(context)
+                            }
+                            focusModeManager.activate(
+                                profile = profile,
+                                durationMillis = if (secs > 0) secs * 1000L else null,
+                                forceDndOverride = dndOverride,
+                                isScheduled = false
+                            )
+                            runOnEnterMacro(profile)
+                        }
+                    }
+                    result.id.startsWith(MACRO_COMMAND_PREFIX) -> {
+                        val macroId = result.id.removePrefix(MACRO_COMMAND_PREFIX)
+                        settings.value.macros.firstOrNull { it.id == macroId }?.let { executeMacro(it) }
+                    }
+                    else -> result.execute(context)
+                }
             }
             is LauncherSearchResult.RichCard -> result.execute(context)
             is LauncherSearchResult.ContactCall -> result.execute(context)
         }
     }
 
+    private fun isPackageOrKeyAllowedInFocus(
+        keyOrPkg: String,
+        allowedKeys: Set<String>? = focusAllowedAppKeys.value
+    ): Boolean {
+        if (allowedKeys == null) return true
+        val pkg = keyOrPkg.substringBefore('/')
+        return keyOrPkg in allowedKeys || allowedKeys.any { it.substringBefore('/') == pkg }
+    }
+
+    private fun resolveDefaultHandlerPackage(intent: Intent): String? =
+        context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            ?.activityInfo?.packageName
+
+    private fun runDueScheduledMacros() {
+        val due = macroScheduler.collectDueMacros(settings.value.macros)
+        due.forEach { executeMacro(it) }
+    }
+
+    fun executeMacro(macro: MacroRoutine) {
+        viewModelScope.launch {
+            MacroExecutor.execute(
+                context = context,
+                macro = macro,
+                settingsRepository = settingsRepository,
+                appRepository = appRepository,
+                quickCaptureRepository = quickCaptureRepository,
+                allowedKeys = focusAllowedAppKeys.value,
+                onOverlay = { cmd ->
+                    when (cmd) {
+                        MacroExecutor.OverlayCommand.Notebook -> openNotebook()
+                        MacroExecutor.OverlayCommand.LatexStudio -> openLatexStudio()
+                        MacroExecutor.OverlayCommand.Atlas -> openAtlas()
+                        MacroExecutor.OverlayCommand.QuickCapture -> openQuickCaptureInbox()
+                        is MacroExecutor.OverlayCommand.SwitchScreen -> {
+                            val idx = displayScreens.value.indexOfFirst { it.id == cmd.screenId }
+                            if (idx >= 0) setScreenIndex(idx)
+                        }
+                    }
+                }
+            )
+        }
+    }
+
     fun executeGesture(action: GestureAction) {
+        val allowed = focusAllowedAppKeys.value
         when (action) {
             is GestureAction.OpenSearch -> openSearch()
             is GestureAction.OpenAppDrawer -> openDrawer()
             is GestureAction.OpenNotifications -> SystemActionsManager.expandStatusBar(context)
             is GestureAction.OpenQuickSettings -> SystemActionsManager.expandQuickSettings(context)
-            is GestureAction.OpenCamera -> SystemActionsManager.openCamera(context)
-            is GestureAction.OpenDialer -> SystemActionsManager.openDialer(context)
+            is GestureAction.OpenCamera -> {
+                if (allowed != null) {
+                    val pkg = resolveDefaultHandlerPackage(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))
+                    if (pkg == null || !isPackageOrKeyAllowedInFocus(pkg, allowed)) return
+                }
+                SystemActionsManager.openCamera(context)
+            }
+            is GestureAction.OpenDialer -> {
+                if (allowed != null) {
+                    val pkg = resolveDefaultHandlerPackage(Intent(Intent.ACTION_DIAL))
+                    if (pkg == null || !isPackageOrKeyAllowedInFocus(pkg, allowed)) return
+                }
+                SystemActionsManager.openDialer(context)
+            }
             is GestureAction.LockScreen -> SystemActionsManager.lockScreen(context)
+            is GestureAction.OpenNotebook -> openNotebook()
+            is GestureAction.OpenLatexStudio -> openLatexStudio()
+            is GestureAction.OpenAtlas -> openAtlas()
+            is GestureAction.ToggleFocusProfile -> {
+                val s = settings.value
+                val profile = if (action.profileId == GestureAction.DEFAULT_FOCUS_PROFILE_ID) {
+                    s.focusProfiles.firstOrNull { it.id == s.defaultFocusProfileId } ?: s.focusProfiles.firstOrNull()
+                } else {
+                    s.focusProfiles.firstOrNull { it.id == action.profileId }
+                }
+                if (profile != null) {
+                    val wasAlreadyThisProfile = focusState.value.isActive && focusState.value.activeProfileId == profile.id
+                    if (!wasAlreadyThisProfile && (profile.syncDnd || profile.muteRinger) && !SystemActionsManager.isDndAccessGranted(context)) {
+                        SystemActionsManager.openDndAccessSettings(context)
+                    }
+                    focusModeManager.toggleProfile(profile, s)
+                    if (!wasAlreadyThisProfile) {
+                        runOnEnterMacro(profile)
+                    }
+                }
+            }
+            is GestureAction.RunMacro -> {
+                settings.value.macros.firstOrNull { it.id == action.macroId }?.let { executeMacro(it) }
+            }
             is GestureAction.LaunchApp -> {
-                val app = installedApps.value.firstOrNull { it.uniqueKey == action.uniqueKey }
-                    ?: installedApps.value.firstOrNull { it.packageName == action.packageName }
+                if (!isPackageOrKeyAllowedInFocus(action.uniqueKey, allowed)) return
+                val app = allInstalledApps.value.firstOrNull { it.uniqueKey == action.uniqueKey }
+                    ?: allInstalledApps.value.firstOrNull { it.packageName == action.packageName }
                 if (app != null) {
                     launchApp(app.packageName, app.activityName, app.userHandle)
                 } else {
@@ -731,6 +1444,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onResume(preserveSearch: Boolean = false) {
+        syncFocusAndRunEnterMacro()
+        runDueScheduledMacros()
         refreshDeviceContacts()
         if (!preserveSearch && _overlay.value is LauncherOverlay.Search && _searchQuery.value.isNotBlank()) {
             dismissOverlay()
@@ -788,15 +1503,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         SystemActionsManager.requestSetDefaultLauncher(context)
 
     override fun onCleared() {
-        try {
-            context.unregisterReceiver(batteryReceiver)
-            context.unregisterReceiver(timeTickReceiver)
-        } catch (_: Exception) {}
+        runCatching { context.unregisterReceiver(batteryReceiver) }
+        runCatching { context.unregisterReceiver(timeTickReceiver) }
         super.onCleared()
     }
 
     private companion object {
         const val KEY_CURRENT_SCREEN_ID = "current_screen_id"
         const val AUTO_LAUNCH_MIN_SCORE = 3500.0
+        const val CONTACTS_REFRESH_TTL_MS = 15L * 60L * 1000L
     }
 }

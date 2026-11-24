@@ -71,17 +71,33 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pallas.launcher.domain.math.CheatsheetFormula
+import com.pallas.launcher.domain.math.CheatsheetFormulaHit
 import com.pallas.launcher.domain.math.CheatsheetSubsection
 import com.pallas.launcher.domain.math.CheatsheetTopic
 import com.pallas.launcher.domain.math.MathCheatsheets
+import com.pallas.launcher.domain.reference.CheatsheetDomain
+import com.pallas.launcher.domain.reference.CheatsheetKind
+import com.pallas.launcher.domain.reference.EngineeringCheatsheetData
+import com.pallas.launcher.domain.reference.PeriodicElement
+import com.pallas.launcher.domain.reference.PeriodicTableData
+import com.pallas.launcher.domain.reference.PhysicsCheatsheetData
 import com.pallas.launcher.domain.search.ManualEntry
 import com.pallas.launcher.domain.search.MathStatsEngine
 import com.pallas.launcher.platform.TexExportHelper
 import com.pallas.launcher.ui.components.LatexFormula
 import com.pallas.launcher.ui.components.TexPreviewDialog
+import com.pallas.launcher.ui.reference.ElementDetailBottomSheet
+import com.pallas.launcher.ui.reference.EngineeringMaterialsTable
+import com.pallas.launcher.ui.reference.HumanPhysiologyTables
+import com.pallas.launcher.ui.reference.PeriodicTableScreen
+import com.pallas.launcher.ui.reference.PhysicalConstantsTable
+import com.pallas.launcher.ui.reference.SupportedCurrenciesSection
+import com.pallas.launcher.ui.reference.categoryAccent
 import com.pallas.launcher.ui.settings.SettingsViewModel
 import com.pallas.launcher.ui.settings.components.SettingsLargeTopBar
 import com.pallas.launcher.ui.theme.LauncherFonts
+import com.pallas.launcher.ui.theme.LauncherTypography
+import com.pallas.launcher.ui.theme.LocalLauncherColors
 import kotlinx.coroutines.launch
 
 private enum class GuideTab(val label: String) {
@@ -99,20 +115,17 @@ private data class EngineCategoryMeta(
 private sealed interface ManualDestination {
     data object Index : ManualDestination
     data class Category(val name: String) : ManualDestination
-    data class Cheatsheet(val topicId: String) : ManualDestination
+    data class Cheatsheet(val topicId: String, val initialFormulaTitle: String? = null) : ManualDestination
 }
-
-private data class CheatsheetSearchHit(
-    val topic: CheatsheetTopic,
-    val subsection: CheatsheetSubsection,
-    val formula: CheatsheetFormula
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MathManualPage(
     viewModel: SettingsViewModel,
     onBack: () -> Unit,
+    initialTabIndex: Int = 0,
+    initialTopicId: String? = null,
+    initialFormulaTitle: String? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -126,10 +139,22 @@ fun MathManualPage(
     val mathPrefix = settings.commandConfigs["math"]?.prefix?.ifBlank { "=" } ?: "="
     val texPrefix = settings.commandConfigs["tex"]?.prefix?.ifBlank { "tex" } ?: "tex"
 
-    var selectedTab by remember { mutableStateOf(GuideTab.ENGINE) }
+    var selectedTab by remember(initialTabIndex) {
+        mutableStateOf(GuideTab.entries.getOrElse(initialTabIndex) { GuideTab.ENGINE })
+    }
     var searchQuery by remember { mutableStateOf("") }
-    var destination by remember { mutableStateOf<ManualDestination>(ManualDestination.Index) }
+    var destination by remember(initialTopicId, initialFormulaTitle) {
+        mutableStateOf<ManualDestination>(
+            if (!initialTopicId.isNullOrBlank()) {
+                ManualDestination.Cheatsheet(initialTopicId, initialFormulaTitle)
+            } else {
+                ManualDestination.Index
+            }
+        )
+    }
     var previewLatex by remember { mutableStateOf<String?>(null) }
+    var selectedElement by remember { mutableStateOf<PeriodicElement?>(null) }
+    val isDark = LocalLauncherColors.current.isDark
 
     // System back gesture navigation: subpage -> manual index -> onBack()
     BackHandler(enabled = destination != ManualDestination.Index) {
@@ -204,38 +229,51 @@ fun MathManualPage(
         }
     }
 
-    val cheatsheetSearchResults = remember(searchQuery) {
+    val cheatsheetSearchResults: List<CheatsheetFormulaHit> = remember(searchQuery) {
+        MathCheatsheets.searchFormulas(searchQuery)
+    }
+
+    val elementSearchResults = remember(searchQuery) {
         val q = searchQuery.trim().lowercase()
         if (q.isEmpty()) emptyList()
-        else {
-            buildList {
-                MathCheatsheets.TOPICS.forEach { topic ->
-                    topic.subsections.forEach { sub ->
-                        sub.formulas.forEach { formula ->
-                            val matches = topic.title.lowercase().contains(q) ||
-                                topic.shortTitle.lowercase().contains(q) ||
-                                sub.title.lowercase().contains(q) ||
-                                formula.title.lowercase().contains(q) ||
-                                (formula.note?.lowercase()?.contains(q) == true) ||
-                                formula.latex.lowercase().contains(q)
-                            if (matches) {
-                                add(CheatsheetSearchHit(topic, sub, formula))
-                            }
-                        }
-                    }
-                }
-            }
+        else PeriodicTableData.ELEMENTS.filter { el ->
+            el.name.lowercase().contains(q) ||
+                el.symbol.lowercase() == q ||
+                el.atomicNumber.toString() == q ||
+                el.category.label.lowercase().contains(q)
+        }.take(12)
+    }
+
+    val constantSearchResults = remember(searchQuery) {
+        val q = searchQuery.trim().lowercase()
+        if (q.isEmpty()) emptyList()
+        else PhysicsCheatsheetData.PHYSICAL_CONSTANTS.filter { c ->
+            c.name.lowercase().contains(q) ||
+                c.symbolLatex.lowercase().contains(q) ||
+                c.note.lowercase().contains(q)
+        }
+    }
+
+    val materialSearchResults = remember(searchQuery) {
+        val q = searchQuery.trim().lowercase()
+        if (q.isEmpty()) emptyList()
+        else EngineeringCheatsheetData.ENGINEERING_MATERIALS.filter { m ->
+            m.name.lowercase().contains(q) || m.note.lowercase().contains(q)
         }
     }
 
     val topBarTitle = when (val d = destination) {
-        ManualDestination.Index -> "Math & Engine"
+        ManualDestination.Index -> "Guide"
         is ManualDestination.Category -> d.name
         is ManualDestination.Cheatsheet -> MathCheatsheets.topicById(d.topicId)?.shortTitle ?: "Cheatsheet"
     }
+    val activeTopicKind = (destination as? ManualDestination.Cheatsheet)?.let {
+        MathCheatsheets.topicById(it.topicId)?.kind
+    }
+    val disableScrollBehavior = activeTopicKind == CheatsheetKind.PERIODIC_TABLE
 
     Scaffold(
-        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        modifier = if (disableScrollBehavior) modifier else modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             SettingsLargeTopBar(
                 title = topBarTitle,
@@ -311,114 +349,78 @@ fun MathManualPage(
 
                 is ManualDestination.Cheatsheet -> {
                     val topic = MathCheatsheets.topicById(target.topicId)
-                    val listState = rememberLazyListState()
-                    val scope = rememberCoroutineScope()
-                    val hasJumpStrip = topic != null && topic.subsections.size > 2
-                    val subsectionHeaderIndices = remember(topic?.id, hasJumpStrip) {
-                        if (topic == null) emptyList()
-                        else buildList {
-                            var idx = if (hasJumpStrip) 2 else 1
-                            topic.subsections.forEach { sub ->
-                                add(idx)
-                                idx += 1 + sub.formulas.size
+                    if (topic != null) {
+                        when (topic.kind) {
+                            CheatsheetKind.PERIODIC_TABLE -> {
+                                PeriodicTableScreen(modifier = Modifier.fillMaxSize())
                             }
-                        }
-                    }
-
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(top = 4.dp, bottom = 36.dp)
-                    ) {
-                        if (topic != null) {
-                            item(key = "cs_lead_${topic.id}") {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 20.dp, vertical = 10.dp),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Text(
-                                        text = topic.description,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = colorScheme.onSurfaceVariant
+                            CheatsheetKind.PHYSICS -> {
+                                var subTab by remember(topic.id) { mutableStateOf(0) }
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    SubTabStrip(
+                                        tabs = listOf("Formulas", "Constants"),
+                                        selectedIndex = subTab,
+                                        onSelect = { subTab = it }
                                     )
-                                    Text(
-                                        text = if (topic.showLatexSource) {
-                                            "${topic.formulaCount} snippets · Tap code to copy · Tap render to export PNG"
-                                        } else {
-                                            "${topic.formulaCount} formulas · Tap any equation to export PNG"
-                                        },
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = colorScheme.outline
-                                    )
-                                }
-                            }
-
-                            if (hasJumpStrip) {
-                                item(key = "cs_jump_${topic.id}") {
-                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                        LazyRow(
-                                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(18.dp)
-                                        ) {
-                                            itemsIndexed(
-                                                items = topic.subsections,
-                                                key = { _, sub -> "jump_${topic.id}_${sub.title}" }
-                                            ) { idx, sub ->
-                                                Text(
-                                                    text = sub.shortTitle,
-                                                    style = MaterialTheme.typography.labelLarge,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = colorScheme.primary,
-                                                    modifier = Modifier
-                                                        .clickable {
-                                                            subsectionHeaderIndices.getOrNull(idx)?.let { targetIdx ->
-                                                                scope.launch { listState.animateScrollToItem(targetIdx) }
-                                                            }
-                                                        }
-                                                        .padding(vertical = 2.dp)
-                                                )
-                                            }
-                                        }
-                                        HorizontalDivider(
-                                            thickness = 0.5.dp,
-                                            color = colorScheme.outlineVariant.copy(alpha = 0.35f),
-                                            modifier = Modifier.padding(horizontal = 20.dp)
+                                    if (subTab == 0) {
+                                        CheatsheetFormulaList(
+                                            topic = topic,
+                                            initialFormulaTitle = target.initialFormulaTitle,
+                                            onPreview = { previewLatex = it },
+                                            onCopyLatex = { TexExportHelper.copyLatexText(context, it) }
                                         )
+                                    } else {
+                                        PhysicalConstantsTable(modifier = Modifier.fillMaxSize())
                                     }
                                 }
                             }
-
-                            topic.subsections.forEach { subsection ->
-                                item(key = "cs_sub_${topic.id}_${subsection.title}") {
-                                    Text(
-                                        text = subsection.title,
-                                        fontFamily = LauncherFonts.serif,
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = colorScheme.primary,
-                                        modifier = Modifier.padding(
-                                            start = 20.dp,
-                                            end = 20.dp,
-                                            top = 22.dp,
-                                            bottom = 4.dp
+                            CheatsheetKind.ENGINEERING -> {
+                                var subTab by remember(topic.id) { mutableStateOf(0) }
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    SubTabStrip(
+                                        tabs = listOf("Formulas", "Materials"),
+                                        selectedIndex = subTab,
+                                        onSelect = { subTab = it }
+                                    )
+                                    if (subTab == 0) {
+                                        CheatsheetFormulaList(
+                                            topic = topic,
+                                            initialFormulaTitle = target.initialFormulaTitle,
+                                            onPreview = { previewLatex = it },
+                                            onCopyLatex = { TexExportHelper.copyLatexText(context, it) }
                                         )
-                                    )
+                                    } else {
+                                        EngineeringMaterialsTable(modifier = Modifier.fillMaxSize())
+                                    }
                                 }
-
-                                itemsIndexed(
-                                    items = subsection.formulas,
-                                    key = { _, formula -> "cs_${topic.id}_${subsection.title}_${formula.title}" }
-                                ) { index, formula ->
-                                    CheatsheetFormulaRow(
-                                        formula = formula,
-                                        showDivider = index < subsection.formulas.lastIndex,
-                                        showSource = topic.showLatexSource,
-                                        onPreview = { previewLatex = formula.latex },
-                                        onCopyLatex = { TexExportHelper.copyLatexText(context, formula.latex) }
+                            }
+                            CheatsheetKind.BIOLOGY -> {
+                                var subTab by remember(topic.id) { mutableStateOf(0) }
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    SubTabStrip(
+                                        tabs = listOf("Formulas", "Physiology"),
+                                        selectedIndex = subTab,
+                                        onSelect = { subTab = it }
                                     )
+                                    if (subTab == 0) {
+                                        CheatsheetFormulaList(
+                                            topic = topic,
+                                            initialFormulaTitle = target.initialFormulaTitle,
+                                            onPreview = { previewLatex = it },
+                                            onCopyLatex = { TexExportHelper.copyLatexText(context, it) }
+                                        )
+                                    } else {
+                                        HumanPhysiologyTables(modifier = Modifier.fillMaxSize())
+                                    }
                                 }
+                            }
+                            CheatsheetKind.FORMULAS -> {
+                                CheatsheetFormulaList(
+                                    topic = topic,
+                                    initialFormulaTitle = target.initialFormulaTitle,
+                                    onPreview = { previewLatex = it },
+                                    onCopyLatex = { TexExportHelper.copyLatexText(context, it) }
+                                )
                             }
                         }
                     }
@@ -508,7 +510,11 @@ fun MathManualPage(
                             contentPadding = PaddingValues(top = 4.dp, bottom = 36.dp)
                         ) {
                             if (searchQuery.isNotBlank()) {
-                                val totalHits = cheatsheetSearchResults.size + entrySearchResults.size
+                                val totalHits = cheatsheetSearchResults.size +
+                                    entrySearchResults.size +
+                                    elementSearchResults.size +
+                                    constantSearchResults.size +
+                                    materialSearchResults.size
                                 item(key = "search_summary") {
                                     Text(
                                         text = "$totalHits result${if (totalHits == 1) "" else "s"} for \"${searchQuery.trim()}\"",
@@ -528,18 +534,139 @@ fun MathManualPage(
                                             verticalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
                                             Text(
-                                                text = "No matching formulas or functions",
+                                                text = "No matching formulas, elements, or functions",
                                                 style = MaterialTheme.typography.titleMedium,
                                                 color = colorScheme.onSurfaceVariant
                                             )
                                             Text(
-                                                text = "Try Stokes, Leibniz, Mean, Pareto, or $texPrefix.",
+                                                text = "Try Maxwell, Kelly, Gold, Titanium, or $texPrefix.",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = colorScheme.outline
                                             )
                                         }
                                     }
                                 } else {
+                                    if (elementSearchResults.isNotEmpty()) {
+                                        item(key = "search_el_header") {
+                                            Text(
+                                                text = "Elements (${elementSearchResults.size})",
+                                                fontFamily = LauncherFonts.serif,
+                                                fontSize = 21.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = colorScheme.primary,
+                                                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 4.dp)
+                                            )
+                                        }
+                                        itemsIndexed(elementSearchResults, key = { _, el -> "search_el_${el.atomicNumber}" }) { idx, el ->
+                                            val accent = categoryAccent(el.category, isDark)
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable { selectedElement = el }
+                                                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                            ) {
+                                                Text(
+                                                    text = el.symbol,
+                                                    fontFamily = LauncherFonts.serif,
+                                                    fontSize = 22.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = accent,
+                                                    modifier = Modifier.width(38.dp)
+                                                )
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = "${el.name} (Z=${el.atomicNumber})",
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = colorScheme.onSurface
+                                                    )
+                                                    Text(
+                                                        text = "${el.atomicMass} u · ${el.electronConfig} · ${el.category.label}",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                            if (idx < elementSearchResults.lastIndex) {
+                                                HorizontalDivider(thickness = 0.5.dp, color = colorScheme.outlineVariant.copy(alpha = 0.28f), modifier = Modifier.padding(horizontal = 20.dp))
+                                            }
+                                        }
+                                    }
+
+                                    if (constantSearchResults.isNotEmpty()) {
+                                        item(key = "search_const_header") {
+                                            Text(
+                                                text = "Physical Constants (${constantSearchResults.size})",
+                                                fontFamily = LauncherFonts.serif,
+                                                fontSize = 21.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = colorScheme.primary,
+                                                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 4.dp)
+                                            )
+                                        }
+                                        itemsIndexed(constantSearchResults, key = { _, c -> "search_c_${c.name}" }) { idx, c ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        val clip = if (c.unit == "dimensionless") c.value else "${c.value} ${c.unit}"
+                                                        TexExportHelper.copyPlainText(context, c.name, clip, "Copied ${c.name}: $clip")
+                                                    }
+                                                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                            ) {
+                                                Box(modifier = Modifier.width(48.dp)) {
+                                                    LatexFormula(latex = c.symbolLatex, color = colorScheme.primary, fontSize = 16.sp)
+                                                }
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(text = c.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = colorScheme.onSurface)
+                                                    Text(text = "${c.value} ${if (c.unit == "dimensionless") "" else c.unit}".trim(), fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = colorScheme.primary)
+                                                }
+                                            }
+                                            if (idx < constantSearchResults.lastIndex) {
+                                                HorizontalDivider(thickness = 0.5.dp, color = colorScheme.outlineVariant.copy(alpha = 0.28f), modifier = Modifier.padding(horizontal = 20.dp))
+                                            }
+                                        }
+                                    }
+
+                                    if (materialSearchResults.isNotEmpty()) {
+                                        item(key = "search_mat_header") {
+                                            Text(
+                                                text = "Engineering Materials (${materialSearchResults.size})",
+                                                fontFamily = LauncherFonts.serif,
+                                                fontSize = 21.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = colorScheme.primary,
+                                                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 4.dp)
+                                            )
+                                        }
+                                        itemsIndexed(materialSearchResults, key = { _, m -> "search_m_${m.name}" }) { idx, m ->
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        val summary = "${m.name}: ρ=${m.densityLabel} kg/m³, E=${m.modulusLabel} GPa, Yield=${m.yieldLabel} MPa, UTS=${m.ultimateLabel} MPa"
+                                                        TexExportHelper.copyPlainText(context, m.name, summary, "Copied ${m.name}")
+                                                    }
+                                                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                                            ) {
+                                                Text(text = m.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = colorScheme.onSurface)
+                                                Text(
+                                                    text = "ρ=${m.densityLabel} kg/m³ · E=${m.modulusLabel} GPa · Yield=${m.yieldLabel} MPa · UTS=${m.ultimateLabel} MPa",
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 11.5.sp,
+                                                    color = colorScheme.primary
+                                                )
+                                            }
+                                            if (idx < materialSearchResults.lastIndex) {
+                                                HorizontalDivider(thickness = 0.5.dp, color = colorScheme.outlineVariant.copy(alpha = 0.28f), modifier = Modifier.padding(horizontal = 20.dp))
+                                            }
+                                        }
+                                    }
                                     if (cheatsheetSearchResults.isNotEmpty()) {
                                         item(key = "search_cs_header") {
                                             Text(
@@ -562,7 +689,13 @@ fun MathManualPage(
                                         ) { index, hit ->
                                             CheatsheetFormulaRow(
                                                 formula = hit.formula,
-                                                contextLabel = hit.topic.shortTitle,
+                                                contextLabel = "${hit.topic.shortTitle} · ${hit.subsection.shortTitle}",
+                                                onOpenContext = {
+                                                    destination = ManualDestination.Cheatsheet(
+                                                        topicId = hit.topic.id,
+                                                        initialFormulaTitle = hit.formula.title
+                                                    )
+                                                },
                                                 showDivider = index < cheatsheetSearchResults.lastIndex,
                                                 showSource = hit.topic.showLatexSource,
                                                 onPreview = { previewLatex = hit.formula.latex },
@@ -605,24 +738,42 @@ fun MathManualPage(
                                     GuideTab.CHEATSHEETS -> {
                                         item(key = "tab_cs_lead") {
                                             Text(
-                                                text = "Math & syntax reference sheets rendered in LaTeX",
+                                                text = "Offline scientific, engineering & quantitative reference sheets",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
                                             )
                                         }
-                                        itemsIndexed(
-                                            items = MathCheatsheets.TOPICS,
-                                            key = { _, topic -> "topic_${topic.id}" }
-                                        ) { index, topic ->
-                                            EditorialNavRow(
-                                                symbol = topic.symbol,
-                                                title = topic.title,
-                                                description = topic.description,
-                                                count = topic.formulaCount,
-                                                showDivider = index < MathCheatsheets.TOPICS.lastIndex,
-                                                onClick = { destination = ManualDestination.Cheatsheet(topic.id) }
-                                            )
+                                        CheatsheetDomain.entries.forEach { domain ->
+                                            val domainTopics = MathCheatsheets.TOPICS.filter { it.domain == domain }
+                                            if (domainTopics.isNotEmpty()) {
+                                                item(key = "domain_hdr_${domain.name}") {
+                                                    Text(
+                                                        text = domain.title,
+                                                        style = LauncherTypography.settingsSectionHeader,
+                                                        color = colorScheme.primary,
+                                                        modifier = Modifier.padding(
+                                                            start = 20.dp,
+                                                            end = 20.dp,
+                                                            top = 16.dp,
+                                                            bottom = 4.dp
+                                                        )
+                                                    )
+                                                }
+                                                itemsIndexed(
+                                                    items = domainTopics,
+                                                    key = { _, topic -> "topic_${topic.id}" }
+                                                ) { index, topic ->
+                                                    EditorialNavRow(
+                                                        symbol = topic.symbol,
+                                                        title = topic.title,
+                                                        description = topic.description,
+                                                        countLabel = topic.countLabel ?: "${topic.formulaCount}",
+                                                        showDivider = index < domainTopics.lastIndex,
+                                                        onClick = { destination = ManualDestination.Cheatsheet(topic.id) }
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
 
@@ -670,7 +821,7 @@ fun MathManualPage(
                                                 symbol = cat.symbol,
                                                 title = cat.name,
                                                 description = cat.description,
-                                                count = count,
+                                                countLabel = "$count",
                                                 showDivider = index < engineCategories.lastIndex,
                                                 onClick = { destination = ManualDestination.Category(cat.name) }
                                             )
@@ -697,6 +848,9 @@ fun MathManualPage(
                                                 onCopyExample = { copyToClipboard(entry.example) }
                                             )
                                         }
+                                        item(key = "tab_cmd_currencies") {
+                                            SupportedCurrenciesSection()
+                                        }
                                     }
                                 }
                             }
@@ -712,6 +866,209 @@ fun MathManualPage(
             latex = latex,
             onDismiss = { previewLatex = null }
         )
+    }
+
+    selectedElement?.let { el ->
+        ElementDetailBottomSheet(
+            element = el,
+            isDark = isDark,
+            onDismiss = { selectedElement = null }
+        )
+    }
+}
+
+@Composable
+private fun SubTabStrip(
+    tabs: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        ) {
+            tabs.forEachIndexed { idx, label ->
+                val selected = idx == selectedIndex
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onSelect(idx) },
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (selected) colorScheme.primary else colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(vertical = 10.dp)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(if (selected) colorScheme.primary else colorScheme.surface)
+                    )
+                }
+            }
+        }
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = colorScheme.outlineVariant.copy(alpha = 0.35f)
+        )
+    }
+}
+
+@Composable
+private fun CheatsheetFormulaList(
+    topic: CheatsheetTopic,
+    initialFormulaTitle: String? = null,
+    onPreview: (String) -> Unit,
+    onCopyLatex: (String) -> Unit,
+    footerItem: (@Composable () -> Unit)? = null
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val hasJumpStrip = topic.subsections.size > 2
+    val subsectionHeaderIndices = remember(topic.id, hasJumpStrip) {
+        buildList {
+            var idx = if (hasJumpStrip) 2 else 1
+            topic.subsections.forEach { sub ->
+                add(idx)
+                idx += 1 + sub.formulas.size
+            }
+        }
+    }
+
+    val targetFormulaIndex = remember(topic.id, initialFormulaTitle, hasJumpStrip) {
+        if (initialFormulaTitle.isNullOrBlank()) null
+        else {
+            var idx = if (hasJumpStrip) 2 else 1
+            var found: Int? = null
+            for (sub in topic.subsections) {
+                idx += 1 // subsection header
+                val offset = sub.formulas.indexOfFirst { it.title == initialFormulaTitle }
+                if (offset >= 0) {
+                    found = idx + offset
+                    break
+                }
+                idx += sub.formulas.size
+            }
+            found
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(topic.id, targetFormulaIndex) {
+        targetFormulaIndex?.let { idx ->
+            listState.scrollToItem(idx)
+        }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 36.dp)
+    ) {
+        item(key = "cs_lead_${topic.id}") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = topic.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = if (topic.showLatexSource) {
+                        "${topic.formulaCount} snippets · Tap code to copy · Tap render to export PNG"
+                    } else {
+                        "${topic.formulaCount} formulas · Tap any equation to export PNG"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colorScheme.outline
+                )
+            }
+        }
+
+        if (hasJumpStrip) {
+            item(key = "cs_jump_${topic.id}") {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(18.dp)
+                    ) {
+                        itemsIndexed(
+                            items = topic.subsections,
+                            key = { _, sub -> "jump_${topic.id}_${sub.title}" }
+                        ) { idx, sub ->
+                            Text(
+                                text = sub.shortTitle,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = colorScheme.primary,
+                                modifier = Modifier
+                                    .clickable {
+                                        subsectionHeaderIndices.getOrNull(idx)?.let { targetIdx ->
+                                            scope.launch { listState.animateScrollToItem(targetIdx) }
+                                        }
+                                    }
+                                    .padding(vertical = 2.dp)
+                            )
+                        }
+                    }
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = colorScheme.outlineVariant.copy(alpha = 0.35f),
+                        modifier = Modifier.padding(horizontal = 20.dp)
+                    )
+                }
+            }
+        }
+
+        topic.subsections.forEach { subsection ->
+            item(key = "cs_sub_${topic.id}_${subsection.title}") {
+                Text(
+                    text = subsection.title,
+                    fontFamily = LauncherFonts.serif,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = colorScheme.primary,
+                    modifier = Modifier.padding(
+                        start = 20.dp,
+                        end = 20.dp,
+                        top = 22.dp,
+                        bottom = 4.dp
+                    )
+                )
+            }
+
+            itemsIndexed(
+                items = subsection.formulas,
+                key = { _, formula -> "cs_${topic.id}_${subsection.title}_${formula.title}" }
+            ) { index, formula ->
+                CheatsheetFormulaRow(
+                    formula = formula,
+                    showDivider = index < subsection.formulas.lastIndex,
+                    showSource = topic.showLatexSource,
+                    onPreview = { onPreview(formula.latex) },
+                    onCopyLatex = { onCopyLatex(formula.latex) }
+                )
+            }
+        }
+
+        if (footerItem != null) {
+            item(key = "cs_footer_${topic.id}") {
+                footerItem()
+            }
+        }
     }
 }
 
@@ -764,7 +1121,7 @@ private fun EditorialNavRow(
     symbol: String,
     title: String,
     description: String,
-    count: Int,
+    countLabel: String,
     showDivider: Boolean,
     onClick: () -> Unit
 ) {
@@ -819,7 +1176,7 @@ private fun EditorialNavRow(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = "$count",
+                    text = countLabel,
                     style = MaterialTheme.typography.labelMedium,
                     color = colorScheme.outline
                 )
@@ -848,6 +1205,7 @@ private fun CheatsheetFormulaRow(
     onPreview: () -> Unit,
     onCopyLatex: () -> Unit,
     contextLabel: String? = null,
+    onOpenContext: (() -> Unit)? = null,
     showSource: Boolean = false
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -874,9 +1232,13 @@ private fun CheatsheetFormulaRow(
                     )
                     if (!contextLabel.isNullOrBlank()) {
                         Text(
-                            text = contextLabel,
+                            text = if (onOpenContext != null) "$contextLabel · Open in sheet →" else contextLabel,
                             style = MaterialTheme.typography.labelSmall,
-                            color = colorScheme.primary
+                            fontWeight = if (onOpenContext != null) FontWeight.SemiBold else FontWeight.Normal,
+                            color = colorScheme.primary,
+                            modifier = if (onOpenContext != null) {
+                                Modifier.clickable(onClick = onOpenContext).padding(vertical = 2.dp)
+                            } else Modifier
                         )
                     }
                 }

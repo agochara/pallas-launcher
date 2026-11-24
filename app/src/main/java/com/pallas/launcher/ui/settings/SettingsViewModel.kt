@@ -5,14 +5,22 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pallas.launcher.data.repository.AppRepository
+import com.pallas.launcher.data.repository.FocusModeManager
+import com.pallas.launcher.data.repository.FocusState
+import com.pallas.launcher.data.repository.QuickCaptureRepository
 import com.pallas.launcher.data.repository.ScreenRepository
 import com.pallas.launcher.data.repository.SettingsBackup
 import com.pallas.launcher.data.repository.SettingsRepository
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.model.CommandConfig
+import com.pallas.launcher.domain.model.FocusProfile
 import com.pallas.launcher.domain.model.HomeScreen
 import com.pallas.launcher.domain.model.LauncherSettings
+import com.pallas.launcher.domain.model.MacroRoutine
 import com.pallas.launcher.domain.model.ScreenApp
+import com.pallas.launcher.platform.MacroExecutor
+import com.pallas.launcher.platform.SystemActionsManager
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,9 +38,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val settingsRepository = SettingsRepository.getInstance(context)
     val screenRepository = ScreenRepository.getInstance(context)
     val appRepository = AppRepository.getInstance(context)
+    val focusModeManager = FocusModeManager.getInstance(context)
+    val quickCaptureRepository = QuickCaptureRepository.getInstance(context)
     private val uiPrefs = context.getSharedPreferences("pallas_ui_state", Context.MODE_PRIVATE)
 
     val settings: StateFlow<LauncherSettings> = settingsRepository.settings
+    val focusState: StateFlow<FocusState> = focusModeManager.state
     val screens: StateFlow<List<HomeScreen>> = screenRepository.screens
     val installedApps: StateFlow<List<AppItem>> = appRepository.installedApps
     val allInstalledApps: StateFlow<List<AppItem>> = appRepository.rawInstalledApps
@@ -80,6 +91,101 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun addSearchContact(nickname: String, name: String, phoneNumber: String) =
         settingsRepository.addSearchContact(nickname, name, phoneNumber)
     fun removeSearchContact(id: String) = settingsRepository.removeSearchContact(id)
+
+    fun activateFocus(profile: FocusProfile, durationMinutes: Int? = null) {
+        if ((profile.syncDnd || profile.muteRinger) && !SystemActionsManager.isDndAccessGranted(context)) {
+            SystemActionsManager.openDndAccessSettings(context)
+        }
+        val durationMs = durationMinutes?.takeIf { it > 0 }?.let { it * 60_000L }
+        focusModeManager.activate(profile, durationMillis = durationMs, isScheduled = false)
+        profile.onEnterMacroId?.let { macroId ->
+            settings.value.macros.firstOrNull { it.id == macroId }?.let { runMacro(it) }
+        }
+    }
+
+    fun deactivateFocus() {
+        focusModeManager.deactivate(settings.value, isManualDismiss = true)
+    }
+
+    fun saveFocusProfile(profile: FocusProfile, makeDefault: Boolean = false) {
+        updateSettings {
+            val idx = focusProfiles.indexOfFirst { it.id == profile.id }
+            val updatedList = if (idx >= 0) {
+                focusProfiles.toMutableList().apply { this[idx] = profile }
+            } else {
+                focusProfiles + profile
+            }
+            val newDefault = when {
+                makeDefault -> profile.id
+                defaultFocusProfileId == null -> profile.id
+                else -> defaultFocusProfileId
+            }
+            copy(focusProfiles = updatedList, defaultFocusProfileId = newDefault)
+        }
+        focusModeManager.syncState(settings.value)
+    }
+
+    fun deleteFocusProfile(profileId: String) {
+        updateSettings {
+            val remaining = focusProfiles.filterNot { it.id == profileId }
+            val newDefault = if (defaultFocusProfileId == profileId) remaining.firstOrNull()?.id else defaultFocusProfileId
+            val newSchedProfile = if (focusScheduleProfileId == profileId) remaining.firstOrNull()?.id else focusScheduleProfileId
+            copy(
+                focusProfiles = remaining,
+                defaultFocusProfileId = newDefault,
+                focusScheduleProfileId = newSchedProfile
+            )
+        }
+        focusModeManager.syncState(settings.value)
+    }
+
+    fun setDefaultFocusProfile(profileId: String) {
+        updateSettings { copy(defaultFocusProfileId = profileId) }
+    }
+
+    fun saveMacro(macro: MacroRoutine) {
+        updateSettings {
+            val idx = macros.indexOfFirst { it.id == macro.id }
+            val updated = if (idx >= 0) {
+                macros.toMutableList().apply { this[idx] = macro }
+            } else {
+                macros + macro
+            }
+            copy(macros = updated)
+        }
+    }
+
+    fun deleteMacro(macroId: String) {
+        updateSettings { copy(macros = macros.filterNot { it.id == macroId }) }
+    }
+
+    fun runMacro(
+        macro: MacroRoutine,
+        onNavigate: (SettingsSubpage) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            MacroExecutor.execute(
+                context = context,
+                macro = macro,
+                settingsRepository = settingsRepository,
+                appRepository = appRepository,
+                quickCaptureRepository = quickCaptureRepository,
+                allowedKeys = null,
+                onOverlay = { cmd ->
+                    when (cmd) {
+                        MacroExecutor.OverlayCommand.Notebook -> onNavigate(SettingsSubpage.NOTEBOOK)
+                        MacroExecutor.OverlayCommand.LatexStudio -> onNavigate(SettingsSubpage.LATEX_STUDIO)
+                        MacroExecutor.OverlayCommand.Atlas -> onNavigate(SettingsSubpage.WORLD_ATLAS)
+                        MacroExecutor.OverlayCommand.QuickCapture -> onNavigate(SettingsSubpage.QUICK_CAPTURE)
+                        is MacroExecutor.OverlayCommand.SwitchScreen -> {
+                            val idx = screens.value.indexOfFirst { it.id == cmd.screenId }
+                            if (idx >= 0) setScreenIndex(idx)
+                        }
+                    }
+                }
+            )
+        }
+    }
 
     fun updateCommandConfig(id: String, enabled: Boolean, prefix: String): String? {
         val cleanPrefix = prefix.trim()

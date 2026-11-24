@@ -16,9 +16,14 @@ object SearchRanking {
     private val WORD_SPLIT = """[\s_\-.,:/]+""".toRegex()
 
     fun normalize(input: String): String {
-        val nfd = Normalizer.normalize(input, Normalizer.Form.NFD)
-        return nfd.replace(DIACRITICS_REGEX, "")
-            .lowercase(Locale.ROOT)
+        for (i in 0 until input.length) {
+            if (input[i].code >= 128) {
+                val nfd = Normalizer.normalize(input, Normalizer.Form.NFD)
+                return nfd.replace(DIACRITICS_REGEX, "")
+                    .lowercase(Locale.ROOT)
+            }
+        }
+        return input.lowercase(Locale.ROOT)
     }
 
     fun extractWords(input: String): List<String> {

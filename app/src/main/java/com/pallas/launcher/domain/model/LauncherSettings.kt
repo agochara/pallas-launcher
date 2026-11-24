@@ -80,7 +80,18 @@ data class CommandConfig(
             "stock" to CommandConfig("stock", "Markets & Finance", true, "st"),
             "weather" to CommandConfig("weather", "Weather", true, "w"),
             "solar" to CommandConfig("solar", "Sunrise & Sunset", true, "sun"),
-            "wolfram" to CommandConfig("wolfram", "Wolfram Alpha", true, "wa")
+            "wolfram" to CommandConfig("wolfram", "Wolfram Alpha", true, "wa"),
+            "wiki" to CommandConfig("wiki", "Wikipedia", true, "wiki"),
+            "tz" to CommandConfig("tz", "World Time", true, "tz"),
+            "def" to CommandConfig("def", "Quick Definition", true, "def"),
+            "note" to CommandConfig("note", "Quick Capture", true, "n"),
+            "qr" to CommandConfig("qr", "Offline QR Code", true, "qr"),
+            "emi" to CommandConfig("emi", "Loan EMI", true, "emi"),
+            "files" to CommandConfig("files", "Local Files", true, "#"),
+            "calendar" to CommandConfig("calendar", "Calendar Agenda", true, "cal"),
+            "flashlight" to CommandConfig("flashlight", "Flashlight", true, "fl"),
+            "dnd" to CommandConfig("dnd", "Do Not Disturb", true, "dnd"),
+            "app_search" to CommandConfig("app_search", "Direct App Search", true, "!")
         )
 
         val ALL_ENABLED: Map<String, CommandConfig> = DEFAULTS
@@ -124,6 +135,7 @@ data class LauncherSettings(
     val clockPaddingRightDp: Int = 24,
     val clockPaddingTopDp: Int = 24,
     val clockPaddingBottomDp: Int = 12,
+    val clockDateSpacingDp: Int = 2,
     val screensPaddingDp: Int = 32,
     val screensPaddingLeftDp: Int = 32,
     val screensPaddingRightDp: Int = 32,
@@ -144,7 +156,20 @@ data class LauncherSettings(
     val autoLaunchSingleMatch: Boolean = false,
     val stockDefaultRange: String = "5d",
     val stockDefaultInterval: String = "1d",
-    val stockShowSparkline: Boolean = true
+    val stockShowSparkline: Boolean = true,
+    val dateArithmeticEnabled: Boolean = true,
+    val colorBaseInspectorEnabled: Boolean = true,
+    val wikiDefRequestTrigger: WolframRequestTrigger = WolframRequestTrigger.ENTER,
+    val wikiDefIdleDelaySeconds: Int = 2,
+    val stockWeatherRequestTrigger: WolframRequestTrigger = WolframRequestTrigger.IDLE,
+    val stockWeatherIdleDelaySeconds: Int = 1,
+    val focusProfiles: List<FocusProfile> = emptyList(),
+    val defaultFocusProfileId: String? = null,
+    val focusScheduleEnabled: Boolean = false,
+    val focusScheduleStartMinute: Int = 23 * 60,
+    val focusScheduleEndMinute: Int = 7 * 60,
+    val focusScheduleProfileId: String? = null,
+    val macros: List<MacroRoutine> = emptyList()
 ) {
     companion object {
         const val DEFAULT_WEATHER_CITY = "London"

@@ -6,10 +6,12 @@ import com.pallas.launcher.domain.search.SmartCommandType
 import com.pallas.launcher.domain.search.UnitConverterEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.URLEncoder
 import java.net.UnknownHostException
 import java.util.Locale
 import kotlin.math.abs
@@ -53,7 +55,11 @@ object LiveCommandService {
         }
     }
 
-    private fun httpGetDetailed(urlStr: String, attempts: Int = 2): HttpOutcome {
+    private fun httpGetDetailed(
+        urlStr: String,
+        attempts: Int = 2,
+        userAgent: String = DEFAULT_USER_AGENT
+    ): HttpOutcome {
         synchronized(responseCache) {
             responseCache[urlStr]?.let { (stamp, body) ->
                 if (System.currentTimeMillis() - stamp < CACHE_TTL_MS) return HttpOutcome(body, null)
@@ -66,10 +72,7 @@ object LiveCommandService {
                 conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 8000
                     readTimeout = 8000
-                    setRequestProperty(
-                        "User-Agent",
-                        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-                    )
+                    setRequestProperty("User-Agent", userAgent)
                     setRequestProperty("Accept", "application/json,text/plain,*/*")
                 }
                 val code = conn.responseCode
@@ -81,7 +84,7 @@ object LiveCommandService {
                     return HttpOutcome(body, null)
                 }
                 lastError = "HTTP $code"
-                if (code in 400..499 && code != 429) return HttpOutcome(null, lastError)
+                if (code in 400..499) return HttpOutcome(null, lastError)
             } catch (_: UnknownHostException) {
                 lastError = "DNS failed (check Private DNS / ad blocker)"
             } catch (_: SocketTimeoutException) {
@@ -101,7 +104,8 @@ object LiveCommandService {
         rawQuery: String,
         range: String = "5d",
         interval: String = "1d",
-        showSparkline: Boolean = true
+        showSparkline: Boolean = true,
+        browserPackage: String? = null
     ): LauncherSearchResult.RichCard = withContext(Dispatchers.IO) {
         val clean = rawQuery.trim()
         val parts = clean.split("\\s+".toRegex())
@@ -174,7 +178,7 @@ object LiveCommandService {
                 subtitle = "$symbol • $exchange ($effectiveRange)",
                 sparkline = if (showSparkline) closes else emptyList(),
                 execute = { ctx ->
-                    SystemActionsManager.openUrl(ctx, "https://finance.yahoo.com/quote/${Uri.encode(symbol)}")
+                    SystemActionsManager.openUrl(ctx, "https://finance.yahoo.com/quote/${Uri.encode(symbol)}", browserPackage)
                 }
             )
         } catch (_: Exception) {
@@ -304,7 +308,11 @@ object LiveCommandService {
         }
     }
 
-    suspend fun fetchWolframShortAnswer(query: String, appId: String): LauncherSearchResult.RichCard = withContext(Dispatchers.IO) {
+    suspend fun fetchWolframShortAnswer(
+        query: String,
+        appId: String,
+        browserPackage: String? = null
+    ): LauncherSearchResult.RichCard = withContext(Dispatchers.IO) {
         if (appId.isBlank()) {
             return@withContext LauncherSearchResult.RichCard(
                 id = "wa_no_key",
@@ -326,7 +334,7 @@ object LiveCommandService {
                 isBadgePositive = true,
                 subtitle = "",
                 execute = { ctx ->
-                    SystemActionsManager.openUrl(ctx, "https://www.wolframalpha.com/input?i=${Uri.encode(query)}")
+                    SystemActionsManager.openUrl(ctx, "https://www.wolframalpha.com/input?i=${Uri.encode(query)}", browserPackage)
                 }
             )
         } else {
@@ -336,11 +344,266 @@ object LiveCommandService {
                 title = query,
                 subtitle = "No short answer (${outcome.error ?: "unavailable"})",
                 execute = { ctx ->
-                    SystemActionsManager.openUrl(ctx, "https://www.wolframalpha.com/input?i=${Uri.encode(query)}")
+                    SystemActionsManager.openUrl(ctx, "https://www.wolframalpha.com/input?i=${Uri.encode(query)}", browserPackage)
                 }
             )
         }
     }
+
+    data class WikiSummary(
+        val title: String,
+        val description: String,
+        val extract: String,
+        val articleUrl: String
+    )
+
+    internal fun encodeWikiTitle(query: String): String {
+        val normalized = query.trim().replace("\\s+".toRegex(), "_")
+        return URLEncoder.encode(normalized, "UTF-8").replace("+", "%20")
+    }
+
+    private fun urlEncodeUtf8(query: String): String =
+        URLEncoder.encode(query.trim(), "UTF-8").replace("+", "%20")
+
+    internal fun parseWikipediaSummaryJson(json: String, fallbackQuery: String): WikiSummary? {
+        return try {
+            val obj = JSONObject(json)
+            val title = obj.optString("title", "").ifBlank { fallbackQuery.trim() }
+            val extract = obj.optString("extract", "").trim()
+            if (extract.isBlank()) return null
+            val description = obj.optString("description", "").trim()
+            val contentUrls = obj.optJSONObject("content_urls")
+            val desktopPage = contentUrls?.optJSONObject("desktop")?.optString("page", "")?.trim().orEmpty()
+            val mobilePage = contentUrls?.optJSONObject("mobile")?.optString("page", "")?.trim().orEmpty()
+            val articleUrl = desktopPage.ifBlank {
+                mobilePage.ifBlank { "https://en.wikipedia.org/wiki/${encodeWikiTitle(title)}" }
+            }
+            WikiSummary(
+                title = title,
+                description = description,
+                extract = extract,
+                articleUrl = articleUrl
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    internal fun parseOpenSearchFirstTitle(json: String): String? {
+        return try {
+            val root = JSONArray(json)
+            val titles = root.optJSONArray(1) ?: return null
+            if (titles.length() == 0) null else titles.optString(0, "").trim().takeIf { it.isNotEmpty() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun fetchWikipediaSummary(
+        rawQuery: String,
+        browserPackage: String? = null
+    ): LauncherSearchResult.RichCard = withContext(Dispatchers.IO) {
+        val clean = rawQuery.trim()
+        if (clean.isEmpty()) {
+            return@withContext LauncherSearchResult.RichCard(
+                id = "wiki_empty",
+                type = SmartCommandType.WIKI,
+                title = "Wikipedia",
+                subtitle = "Enter a topic to look up"
+            )
+        }
+
+        val summaryUrl = "https://en.wikipedia.org/api/rest_v1/page/summary/${encodeWikiTitle(clean)}"
+        val firstOutcome = httpGetDetailed(summaryUrl, attempts = 1, userAgent = WIKI_USER_AGENT)
+        var summary = firstOutcome.body?.let { parseWikipediaSummaryJson(it, clean) }
+        var lastError = firstOutcome.error
+
+        if (summary == null) {
+            val searchUrl = "https://en.wikipedia.org/w/api.php?action=opensearch&search=${urlEncodeUtf8(clean)}&limit=3&namespace=0&format=json"
+            val searchOutcome = httpGetDetailed(searchUrl, attempts = 1, userAgent = WIKI_USER_AGENT)
+            val matchedTitle = searchOutcome.body?.let { parseOpenSearchFirstTitle(it) }
+            if (matchedTitle != null) {
+                val fallbackSummaryUrl = "https://en.wikipedia.org/api/rest_v1/page/summary/${encodeWikiTitle(matchedTitle)}"
+                val secondOutcome = httpGetDetailed(fallbackSummaryUrl, attempts = 1, userAgent = WIKI_USER_AGENT)
+                summary = secondOutcome.body?.let { parseWikipediaSummaryJson(it, matchedTitle) }
+                if (summary == null && secondOutcome.error != null) {
+                    lastError = secondOutcome.error
+                }
+            } else if (searchOutcome.error != null && lastError == null) {
+                lastError = searchOutcome.error
+            }
+        }
+
+        if (summary != null) {
+            LauncherSearchResult.RichCard(
+                id = "wiki_${summary.title}",
+                type = SmartCommandType.WIKI,
+                title = summary.title,
+                subtitle = summary.description,
+                bodyText = summary.extract,
+                badgeText = "Wikipedia",
+                isBadgePositive = true,
+                copyText = summary.extract,
+                execute = { ctx ->
+                    SystemActionsManager.openUrl(ctx, summary.articleUrl, browserPackage)
+                }
+            )
+        } else {
+            val reason = if (lastError != null && lastError != "HTTP 404") lastError else "no matching article"
+            LauncherSearchResult.RichCard(
+                id = "wiki_err_$clean",
+                type = SmartCommandType.WIKI,
+                title = clean,
+                subtitle = "Wikipedia ($reason)",
+                execute = { ctx ->
+                    SystemActionsManager.openUrl(ctx, "https://en.wikipedia.org/w/index.php?search=${urlEncodeUtf8(clean)}", browserPackage)
+                }
+            )
+        }
+    }
+
+    data class DictionaryEntry(
+        val word: String,
+        val phonetic: String,
+        val partOfSpeech: String,
+        val definitions: List<String>,
+        val example: String?,
+        val sourceUrl: String
+    )
+
+    internal fun parseDictionaryJson(json: String, fallbackWord: String): DictionaryEntry? {
+        return try {
+            val arr = JSONArray(json)
+            if (arr.length() == 0) return null
+            val first = arr.optJSONObject(0) ?: return null
+            val word = first.optString("word", "").trim().ifBlank { fallbackWord.trim() }
+
+            var phonetic = first.optString("phonetic", "").trim()
+            if (phonetic.isEmpty()) {
+                val phonetics = first.optJSONArray("phonetics")
+                if (phonetics != null) {
+                    for (i in 0 until phonetics.length()) {
+                        val t = phonetics.optJSONObject(i)?.optString("text", "")?.trim().orEmpty()
+                        if (t.isNotEmpty()) {
+                            phonetic = t
+                            break
+                        }
+                    }
+                }
+            }
+
+            val meanings = first.optJSONArray("meanings") ?: return null
+            var primaryPos = ""
+            var firstExample: String? = null
+            val defs = mutableListOf<String>()
+
+            for (mIdx in 0 until meanings.length()) {
+                val m = meanings.optJSONObject(mIdx) ?: continue
+                val pos = m.optString("partOfSpeech", "").trim()
+                if (primaryPos.isEmpty() && pos.isNotEmpty()) primaryPos = pos
+                val dArr = m.optJSONArray("definitions") ?: continue
+                for (dIdx in 0 until minOf(2, dArr.length())) {
+                    val dObj = dArr.optJSONObject(dIdx) ?: continue
+                    val defText = dObj.optString("definition", "").trim()
+                    if (defText.isNotEmpty()) {
+                        val line = if (pos.isNotEmpty()) "($pos) $defText" else defText
+                        defs.add(line)
+                    }
+                    if (firstExample == null) {
+                        val ex = dObj.optString("example", "").trim()
+                        if (ex.isNotEmpty()) firstExample = ex
+                    }
+                    if (defs.size >= 3) break
+                }
+                if (defs.size >= 3) break
+            }
+
+            if (defs.isEmpty()) return null
+
+            val sourceUrls = first.optJSONArray("sourceUrls")
+            val sourceUrl = (0 until (sourceUrls?.length() ?: 0))
+                .asSequence()
+                .mapNotNull { sourceUrls?.optString(it)?.trim()?.takeIf { u -> u.isNotEmpty() } }
+                .firstOrNull()
+                ?: "https://en.wiktionary.org/wiki/${encodeWikiTitle(word)}"
+
+            DictionaryEntry(
+                word = word,
+                phonetic = phonetic,
+                partOfSpeech = primaryPos,
+                definitions = defs,
+                example = firstExample,
+                sourceUrl = sourceUrl
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun fetchDefinition(
+        rawWord: String,
+        browserPackage: String? = null
+    ): LauncherSearchResult.RichCard = withContext(Dispatchers.IO) {
+        val clean = rawWord.trim()
+        if (clean.isEmpty()) {
+            return@withContext LauncherSearchResult.RichCard(
+                id = "def_empty",
+                type = SmartCommandType.DEFINE,
+                title = "Dictionary",
+                subtitle = "Enter an English word to define"
+            )
+        }
+
+        val url = "https://api.dictionaryapi.dev/api/v2/entries/en/${urlEncodeUtf8(clean.lowercase(Locale.ROOT))}"
+        val outcome = httpGetDetailed(url, attempts = 1, userAgent = WIKI_USER_AGENT)
+        val parsed = outcome.body?.let { parseDictionaryJson(it, clean) }
+
+        if (parsed != null) {
+            val numbered = parsed.definitions.mapIndexed { idx, line ->
+                if (parsed.definitions.size > 1) "${idx + 1}. $line" else line
+            }.joinToString("\n")
+            val body = if (!parsed.example.isNullOrBlank()) {
+                "$numbered\n\"${parsed.example}\""
+            } else {
+                numbered
+            }
+            val copyContent = buildString {
+                append(parsed.word)
+                if (parsed.phonetic.isNotEmpty()) append(" (${parsed.phonetic})")
+                append(": ")
+                append(parsed.definitions.joinToString(" | "))
+            }
+            LauncherSearchResult.RichCard(
+                id = "def_${parsed.word}",
+                type = SmartCommandType.DEFINE,
+                title = parsed.word,
+                subtitle = parsed.phonetic.ifBlank { parsed.partOfSpeech },
+                bodyText = body,
+                badgeText = parsed.partOfSpeech.ifBlank { "Define" },
+                isBadgePositive = true,
+                copyText = copyContent,
+                execute = { ctx ->
+                    SystemActionsManager.openUrl(ctx, parsed.sourceUrl, browserPackage)
+                }
+            )
+        } else {
+            val reason = if (outcome.error != null && outcome.error != "HTTP 404") outcome.error else "no definition found"
+            LauncherSearchResult.RichCard(
+                id = "def_err_$clean",
+                type = SmartCommandType.DEFINE,
+                title = clean,
+                subtitle = "Dictionary ($reason)",
+                execute = { ctx ->
+                    SystemActionsManager.openUrl(ctx, "https://en.wiktionary.org/wiki/${encodeWikiTitle(clean)}", browserPackage)
+                }
+            )
+        }
+    }
+
+    private const val DEFAULT_USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+    private const val WIKI_USER_AGENT =
+        "PallasLauncher/3.0.0 (Android; minimalist launcher)"
 
     private fun wmoDescription(code: Int): String = when (code) {
         0 -> "Clear"

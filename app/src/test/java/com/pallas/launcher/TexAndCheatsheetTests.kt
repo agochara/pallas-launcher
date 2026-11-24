@@ -4,6 +4,10 @@ import com.hrm.latex.parser.LatexParser
 import com.pallas.launcher.domain.math.MathCheatsheets
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.model.CommandConfig
+import com.pallas.launcher.domain.reference.CheatsheetKind
+import com.pallas.launcher.domain.reference.EngineeringCheatsheetData
+import com.pallas.launcher.domain.reference.PeriodicTableData
+import com.pallas.launcher.domain.reference.PhysicsCheatsheetData
 import com.pallas.launcher.domain.search.LauncherSearchResult
 import com.pallas.launcher.domain.search.MathStatsEngine
 import com.pallas.launcher.domain.search.SearchEngine
@@ -145,7 +149,20 @@ class TexAndCheatsheetTests {
     fun cheatsheetsCoverCalculusAndHaveBalancedLatexWithoutBasicArithmetic() {
         val topics = MathCheatsheets.TOPICS
         assertEquals(
-            listOf("calculus", "linear_algebra", "probability_statistics", "latex"),
+            listOf(
+                "calculus",
+                "linear_algebra",
+                "probability_statistics",
+                "geometry_trig",
+                "discrete_math",
+                "physics",
+                "periodic_table",
+                "biology_physiology",
+                "engineering",
+                "finance_economics",
+                "information_theory",
+                "latex"
+            ),
             topics.map { it.id }
         )
 
@@ -156,7 +173,9 @@ class TexAndCheatsheetTests {
         topics.forEach { topic ->
             assertTrue("shortTitle blank for ${topic.id}", topic.shortTitle.isNotBlank())
             assertTrue("symbol blank for ${topic.id}", topic.symbol.isNotBlank())
-            assertTrue("subsections empty for ${topic.id}", topic.subsections.isNotEmpty())
+            if (topic.kind != CheatsheetKind.PERIODIC_TABLE) {
+                assertTrue("subsections empty for ${topic.id}", topic.subsections.isNotEmpty())
+            }
             assertEquals(
                 "Duplicate subsection titles in ${topic.id}",
                 topic.subsections.size,
@@ -176,6 +195,43 @@ class TexAndCheatsheetTests {
 
         val probTopic = MathCheatsheets.topicById("probability_statistics")!!
         assertFalse(probTopic.title.contains("Fat Tail", ignoreCase = true))
+
+        val financeTopic = MathCheatsheets.topicById("finance_economics")!!
+        val financeText = (listOf(financeTopic.title, financeTopic.description) +
+            financeTopic.subsections.flatMap { sub ->
+                listOf(sub.title) + sub.formulas.flatMap { listOf(it.title, it.latex, it.note.orEmpty()) }
+            }).joinToString(" ").lowercase()
+        listOf("black-scholes", "black scholes", "capm", "markowitz", "sharpe ratio", "mean-variance").forEach { banned ->
+            assertFalse("Forbidden formula/theory '$banned' found in finance cheatsheet", financeText.contains(banned))
+        }
+
+        val infoTopic = MathCheatsheets.topicById("information_theory")!!
+        assertEquals("Information Theory", infoTopic.title)
+        val infoTitles = infoTopic.subsections.flatMap { it.formulas }.map { it.title }.joinToString(" | ")
+        listOf(
+            "Source Coding Theorem",
+            "Noisy-Channel Coding Theorem",
+            "Shannon–Hartley",
+            "Data Processing Inequality",
+            "Gibbs' Inequality",
+            "Kraft–McMillan",
+            "Asymptotic Equipartition Property",
+            "Fano's Inequality"
+        ).forEach { expected ->
+            assertTrue("Expected theorem '$expected' in Information Theory", infoTitles.contains(expected))
+        }
+
+        val engTopic = MathCheatsheets.topicById("engineering")!!
+        val engText = (listOf(engTopic.title, engTopic.description) +
+            engTopic.subsections.flatMap { sub -> sub.formulas.flatMap { listOf(it.title, it.latex, it.note.orEmpty()) } }).joinToString(" ")
+        assertFalse("Engineering cheatsheet should not reference Gordon", engText.contains("Gordon", ignoreCase = true))
+
+        // Periodic Table, Constants, Materials sanity
+        assertEquals(118, PeriodicTableData.ELEMENTS.size)
+        assertEquals((1..118).toList(), PeriodicTableData.ELEMENTS.map { it.atomicNumber })
+        assertEquals(118, PeriodicTableData.ELEMENTS.map { it.gridRow to it.gridCol }.distinct().size)
+        assertTrue(PhysicsCheatsheetData.PHYSICAL_CONSTANTS.size >= 24)
+        assertTrue(EngineeringCheatsheetData.ENGINEERING_MATERIALS.size >= 10)
 
         val latexTopic = MathCheatsheets.topicById("latex")
         assertNotNull(latexTopic)

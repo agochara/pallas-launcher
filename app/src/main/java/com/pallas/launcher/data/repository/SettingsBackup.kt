@@ -7,9 +7,11 @@ import com.pallas.launcher.domain.model.ClockVerticalPosition
 import com.pallas.launcher.domain.model.CommandConfig
 import com.pallas.launcher.domain.model.EdgeScrubPosition
 import com.pallas.launcher.domain.model.EdgeScrubReleaseAction
+import com.pallas.launcher.domain.model.FocusProfile
 import com.pallas.launcher.domain.model.GestureAction
 import com.pallas.launcher.domain.model.HomeScreen
 import com.pallas.launcher.domain.model.LauncherSettings
+import com.pallas.launcher.domain.model.MacroRoutine
 import com.pallas.launcher.domain.model.NameLengthSortOrder
 import com.pallas.launcher.domain.model.SearchContact
 import com.pallas.launcher.domain.model.TextShadowMode
@@ -173,6 +175,7 @@ object SettingsBackup {
         put("clockPaddingRightDp", s.clockPaddingRightDp)
         put("clockPaddingTopDp", s.clockPaddingTopDp)
         put("clockPaddingBottomDp", s.clockPaddingBottomDp)
+        put("clockDateSpacingDp", s.clockDateSpacingDp)
 
         put("appsVerticalPosition", s.appsVerticalPosition.name)
         put("appsHorizontalAlignment", s.appsHorizontalAlignment.name)
@@ -222,6 +225,19 @@ object SettingsBackup {
         put("stockDefaultRange", s.stockDefaultRange)
         put("stockDefaultInterval", s.stockDefaultInterval)
         put("stockShowSparkline", s.stockShowSparkline)
+        put("dateArithmeticEnabled", s.dateArithmeticEnabled)
+        put("colorBaseInspectorEnabled", s.colorBaseInspectorEnabled)
+        put("wikiDefRequestTrigger", s.wikiDefRequestTrigger.name)
+        put("wikiDefIdleDelaySeconds", s.wikiDefIdleDelaySeconds)
+        put("stockWeatherRequestTrigger", s.stockWeatherRequestTrigger.name)
+        put("stockWeatherIdleDelaySeconds", s.stockWeatherIdleDelaySeconds)
+        put("focusProfiles", JSONArray().also { arr -> s.focusProfiles.forEach { arr.put(it.toJson()) } })
+        if (s.defaultFocusProfileId != null) put("defaultFocusProfileId", s.defaultFocusProfileId)
+        put("focusScheduleEnabled", s.focusScheduleEnabled)
+        put("focusScheduleStartMinute", s.focusScheduleStartMinute)
+        put("focusScheduleEndMinute", s.focusScheduleEndMinute)
+        if (s.focusScheduleProfileId != null) put("focusScheduleProfileId", s.focusScheduleProfileId)
+        put("macros", JSONArray().also { arr -> s.macros.forEach { arr.put(it.toJson()) } })
     }
 
     fun settingsFromJson(o: JSONObject, base: LauncherSettings = LauncherSettings()): LauncherSettings {
@@ -337,6 +353,36 @@ object SettingsBackup {
         val stockIntervalRaw = o.optStringOrNull("stockDefaultInterval")?.trim()
         val stockInterval = if (!stockIntervalRaw.isNullOrEmpty()) stockIntervalRaw else base.stockDefaultInterval
 
+        val focusProfiles = if (!o.has("focusProfiles")) {
+            base.focusProfiles
+        } else if (o.isNull("focusProfiles")) {
+            emptyList()
+        } else {
+            val arr = o.optJSONArray("focusProfiles")
+            if (arr == null) base.focusProfiles
+            else buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    FocusProfile.fromJson(obj)?.let { add(it) }
+                }
+            }
+        }
+
+        val macros = if (!o.has("macros")) {
+            base.macros
+        } else if (o.isNull("macros")) {
+            emptyList()
+        } else {
+            val arr = o.optJSONArray("macros")
+            if (arr == null) base.macros
+            else buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    MacroRoutine.fromJson(obj)?.let { add(it) }
+                }
+            }
+        }
+
         return base.copy(
             themeMode = enumOf("themeMode", base.themeMode, ThemeMode.entries.toTypedArray()),
             showWallpaperScrim = o.optBoolean("showWallpaperScrim", base.showWallpaperScrim),
@@ -355,6 +401,7 @@ object SettingsBackup {
             clockPaddingRightDp = dp("clockPaddingRightDp", base.clockPaddingRightDp),
             clockPaddingTopDp = dp("clockPaddingTopDp", base.clockPaddingTopDp),
             clockPaddingBottomDp = dp("clockPaddingBottomDp", base.clockPaddingBottomDp),
+            clockDateSpacingDp = o.optInt("clockDateSpacingDp", base.clockDateSpacingDp).coerceIn(0, 48),
 
             appsVerticalPosition = enumOf("appsVerticalPosition", base.appsVerticalPosition, AppsVerticalPosition.entries.toTypedArray()),
             appsHorizontalAlignment = enumOf("appsHorizontalAlignment", base.appsHorizontalAlignment, AppsHorizontalAlignment.entries.toTypedArray()),
@@ -380,7 +427,7 @@ object SettingsBackup {
                 ?: parsedSwipeDown ?: base.swipeDownRightAction,
             wolframSubmitMode = enumOf("wolframSubmitMode", base.wolframSubmitMode, WolframSubmitMode.entries.toTypedArray()),
             wolframRequestTrigger = enumOf("wolframRequestTrigger", base.wolframRequestTrigger, WolframRequestTrigger.entries.toTypedArray()),
-            wolframIdleDelaySeconds = o.optInt("wolframIdleDelaySeconds", base.wolframIdleDelaySeconds).coerceIn(1, 30),
+            wolframIdleDelaySeconds = o.optInt("wolframIdleDelaySeconds", base.wolframIdleDelaySeconds).coerceIn(1, 5),
             doubleTapAction = o.optStringOrNull("doubleTapAction")?.let(GestureAction::fromStringOrNull) ?: base.doubleTapAction,
             edgeScrubPosition = enumOf("edgeScrubPosition", base.edgeScrubPosition, EdgeScrubPosition.entries.toTypedArray()),
             edgeScrubReleaseAction = enumOf("edgeScrubReleaseAction", base.edgeScrubReleaseAction, EdgeScrubReleaseAction.entries.toTypedArray()),
@@ -400,7 +447,28 @@ object SettingsBackup {
             autoLaunchSingleMatch = o.optBoolean("autoLaunchSingleMatch", base.autoLaunchSingleMatch),
             stockDefaultRange = stockRange,
             stockDefaultInterval = stockInterval,
-            stockShowSparkline = o.optBoolean("stockShowSparkline", base.stockShowSparkline)
+            stockShowSparkline = o.optBoolean("stockShowSparkline", base.stockShowSparkline),
+            dateArithmeticEnabled = o.optBoolean("dateArithmeticEnabled", base.dateArithmeticEnabled),
+            colorBaseInspectorEnabled = o.optBoolean("colorBaseInspectorEnabled", base.colorBaseInspectorEnabled),
+            wikiDefRequestTrigger = enumOf("wikiDefRequestTrigger", base.wikiDefRequestTrigger, WolframRequestTrigger.entries.toTypedArray()),
+            wikiDefIdleDelaySeconds = o.optInt("wikiDefIdleDelaySeconds", base.wikiDefIdleDelaySeconds).coerceIn(1, 5),
+            stockWeatherRequestTrigger = enumOf("stockWeatherRequestTrigger", base.stockWeatherRequestTrigger, WolframRequestTrigger.entries.toTypedArray()),
+            stockWeatherIdleDelaySeconds = o.optInt("stockWeatherIdleDelaySeconds", base.stockWeatherIdleDelaySeconds).coerceIn(1, 5),
+            focusProfiles = focusProfiles,
+            defaultFocusProfileId = if (o.has("defaultFocusProfileId")) {
+                o.optStringOrNull("defaultFocusProfileId")?.trim()?.takeIf { it.isNotEmpty() }
+            } else {
+                base.defaultFocusProfileId
+            },
+            focusScheduleEnabled = o.optBoolean("focusScheduleEnabled", base.focusScheduleEnabled),
+            focusScheduleStartMinute = o.optInt("focusScheduleStartMinute", base.focusScheduleStartMinute).coerceIn(0, 1439),
+            focusScheduleEndMinute = o.optInt("focusScheduleEndMinute", base.focusScheduleEndMinute).coerceIn(0, 1439),
+            focusScheduleProfileId = if (o.has("focusScheduleProfileId")) {
+                o.optStringOrNull("focusScheduleProfileId")?.trim()?.takeIf { it.isNotEmpty() }
+            } else {
+                base.focusScheduleProfileId
+            },
+            macros = macros
         )
     }
 }

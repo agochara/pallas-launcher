@@ -55,9 +55,9 @@ class SettingsRepository(context: Context) {
     fun replaceAll(new: LauncherSettings) = update { new.copy(wolframAppId = wolframAppId) }
 
     private fun persist(old: LauncherSettings, new: LauncherSettings) {
-        prefs.edit().putString(KEY_SETTINGS_JSON, SettingsBackup.settingsToJson(new).toString()).commit()
+        prefs.edit().putString(KEY_SETTINGS_JSON, SettingsBackup.settingsToJson(new).toString()).apply()
         if (new.wolframAppId != old.wolframAppId) {
-            secrets.edit().putString(KEY_WOLFRAM_APP_ID, encryptSecret(new.wolframAppId)).commit()
+            secrets.edit().putString(KEY_WOLFRAM_APP_ID, encryptSecret(new.wolframAppId)).apply()
         }
     }
 
@@ -131,6 +131,7 @@ class SettingsRepository(context: Context) {
      */
     private fun migrateLegacy(): LauncherSettings {
         val hasLegacy = prefs.all.isNotEmpty()
+        if (!hasLegacy) return LauncherSettings()
 
         fun <T : Enum<T>> enumOf(key: String, default: T, values: Array<T>): T =
             values.firstOrNull { it.name == prefs.getString(key, null) } ?: default

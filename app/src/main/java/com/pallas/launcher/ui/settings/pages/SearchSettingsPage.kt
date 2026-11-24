@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -73,6 +74,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import com.pallas.launcher.data.repository.QuickCaptureRepository
 import com.pallas.launcher.domain.model.CommandConfig
 import com.pallas.launcher.domain.model.WolframSubmitMode
 import com.pallas.launcher.domain.model.WolframRequestTrigger
@@ -106,12 +108,43 @@ private val STOCK_RANGE_LABELS = listOf(
 fun SearchSettingsPage(
     viewModel: SettingsViewModel,
     onBack: () -> Unit,
+    onOpenQuickCapture: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
     val settings by viewModel.settings.collectAsState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val quickCaptureRepo = remember(context) { QuickCaptureRepository.getInstance(context) }
+    val quickNotes by quickCaptureRepo.notes.collectAsState()
+    val linkedMdLabel by quickCaptureRepo.linkedFileLabel.collectAsState()
+    var showQuickCaptureDialog by remember { mutableStateOf(false) }
+
+    fun resolveUriDisplayName(uri: Uri): String? = runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    }.getOrNull()
+
+    val openMdLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val name = resolveUriDisplayName(uri) ?: "Linked .md file"
+            quickCaptureRepo.setLinkedFile(uri, name)
+            Toast.makeText(context, "Linked $name", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val createMdLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri ->
+        if (uri != null) {
+            val name = resolveUriDisplayName(uri) ?: "pallas_inbox.md"
+            quickCaptureRepo.setLinkedFile(uri, name)
+            Toast.makeText(context, "Created & linked $name", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     var showBrowserDialog by remember { mutableStateOf(false) }
     var browsers by remember { mutableStateOf(emptyList<BrowserInfo>()) }
@@ -348,8 +381,127 @@ fun SearchSettingsPage(
                 val convertPrefix = settings.commandConfigs["convert"]?.prefix?.ifBlank { "convert" } ?: "convert"
                 val stockPrefix = settings.commandConfigs["stock"]?.prefix?.ifBlank { "st" } ?: "st"
                 val texPrefix = settings.commandConfigs["tex"]?.prefix?.ifBlank { "tex" } ?: "tex"
+                val wikiPrefix = settings.commandConfigs["wiki"]?.prefix?.ifBlank { "wiki" } ?: "wiki"
+                val tzPrefix = settings.commandConfigs["tz"]?.prefix?.ifBlank { "tz" } ?: "tz"
+                val defPrefix = settings.commandConfigs["def"]?.prefix?.ifBlank { "def" } ?: "def"
+                val notePrefix = settings.commandConfigs["note"]?.prefix?.ifBlank { "n" } ?: "n"
+                val qrPrefix = settings.commandConfigs["qr"]?.prefix?.ifBlank { "qr" } ?: "qr"
+                val emiPrefix = settings.commandConfigs["emi"]?.prefix?.ifBlank { "emi" } ?: "emi"
+                val filesPrefix = settings.commandConfigs["files"]?.prefix?.ifBlank { "#" } ?: "#"
+                val flPrefix = settings.commandConfigs["flashlight"]?.prefix?.ifBlank { "fl" } ?: "fl"
+                val dndPrefix = settings.commandConfigs["dnd"]?.prefix?.ifBlank { "dnd" } ?: "dnd"
                 Text(
-                    text = "Type '$webPrefix <words>' to search the web, '$convertPrefix 100 usd to inr' to convert units/FX, '@name' for contacts, '$stockPrefix SYMBOL 5y' for stocks, or '$texPrefix <latex>' for LaTeX.",
+                    text = "Try '$webPrefix <words>', '$wikiPrefix <topic>', '$defPrefix <word>', '$tzPrefix nyc', '$notePrefix <note>', '$qrPrefix <url>', '$emiPrefix 500k 8.5 5y', '$convertPrefix usd to inr', '@name', '$stockPrefix SYMBOL', '$texPrefix <latex>', 'show cal', '${filesPrefix}file', '$flPrefix', '$dndPrefix', 'focus', 'days to 15 may', or '#D4AF37'.",
+                    color = colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp)
+                )
+            }
+
+            // ------------------------------------------------------------- Section: Wolfram Alpha
+            item {
+                val waPrefix = settings.commandConfigs["wolfram"]?.prefix?.ifBlank { "wa" } ?: "wa"
+                SettingsSectionHeader("Wolfram Alpha")
+                SettingsGroup {
+                    SettingsNavRow(
+                        title = "AppID",
+                        subtitle = if (settings.wolframAppId.isBlank()) "Not configured" else "Configured",
+                        onClick = {
+                            wolframInput = settings.wolframAppId
+                            revealWolframAppId = false
+                            showWolframDialog = true
+                        }
+                    )
+                    SettingsSegmentedRow(
+                        title = "Mode",
+                        options = WolframSubmitMode.entries,
+                        selected = settings.wolframSubmitMode,
+                        onSelected = { viewModel.updateSettings { copy(wolframSubmitMode = it) } },
+                        label = { if (it == WolframSubmitMode.API) "Query API" else "Open website" }
+                    )
+                    if (settings.wolframSubmitMode == WolframSubmitMode.API) {
+                        SettingsSegmentedRow(
+                            title = "API Request",
+                            options = WolframRequestTrigger.entries,
+                            selected = settings.wolframRequestTrigger,
+                            onSelected = { viewModel.updateSettings { copy(wolframRequestTrigger = it) } },
+                            label = { if (it == WolframRequestTrigger.ENTER) "On Enter" else "After delay" }
+                        )
+                        if (settings.wolframRequestTrigger == WolframRequestTrigger.IDLE) {
+                            SettingsSegmentedRow(
+                                title = "Request Delay",
+                                options = listOf(1, 2, 3, 4, 5),
+                                selected = settings.wolframIdleDelaySeconds.coerceIn(1, 5),
+                                onSelected = { seconds -> viewModel.updateSettings { copy(wolframIdleDelaySeconds = seconds) } },
+                                label = { "${it}s" }
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = "Used for '$waPrefix <query>'. Set API Request to 'On Enter' or use a delay to avoid hitting rate limits while typing.",
+                    color = colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp)
+                )
+            }
+
+            // ------------------------------------------------------------- Section: Wikipedia & Dictionary
+            item {
+                val wikiPrefix = settings.commandConfigs["wiki"]?.prefix?.ifBlank { "wiki" } ?: "wiki"
+                val defPrefix = settings.commandConfigs["def"]?.prefix?.ifBlank { "def" } ?: "def"
+                SettingsSectionHeader("Wikipedia & Dictionary")
+                SettingsGroup {
+                    SettingsSegmentedRow(
+                        title = "API Request",
+                        options = WolframRequestTrigger.entries,
+                        selected = settings.wikiDefRequestTrigger,
+                        onSelected = { viewModel.updateSettings { copy(wikiDefRequestTrigger = it) } },
+                        label = { if (it == WolframRequestTrigger.ENTER) "On Enter" else "After delay" }
+                    )
+                    if (settings.wikiDefRequestTrigger == WolframRequestTrigger.IDLE) {
+                        SettingsSegmentedRow(
+                            title = "Request Delay",
+                            options = listOf(1, 2, 3, 4, 5),
+                            selected = settings.wikiDefIdleDelaySeconds.coerceIn(1, 5),
+                            onSelected = { seconds -> viewModel.updateSettings { copy(wikiDefIdleDelaySeconds = seconds) } },
+                            label = { "${it}s" }
+                        )
+                    }
+                }
+                Text(
+                    text = "Applies to '$wikiPrefix <topic>' and '$defPrefix <word>' to avoid rate-limiting while typing. Tapping a loaded result opens the full article in your selected browser.",
+                    color = colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp)
+                )
+            }
+
+            // ------------------------------------------------------------- Section: Stocks & Weather
+            item {
+                val stockPrefix = settings.commandConfigs["stock"]?.prefix?.ifBlank { "st" } ?: "st"
+                val wxPrefix = settings.commandConfigs["weather"]?.prefix?.ifBlank { "w" } ?: "w"
+                SettingsSectionHeader("Stocks & Weather")
+                SettingsGroup {
+                    SettingsSegmentedRow(
+                        title = "API Request",
+                        options = WolframRequestTrigger.entries,
+                        selected = settings.stockWeatherRequestTrigger,
+                        onSelected = { viewModel.updateSettings { copy(stockWeatherRequestTrigger = it) } },
+                        label = { if (it == WolframRequestTrigger.ENTER) "On Enter" else "After delay" }
+                    )
+                    if (settings.stockWeatherRequestTrigger == WolframRequestTrigger.IDLE) {
+                        SettingsSegmentedRow(
+                            title = "Request Delay",
+                            options = listOf(1, 2, 3, 4, 5),
+                            selected = settings.stockWeatherIdleDelaySeconds.coerceIn(1, 5),
+                            onSelected = { seconds -> viewModel.updateSettings { copy(stockWeatherIdleDelaySeconds = seconds) } },
+                            label = { "${it}s" }
+                        )
+                    }
+                }
+                Text(
+                    text = "Applies to '$stockPrefix <symbol>', '$wxPrefix <city>', and sunrise/sunset lookups. Switch to 'On Enter' if you want zero queries while typing.",
                     color = colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 28.dp, vertical = 6.dp)
@@ -369,40 +521,6 @@ fun SearchSettingsPage(
                         }
                     )
                     SettingsNavRow(
-                        title = "Wolfram Alpha AppID",
-                        subtitle = if (settings.wolframAppId.isBlank()) "Not configured" else "Configured",
-                        onClick = {
-                            wolframInput = settings.wolframAppId
-                            revealWolframAppId = false
-                            showWolframDialog = true
-                        }
-                    )
-                    SettingsSegmentedRow(
-                        title = "When Pressing Enter",
-                        options = WolframSubmitMode.entries,
-                        selected = settings.wolframSubmitMode,
-                        onSelected = { viewModel.updateSettings { copy(wolframSubmitMode = it) } },
-                        label = { if (it == WolframSubmitMode.API) "Query API" else "Open website" }
-                    )
-                    if (settings.wolframSubmitMode == WolframSubmitMode.API) {
-                        SettingsSegmentedRow(
-                            title = "Automatic API Request",
-                            options = WolframRequestTrigger.entries,
-                            selected = settings.wolframRequestTrigger,
-                            onSelected = { viewModel.updateSettings { copy(wolframRequestTrigger = it) } },
-                            label = { if (it == WolframRequestTrigger.ENTER) "Manual (Enter)" else "After pause" }
-                        )
-                        if (settings.wolframRequestTrigger == WolframRequestTrigger.IDLE) {
-                            SettingsSegmentedRow(
-                                title = "Wait Before Request",
-                                options = listOf(1, 2, 3, 4, 5),
-                                selected = settings.wolframIdleDelaySeconds,
-                                onSelected = { seconds -> viewModel.updateSettings { copy(wolframIdleDelaySeconds = seconds) } },
-                                label = { "${it}s" }
-                            )
-                        }
-                    }
-                    SettingsNavRow(
                         title = "Default Market Period",
                         subtitle = "${STOCK_RANGE_LABELS.firstOrNull { it.first == settings.stockDefaultRange }?.second ?: settings.stockDefaultRange} • e.g. '${settings.commandConfigs["stock"]?.prefix ?: "st"} RELIANCE 5y'",
                         onClick = {
@@ -416,57 +534,96 @@ fun SearchSettingsPage(
                         checked = settings.stockShowSparkline,
                         onCheckedChange = { viewModel.updateSettings { copy(stockShowSparkline = it) } }
                     )
+                    SettingsSwitchRow(
+                        title = "Date Arithmetic",
+                        subtitle = "Offline queries like 'days to 15 may' or 'today + 90d' (no prefix)",
+                        checked = settings.dateArithmeticEnabled,
+                        onCheckedChange = { viewModel.updateSettings { copy(dateArithmeticEnabled = it) } }
+                    )
+                    SettingsSwitchRow(
+                        title = "Color & Base Inspector",
+                        subtitle = "Live swatch for '#D4AF37' and base conversions like 'hex 255' or 'bin 42'",
+                        checked = settings.colorBaseInspectorEnabled,
+                        onCheckedChange = { viewModel.updateSettings { copy(colorBaseInspectorEnabled = it) } }
+                    )
+                    SettingsNavRow(
+                        title = "Quick Capture Inbox & File",
+                        subtitle = "${quickNotes.size} note${if (quickNotes.size == 1) "" else "s"} • ${linkedMdLabel ?: "Internal pallas_inbox.md"}",
+                        onClick = { showQuickCaptureDialog = true }
+                    )
+                }
 
-                    settings.commandConfigs.values.forEach { config ->
-                        Surface(
-                            color = colorScheme.surfaceContainerHigh,
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.fillMaxWidth()
+                Text(
+                    text = "Commands & Prefixes",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = colorScheme.primary,
+                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 10.dp)
+                )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    settings.commandConfigs.values.toList().chunked(2).forEach { pair ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = config.label,
-                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                                    color = colorScheme.onSurface,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(end = 12.dp)
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            pair.forEach { config ->
+                                Surface(
+                                    color = if (config.enabled) colorScheme.surfaceContainerHigh else colorScheme.surfaceContainer,
+                                    shape = RoundedCornerShape(18.dp),
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = colorScheme.surfaceContainerHighest,
-                                        modifier = Modifier.clickable {
-                                            editingConfig = config
-                                            editPrefixInput = config.prefix
-                                        }
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(14.dp),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Surface(
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = if (config.enabled) colorScheme.primaryContainer else colorScheme.surfaceContainerHighest,
+                                                modifier = Modifier.clickable {
+                                                    editingConfig = config
+                                                    editPrefixInput = config.prefix
+                                                }
+                                            ) {
+                                                Text(
+                                                    text = config.prefix,
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (config.enabled) colorScheme.onPrimaryContainer else colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                                )
+                                            }
+                                            Switch(
+                                                checked = config.enabled,
+                                                onCheckedChange = { isChecked ->
+                                                    viewModel.updateCommandConfig(config.id, isChecked, config.prefix)?.let { err ->
+                                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            )
+                                        }
                                         Text(
-                                            text = config.prefix,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = colorScheme.primary,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                            text = config.label,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = if (config.enabled) colorScheme.onSurface else colorScheme.onSurface.copy(alpha = 0.55f),
+                                            maxLines = 2
                                         )
                                     }
-                                    Switch(
-                                        checked = config.enabled,
-                                        onCheckedChange = { isChecked ->
-                                            viewModel.updateCommandConfig(config.id, isChecked, config.prefix)?.let { err ->
-                                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    )
                                 }
+                            }
+                            if (pair.size == 1) {
+                                Row(modifier = Modifier.weight(1f)) {}
                             }
                         }
                     }
@@ -508,7 +665,7 @@ fun SearchSettingsPage(
 
                 val callPrefix = settings.commandConfigs["call"]?.prefix?.ifBlank { "call" } ?: "call"
                 Text(
-                    text = "@ searches device contacts and saved nicknames. Use '$callPrefix <nickname>' to call a saved nickname directly.",
+                    text = "@ searches your full device contacts list and saved nicknames. '$callPrefix <nickname>' only displays favorite contacts added below.",
                     color = colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 28.dp, vertical = 4.dp)
@@ -1118,6 +1275,75 @@ fun SearchSettingsPage(
             dismissButton = {
                 TextButton(onClick = { showStockSettingsDialog = false }) {
                     Text("Cancel", color = colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
+
+    // Quick Capture Inbox & File Dialog
+    if (showQuickCaptureDialog) {
+        val notePrefix = settings.commandConfigs["note"]?.prefix?.ifBlank { "n" } ?: "n"
+        AlertDialog(
+            onDismissRequest = { showQuickCaptureDialog = false },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = colorScheme.surfaceContainerHigh,
+            title = { Text("Quick Capture Inbox & File", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Typing '$notePrefix <note>' appends a timestamped line to internal pallas_inbox.md" +
+                            (linkedMdLabel?.let { " and mirrors it to '$it'." } ?: "."),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = {
+                            showQuickCaptureDialog = false
+                            onOpenQuickCapture()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Open Quick Capture Inbox (${quickNotes.size})")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            showQuickCaptureDialog = false
+                            openMdLauncher.launch(arrayOf("text/markdown", "text/plain", "text/*"))
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Link Existing .md File")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            showQuickCaptureDialog = false
+                            createMdLauncher.launch("pallas_inbox.md")
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Create New Linked .md File")
+                    }
+                    if (linkedMdLabel != null) {
+                        TextButton(
+                            onClick = {
+                                quickCaptureRepo.setLinkedFile(null, null)
+                                Toast.makeText(context, "Reset to internal inbox only", Toast.LENGTH_SHORT).show()
+                                showQuickCaptureDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Unlink External .md File", color = colorScheme.error)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showQuickCaptureDialog = false }) {
+                    Text("Close", color = colorScheme.onSurfaceVariant)
                 }
             }
         )

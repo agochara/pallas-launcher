@@ -41,10 +41,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -69,11 +72,17 @@ import com.pallas.launcher.domain.model.ClockVerticalPosition
 import com.pallas.launcher.domain.model.GestureAction
 import com.pallas.launcher.domain.model.ScreenApp
 import com.pallas.launcher.domain.model.TextShadowMode
+import com.pallas.launcher.domain.search.CALENDAR_GRANT_PERMISSION_ID
+import com.pallas.launcher.domain.search.FILES_GRANT_PERMISSION_ID
 import com.pallas.launcher.platform.SystemActionsManager
 import com.pallas.launcher.ui.LauncherOverlay
 import com.pallas.launcher.ui.MainViewModel
 import com.pallas.launcher.ui.apps.AlphabeticalAppDrawer
+import com.pallas.launcher.ui.atlas.WorldAtlasScreen
 import com.pallas.launcher.ui.components.RenameAppDialog
+import com.pallas.launcher.ui.latex.LatexStudioScreen
+import com.pallas.launcher.ui.notebook.NotebookScreen
+import com.pallas.launcher.ui.notes.QuickCaptureInboxScreen
 import com.pallas.launcher.ui.screens.AppPickerSheet
 import com.pallas.launcher.ui.search.LauncherSearchOverlay
 import com.pallas.launcher.ui.settings.SettingsScreen
@@ -86,6 +95,8 @@ import kotlin.math.roundToInt
 fun PallasHomeScreen(
     viewModel: MainViewModel,
     onRequestContactsPermission: () -> Unit = {},
+    onRequestCalendarPermission: () -> Unit = {},
+    onRequestFileSearchPermission: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val configuration = LocalConfiguration.current
@@ -105,6 +116,7 @@ fun PallasHomeScreen(
     val overlay by viewModel.overlay.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
+    val activeFocusProfile by viewModel.activeFocusProfile.collectAsState()
     var contactPermissionRequested by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
@@ -150,9 +162,13 @@ fun PallasHomeScreen(
         else -> false
     }
 
-    val drawerApps = remember(installedApps, settings.hiddenFromAppList) {
-        installedApps.filterNot {
-            settings.hiddenFromAppList.contains(it.uniqueKey) || settings.hiddenFromAppList.contains(it.packageName)
+    val drawerApps = remember(installedApps, settings.hiddenFromAppList, activeFocusProfile) {
+        if (activeFocusProfile != null) {
+            installedApps
+        } else {
+            installedApps.filterNot {
+                settings.hiddenFromAppList.contains(it.uniqueKey) || settings.hiddenFromAppList.contains(it.packageName)
+            }
         }
     }
 
@@ -204,27 +220,32 @@ fun PallasHomeScreen(
                     }
                 },
                 onHorizontalDragEnd = { isCommitLong, isLeft ->
-                    coroutineScope.launch {
-                        if (isCommitLong && screens.size > 1) {
+                    if (isCommitLong && screens.size > 1) {
+                        coroutineScope.launch {
                             val targetOffset = if (isLeft) -screenWidthPx else screenWidthPx
-                            pagerOffsetX.animateTo(
-                                targetValue = targetOffset,
-                                animationSpec = tween(180, easing = FastOutSlowInEasing)
-                            )
                             val newIndex = if (isLeft) {
                                 (currentScreenIndex + 1) % screens.size
                             } else {
                                 (currentScreenIndex - 1 + screens.size) % screens.size
                             }
-                            viewModel.setScreenIndex(newIndex)
-                            pagerOffsetX.snapTo(0f)
-                        } else {
-                            pagerOffsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-                            if (isLeft) {
-                                viewModel.executeGesture(settings.shortSwipeLeftAction)
-                            } else {
-                                viewModel.executeGesture(settings.shortSwipeRightAction)
+                            try {
+                                pagerOffsetX.animateTo(
+                                    targetValue = targetOffset,
+                                    animationSpec = tween(180, easing = FastOutSlowInEasing)
+                                )
+                            } finally {
+                                viewModel.setScreenIndex(newIndex)
+                                pagerOffsetX.snapTo(0f)
                             }
+                        }
+                    } else {
+                        if (isLeft) {
+                            viewModel.executeGesture(settings.shortSwipeLeftAction)
+                        } else {
+                            viewModel.executeGesture(settings.shortSwipeRightAction)
+                        }
+                        coroutineScope.launch {
+                            pagerOffsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
                         }
                     }
                 },
@@ -256,7 +277,7 @@ fun PallasHomeScreen(
                 val navBarBottomPadding = WindowInsets.navigationBarsIgnoringVisibility.asPaddingValues().calculateBottomPadding()
 
                 val isDrawerOrSearchActive = isDrawerVisible || overlay is LauncherOverlay.Search
-                val homeAlpha by animateFloatAsState(
+                val homeAlphaState = animateFloatAsState(
                     targetValue = if (isDrawerOrSearchActive) 0f else 1f,
                     animationSpec = if (isDrawerOrSearchActive) {
                         tween(120)
@@ -265,7 +286,7 @@ fun PallasHomeScreen(
                     },
                     label = "home_content_alpha"
                 )
-                val blurFraction by animateFloatAsState(
+                val blurFractionState = animateFloatAsState(
                     targetValue = if (isDrawerOrSearchActive) 1f else 0f,
                     animationSpec = if (isDrawerOrSearchActive) {
                         spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
@@ -275,8 +296,10 @@ fun PallasHomeScreen(
                     label = "window_blur_radius"
                 )
                 val windowBlurController = LocalWindowBlurController.current
-                LaunchedEffect(blurFraction) {
-                    windowBlurController((blurFraction * 40f).roundToInt())
+                LaunchedEffect(windowBlurController) {
+                    snapshotFlow { (blurFractionState.value * 40f).roundToInt() }
+                        .distinctUntilChanged()
+                        .collect { radius -> windowBlurController(radius) }
                 }
 
                 val isClockTop = settings.clockVerticalPosition == ClockVerticalPosition.TOP
@@ -286,16 +309,17 @@ fun PallasHomeScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            alpha = homeAlpha
+                            alpha = homeAlphaState.value
                         }
                         .padding(top = statusBarTopPadding, bottom = navBarBottomPadding)
                 ) {
                     val clockComposable: @Composable () -> Unit = {
-                        if (settings.showClock) {
+                        if (settings.showClock || settings.showDate) {
                             ClockHeader(
                                 timeString = currentTime,
                                 dateString = currentDate,
                                 alignment = settings.clockHorizontalAlignment,
+                                showClock = settings.showClock,
                                 showDate = settings.showDate,
                                 onClockClick = { viewModel.openClock() },
                                 onDateClick = { viewModel.openCalendar() },
@@ -304,6 +328,7 @@ fun PallasHomeScreen(
                                 paddingRightDp = settings.clockPaddingRightDp,
                                 paddingTopDp = settings.clockPaddingTopDp,
                                 paddingBottomDp = settings.clockPaddingBottomDp,
+                                clockDateSpacingDp = settings.clockDateSpacingDp,
                                 shadow = homeTextShadow
                             )
                         }
@@ -322,12 +347,14 @@ fun PallasHomeScreen(
 
                             if (screens.isEmpty()) return@BoxWithConstraints
 
+                            val installedByKey = remember(installedApps) {
+                                installedApps.associateBy { it.uniqueKey }
+                            }
                             val currScreen = screens.getOrNull(currentScreenIndex) ?: screens.first()
                             val currAllApps = currScreen.apps
-                            val currVisibleApps = remember(currAllApps, installedApps, isAppsLoaded) {
+                            val currVisibleApps = remember(currAllApps, installedByKey, isAppsLoaded) {
                                 if (!isAppsLoaded) currAllApps.filterNot { it.isProfileRemoved }
                                 else {
-                                    val installedByKey = installedApps.associateBy { it.uniqueKey }
                                     currAllApps.mapNotNull { app ->
                                         if (app.isProfileRemoved) null
                                         else {
@@ -377,10 +404,9 @@ fun PallasHomeScreen(
                                 }
                                 val adjScreen = screens[adjacentIndex]
                                 val adjAllApps = adjScreen.apps
-                                val adjVisibleApps = remember(adjAllApps, installedApps, isAppsLoaded) {
+                                val adjVisibleApps = remember(adjAllApps, installedByKey, isAppsLoaded) {
                                     if (!isAppsLoaded) adjAllApps.filterNot { it.isProfileRemoved }
                                     else {
-                                        val installedByKey = installedApps.associateBy { it.uniqueKey }
                                         adjAllApps.mapNotNull { app ->
                                             if (app.isProfileRemoved) null
                                             else {
@@ -439,8 +465,8 @@ fun PallasHomeScreen(
 
         AnimatedVisibility(
             visible = overlay is LauncherOverlay.Search,
-            enter = fadeIn(tween(180)),
-            exit = fadeOut(tween(180))
+            enter = fadeIn(tween(90)),
+            exit = fadeOut(tween(110))
         ) {
             LauncherSearchOverlay(
                 query = searchQuery,
@@ -456,7 +482,13 @@ fun PallasHomeScreen(
                     }
                     viewModel.onSearchQueryChanged(it)
                 },
-                onResultClick = { viewModel.launchSearchResult(it) },
+                onResultClick = {
+                    when (it.id) {
+                        CALENDAR_GRANT_PERMISSION_ID -> onRequestCalendarPermission()
+                        FILES_GRANT_PERMISSION_ID -> onRequestFileSearchPermission()
+                        else -> viewModel.launchSearchResult(it)
+                    }
+                },
                 onSearchSubmit = { viewModel.submitWolframQuery() },
                 onAppLongPress = { app ->
                     val existingOnScreen = currentScreen?.apps?.firstOrNull { it.uniqueKey == app.uniqueKey }
@@ -472,6 +504,8 @@ fun PallasHomeScreen(
                     viewModel.closeSearch()
                     viewModel.showAppOptions(screenApp, returnToDrawer = false)
                 },
+                onExpandToLatexStudio = { rawLatex -> viewModel.openLatexStudio(rawLatex) },
+                onExpandToNotebook = { rawExpr -> viewModel.openNotebook(rawExpr) },
                 onDismiss = { viewModel.closeSearch() }
             )
         }
@@ -493,13 +527,83 @@ fun PallasHomeScreen(
             )
         }
 
+        var lastSettingsOverlay by remember { mutableStateOf<LauncherOverlay.Settings?>(null) }
+        if (overlay is LauncherOverlay.Settings) {
+            lastSettingsOverlay = overlay as LauncherOverlay.Settings
+        }
         AnimatedVisibility(
             visible = overlay is LauncherOverlay.Settings,
             enter = slideInHorizontally(tween(220)) { it } + fadeIn(tween(180)),
             exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(180))
         ) {
-            SettingsScreen(
-                onDismiss = { viewModel.closeSettings() }
+            lastSettingsOverlay?.let { activeSettings ->
+                key(activeSettings.launchId) {
+                    SettingsScreen(
+                        onDismiss = { viewModel.closeSettings() },
+                        initialSubpage = activeSettings.initialSubpage,
+                        initialGuideTab = activeSettings.guideTab,
+                        initialGuideTopicId = activeSettings.guideTopicId,
+                        initialGuideFormulaTitle = activeSettings.guideFormulaTitle
+                    )
+                }
+            }
+        }
+
+        var lastLatexOverlay by remember { mutableStateOf<LauncherOverlay.LatexStudio?>(null) }
+        if (overlay is LauncherOverlay.LatexStudio) {
+            lastLatexOverlay = overlay as LauncherOverlay.LatexStudio
+        }
+        AnimatedVisibility(
+            visible = overlay is LauncherOverlay.LatexStudio,
+            enter = slideInHorizontally(tween(220)) { it } + fadeIn(tween(180)),
+            exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(180))
+        ) {
+            lastLatexOverlay?.let { activeLatex ->
+                key(activeLatex.launchId) {
+                    LatexStudioScreen(
+                        onClose = { viewModel.closeLatexStudio() },
+                        initialContent = activeLatex.initialContent
+                    )
+                }
+            }
+        }
+
+        var lastNotebookOverlay by remember { mutableStateOf<LauncherOverlay.Notebook?>(null) }
+        if (overlay is LauncherOverlay.Notebook) {
+            lastNotebookOverlay = overlay as LauncherOverlay.Notebook
+        }
+        AnimatedVisibility(
+            visible = overlay is LauncherOverlay.Notebook,
+            enter = slideInHorizontally(tween(220)) { it } + fadeIn(tween(180)),
+            exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(180))
+        ) {
+            lastNotebookOverlay?.let { activeNotebook ->
+                key(activeNotebook.launchId) {
+                    NotebookScreen(
+                        onClose = { viewModel.closeNotebook() },
+                        initialExpression = activeNotebook.initialExpression
+                    )
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = overlay is LauncherOverlay.QuickCaptureInbox,
+            enter = slideInHorizontally(tween(220)) { it } + fadeIn(tween(180)),
+            exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(180))
+        ) {
+            QuickCaptureInboxScreen(
+                onClose = { viewModel.closeQuickCaptureInbox() }
+            )
+        }
+
+        AnimatedVisibility(
+            visible = overlay is LauncherOverlay.WorldAtlas,
+            enter = slideInHorizontally(tween(220)) { it } + fadeIn(tween(180)),
+            exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(180))
+        ) {
+            WorldAtlasScreen(
+                onBack = { viewModel.closeAtlas() }
             )
         }
 

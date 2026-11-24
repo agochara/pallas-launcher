@@ -69,6 +69,21 @@ fun GesturesSettingsPage(
             is GestureAction.OpenQuickSettings -> "Open Quick Settings"
             is GestureAction.OpenAppDrawer -> "Open App List"
             is GestureAction.LockScreen -> "Lock Screen"
+            is GestureAction.OpenNotebook -> "Open Computational Notebook"
+            is GestureAction.OpenLatexStudio -> "Open LaTeX Studio"
+            is GestureAction.OpenAtlas -> "Open World Atlas"
+            is GestureAction.ToggleFocusProfile -> {
+                if (action.profileId == GestureAction.DEFAULT_FOCUS_PROFILE_ID) {
+                    "Toggle Focus (Default)"
+                } else {
+                    val profile = settings.focusProfiles.firstOrNull { it.id == action.profileId }
+                    if (profile != null) "Toggle Focus: ${profile.name}" else "Toggle Focus (Removed)"
+                }
+            }
+            is GestureAction.RunMacro -> {
+                val macro = settings.macros.firstOrNull { it.id == action.macroId }
+                if (macro != null) "Run Macro: ${macro.name}" else "Run Macro (Removed)"
+            }
             is GestureAction.LaunchApp -> {
                 val app = installedApps.find { it.uniqueKey == action.uniqueKey }
                     ?: installedApps.find { it.packageName == action.packageName }
@@ -78,16 +93,28 @@ fun GesturesSettingsPage(
         }
     }
 
-    val standardGestureOptions = listOf(
-        GestureAction.OpenAppDrawer to "Open App List",
-        GestureAction.OpenSearch to "Open Search",
-        GestureAction.OpenNotifications to "Open Notifications",
-        GestureAction.OpenQuickSettings to "Open Quick Settings",
-        GestureAction.OpenCamera to "Open Camera",
-        GestureAction.OpenDialer to "Open Dialer",
-        GestureAction.LockScreen to "Lock Screen",
-        GestureAction.None to "None"
-    )
+    val standardGestureOptions = buildList<Pair<GestureAction, String>> {
+        add(GestureAction.OpenAppDrawer to "Open App List")
+        add(GestureAction.OpenSearch to "Open Search")
+        add(GestureAction.OpenNotifications to "Open Notifications")
+        add(GestureAction.OpenQuickSettings to "Open Quick Settings")
+        add(GestureAction.OpenCamera to "Open Camera")
+        add(GestureAction.OpenDialer to "Open Dialer")
+        add(GestureAction.LockScreen to "Lock Screen")
+        add(GestureAction.OpenNotebook to "Open Computational Notebook")
+        add(GestureAction.OpenLatexStudio to "Open LaTeX Studio")
+        add(GestureAction.OpenAtlas to "Open World Atlas")
+        if (settings.focusProfiles.isNotEmpty()) {
+            add(GestureAction.ToggleFocusProfile(GestureAction.DEFAULT_FOCUS_PROFILE_ID) to "Toggle Focus (Default)")
+            settings.focusProfiles.forEach { p ->
+                add(GestureAction.ToggleFocusProfile(p.id) to "Toggle Focus: ${p.name}")
+            }
+        }
+        settings.macros.forEach { m ->
+            add(GestureAction.RunMacro(m.id) to "Run Macro: ${m.name} (${m.triggerWord})")
+        }
+        add(GestureAction.None to "None")
+    }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 

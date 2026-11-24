@@ -1,5 +1,12 @@
 package com.pallas.launcher.domain.math
 
+import com.pallas.launcher.domain.reference.CheatsheetDomain
+import com.pallas.launcher.domain.reference.CheatsheetKind
+import com.pallas.launcher.domain.reference.DiscreteMathCheatsheetData
+import com.pallas.launcher.domain.reference.EngineeringCheatsheetData
+import com.pallas.launcher.domain.reference.GeometryFinanceCsBioData
+import com.pallas.launcher.domain.reference.PhysicsCheatsheetData
+
 data class CheatsheetFormula(
     val title: String,
     val latex: String,
@@ -19,11 +26,34 @@ data class CheatsheetTopic(
     val symbol: String,
     val description: String,
     val subsections: List<CheatsheetSubsection>,
-    val showLatexSource: Boolean = false
+    val showLatexSource: Boolean = false,
+    val domain: CheatsheetDomain = CheatsheetDomain.MATHEMATICS,
+    val kind: CheatsheetKind = CheatsheetKind.FORMULAS,
+    val countLabel: String? = null,
+    val aliases: List<String> = emptyList()
 ) {
     val formulaCount: Int
         get() = subsections.sumOf { it.formulas.size }
 }
+
+data class CheatsheetFormulaHit(
+    val topic: CheatsheetTopic,
+    val subsection: CheatsheetSubsection,
+    val formula: CheatsheetFormula,
+    val score: Int
+)
+
+private data class IndexedCheatsheetFormula(
+    val topic: CheatsheetTopic,
+    val subsection: CheatsheetSubsection,
+    val formula: CheatsheetFormula,
+    val topicLower: String,
+    val shortTopicLower: String,
+    val subLower: String,
+    val titleLower: String,
+    val noteLower: String,
+    val latexLower: String
+)
 
 object MathCheatsheets {
     val TOPICS: List<CheatsheetTopic> = listOf(
@@ -280,57 +310,145 @@ object MathCheatsheets {
             title = "Linear Algebra",
             shortTitle = "Linear Algebra",
             symbol = "λ",
-            description = "Eigenvalues, spectral & SVD decompositions, determinants, projections, and matrix calculus.",
+            description = "Fundamental subspaces, LU/QR/Cholesky/Spectral/SVD decompositions, projections, identities, and matrix calculus.",
             subsections = listOf(
                 CheatsheetSubsection(
-                    title = "Eigenvalues, Decompositions & Determinants",
-                    shortTitle = "Spectral",
+                    title = "The Four Fundamental Subspaces",
+                    shortTitle = "Subspaces",
                     formulas = listOf(
                         CheatsheetFormula(
-                            title = "Characteristic Equation & Spectral Theorem",
-                            latex = """\det(A - \lambda I) = 0, \quad A = A^T \implies A = Q \Lambda Q^T"""
+                            title = "Rank–Nullity Theorem",
+                            latex = """\dim\mathcal{C}(A) + \dim\mathcal{N}(A) = n, \quad \operatorname{rank}(A) + \operatorname{nullity}(A) = n""",
+                            note = "For A ∈ ℝ^{m×n}; column space C(A) and null space N(A)."
                         ),
                         CheatsheetFormula(
-                            title = "Singular Value Decomposition (SVD)",
-                            latex = """A = U \Sigma V^T \quad (U^T U = I,\; V^T V = I,\; \Sigma = \operatorname{diag}(\sigma_1,\dots,\sigma_r))"""
+                            title = "Dimensions of the Four Subspaces",
+                            latex = """\dim\mathcal{C}(A) = \dim\mathcal{R}(A^T) = r, \quad \dim\mathcal{N}(A) = n - r, \quad \dim\mathcal{N}(A^T) = m - r"""
                         ),
                         CheatsheetFormula(
-                            title = "Cayley-Hamilton Theorem",
-                            latex = """p(\lambda) = \det(\lambda I - A) \implies p(A) = 0"""
+                            title = "Orthogonality of Fundamental Subspaces",
+                            latex = """\mathcal{N}(A) \perp \mathcal{R}(A^T)\;\text{in }\mathbb{R}^n, \quad \mathcal{N}(A^T) \perp \mathcal{C}(A)\;\text{in }\mathbb{R}^m""",
+                            note = "Every x ∈ ℝ^n decomposes uniquely as x = x_row + x_null with x_row ⊥ x_null."
                         ),
                         CheatsheetFormula(
-                            title = "Jacobi's Formula & Matrix Exponential Determinant",
-                            latex = """\det(e^A) = e^{\operatorname{tr}(A)}, \quad \frac{d}{dt}\det A(t) = \operatorname{tr}\!\left(\operatorname{adj}(A)\frac{dA}{dt}\right)"""
-                        ),
-                        CheatsheetFormula(
-                            title = "Matrix Determinant Lemma",
-                            latex = """\det(A + uv^T) = (1 + v^T A^{-1} u)\det(A)"""
+                            title = "Rank & Sylvester Inequalities",
+                            latex = """\operatorname{rank}(AB) \le \min(\operatorname{rank} A, \operatorname{rank} B), \quad \operatorname{rank}(A)+\operatorname{rank}(B)-n \le \operatorname{rank}(AB)"""
                         )
                     )
                 ),
                 CheatsheetSubsection(
-                    title = "Inverses, Projections & Matrix Calculus",
-                    shortTitle = "Matrix Calculus",
+                    title = "Matrix Decompositions",
+                    shortTitle = "Decompositions",
                     formulas = listOf(
                         CheatsheetFormula(
-                            title = "Sherman-Morrison-Woodbury Identity",
-                            latex = """(A + UCV)^{-1} = A^{-1} - A^{-1}U(C^{-1} + V A^{-1} U)^{-1} V A^{-1}"""
+                            title = "LU Decomposition",
+                            latex = """PA = LU \quad (L\text{ unit lower triangular},\; U\text{ upper triangular})""",
+                            note = "Exists for any square matrix with permutation P; used for O(n^3/3) linear solves."
                         ),
                         CheatsheetFormula(
-                            title = "Moore-Penrose Normal Equations",
-                            latex = """A^+ = (A^T A)^{-1}A^T \quad (\text{full column rank}), \quad \hat{x} = \arg\min_x \|Ax - b\|_2"""
+                            title = "QR Decomposition",
+                            latex = """A = QR \quad (Q^T Q = I,\; R\text{ upper triangular})""",
+                            note = "Exists for any m×n matrix (m ≥ n); unique when A has full column rank and R_ii > 0."
                         ),
                         CheatsheetFormula(
-                            title = "Gram-Schmidt Orthogonalization",
+                            title = "Cholesky Decomposition",
+                            latex = """A = L L^T \quad (A = A^T \succ 0,\; L\text{ lower triangular},\; L_{ii} > 0)""",
+                            note = "Unique iff A is symmetric positive-definite; ~2× faster than LU."
+                        ),
+                        CheatsheetFormula(
+                            title = "Spectral Decomposition",
+                            latex = """A = Q \Lambda Q^T = \sum_{i=1}^n \lambda_i q_i q_i^T \quad (A = A^T,\; Q^T Q = I)""",
+                            note = "Every real symmetric matrix has real eigenvalues and an orthonormal eigenbasis."
+                        ),
+                        CheatsheetFormula(
+                            title = "Singular Value Decomposition (SVD)",
+                            latex = """A = U \Sigma V^T \quad (U^T U = I,\; V^T V = I,\; \Sigma = \operatorname{diag}(\sigma_1,\dots,\sigma_r))""",
+                            note = "Exists for every real or complex m×n matrix; σ_i = √λ_i(A^T A) ≥ 0."
+                        ),
+                        CheatsheetFormula(
+                            title = "Schur Decomposition",
+                            latex = """A = Q T Q^* \quad (Q^* Q = I,\; T\text{ upper triangular})""",
+                            note = "Exists for every square complex matrix; diagonal of T holds the eigenvalues of A."
+                        )
+                    )
+                ),
+                CheatsheetSubsection(
+                    title = "Least Squares & Projections",
+                    shortTitle = "Projections",
+                    formulas = listOf(
+                        CheatsheetFormula(
+                            title = "Normal Equations",
+                            latex = """A^T A \hat{x} = A^T b, \quad \hat{x} = \arg\min_x \|Ax - b\|_2"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Orthogonal Projection Matrix",
+                            latex = """P = A(A^T A)^{-1}A^T, \quad P^2 = P = P^T, \quad (I - P)b \perp \mathcal{C}(A)""",
+                            note = "Projects b onto C(A) when A has full column rank."
+                        ),
+                        CheatsheetFormula(
+                            title = "Moore–Penrose Pseudoinverse",
+                            latex = """A^+ = V \Sigma^+ U^T, \quad A^+ = (A^T A)^{-1}A^T\;\text{(full column rank)}"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Gram–Schmidt Orthogonalization",
                             latex = """u_k = v_k - \sum_{j=1}^{k-1} \frac{\langle v_k, u_j \rangle}{\langle u_j, u_j \rangle} u_j, \quad e_k = \frac{u_k}{\|u_k\|_2}"""
                         ),
                         CheatsheetFormula(
-                            title = "Quadratic Form Gradient",
-                            latex = """\nabla_x (x^T A x) = (A + A^T)x"""
+                            title = "Tikhonov (Ridge) Regularization",
+                            latex = """\hat{x}_\lambda = (A^T A + \lambda I)^{-1}A^T b = \arg\min_x \|Ax - b\|_2^2 + \lambda\|x\|_2^2"""
+                        )
+                    )
+                ),
+                CheatsheetSubsection(
+                    title = "Eigenvalues, Determinants & Identities",
+                    shortTitle = "Identities",
+                    formulas = listOf(
+                        CheatsheetFormula(
+                            title = "Characteristic Equation, Trace & Determinant",
+                            latex = """\det(A - \lambda I) = 0, \quad \operatorname{tr}(A) = \sum_{i=1}^n \lambda_i, \quad \det(A) = \prod_{i=1}^n \lambda_i"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Positive-Definiteness Criteria",
+                            latex = """x^T A x > 0\;(\forall x \neq 0) \iff \lambda_i(A) > 0 \iff \Delta_k > 0\;(\forall k)""",
+                            note = "Sylvester's criterion: symmetric A ≻ 0 iff all leading principal minors Δ_k > 0."
+                        ),
+                        CheatsheetFormula(
+                            title = "Trace Cyclic Property & Frobenius Norm",
+                            latex = """\operatorname{tr}(ABC) = \operatorname{tr}(CAB) = \operatorname{tr}(BCA), \quad \|A\|_F^2 = \operatorname{tr}(A^T A)"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Sherman–Morrison–Woodbury Inverse",
+                            latex = """(A + UCV)^{-1} = A^{-1} - A^{-1}U(C^{-1} + V A^{-1} U)^{-1} V A^{-1}"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Cayley–Hamilton & Matrix Determinant Lemma",
+                            latex = """p(\lambda)=\det(\lambda I - A) \implies p(A)=0, \quad \det(A + uv^T) = (1 + v^T A^{-1} u)\det(A)"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Jacobi's Formula & Matrix Exponential Determinant",
+                            latex = """\det(e^A) = e^{\operatorname{tr}(A)}, \quad \frac{d}{dt}\det A(t) = \operatorname{tr}\!\left(\operatorname{adj}(A)\frac{dA}{dt}\right)"""
+                        )
+                    )
+                ),
+                CheatsheetSubsection(
+                    title = "Matrix Calculus",
+                    shortTitle = "Calculus",
+                    formulas = listOf(
+                        CheatsheetFormula(
+                            title = "Gradients of Linear & Bilinear Forms",
+                            latex = """\nabla_x (c^T x) = c, \quad \nabla_x (x^T A y) = Ay, \quad \nabla_y (x^T A y) = A^T x"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Gradient of Quadratic Form",
+                            latex = """\nabla_x (x^T A x) = (A + A^T)x \quad (\text{and } 2Ax\text{ when } A = A^T)"""
                         ),
                         CheatsheetFormula(
                             title = "Log-Determinant & Inverse Derivatives",
                             latex = """\frac{\partial \ln\det X}{\partial X} = X^{-T}, \quad \frac{\partial X^{-1}}{\partial \alpha} = -X^{-1}\frac{\partial X}{\partial \alpha} X^{-1}"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Trace Derivatives",
+                            latex = """\frac{\partial \operatorname{tr}(AX)}{\partial X} = A^T, \quad \frac{\partial \operatorname{tr}(X^T A X)}{\partial X} = (A + A^T)X"""
                         )
                     )
                 )
@@ -341,45 +459,99 @@ object MathCheatsheets {
             title = "Probability & Statistics",
             shortTitle = "Probability & Stats",
             symbol = "ℙ",
-            description = "Bayes' theorem, moments, concentration inequalities, limit laws, distributions, and tail estimators.",
+            description = "Distributions, concentration inequalities, extreme-value tails, limit laws, and transforms.",
+            domain = CheatsheetDomain.MATHEMATICS,
             subsections = listOf(
                 CheatsheetSubsection(
-                    title = "Foundations, Moments & Inequalities",
-                    shortTitle = "Foundations",
+                    title = "Distributions Reference",
+                    shortTitle = "Distributions",
                     formulas = listOf(
                         CheatsheetFormula(
-                            title = "Bayes' Theorem & Law of Total Variance",
-                            latex = """P(A\mid B) = \frac{P(B\mid A)P(A)}{P(B)}, \quad \operatorname{Var}(Y) = \mathbb{E}[\operatorname{Var}(Y\mid X)] + \operatorname{Var}(\mathbb{E}[Y\mid X])"""
+                            title = "Normal (Gaussian) Distribution",
+                            latex = """f(x) = \frac{1}{\sigma\sqrt{2\pi}}e^{-\frac{(x-\mu)^2}{2\sigma^2}}, \quad \mathbb{E}[X]=\mu, \quad \operatorname{Var}(X)=\sigma^2"""
                         ),
                         CheatsheetFormula(
-                            title = "Moment Generating & Characteristic Functions",
-                            latex = """M_X(t) = \mathbb{E}[e^{tX}], \quad \varphi_X(t) = \mathbb{E}[e^{itX}], \quad \mathbb{E}[X^n] = M_X^{(n)}(0)"""
+                            title = "Exponential Distribution",
+                            latex = """f(x) = \lambda e^{-\lambda x}\;(x \ge 0), \quad \mathbb{E}[X] = \frac{1}{\lambda}, \quad \operatorname{Var}(X) = \frac{1}{\lambda^2}""",
+                            note = "Memoryless continuous distribution: P(X > s + t | X > s) = P(X > t)."
                         ),
                         CheatsheetFormula(
-                            title = "Markov, Chebyshev & Jensen Inequalities",
-                            latex = """P(X \ge a) \le \frac{\mathbb{E}[X]}{a}, \quad P(|X - \mu| \ge k\sigma) \le \frac{1}{k^2}, \quad \varphi(\mathbb{E}[X]) \le \mathbb{E}[\varphi(X)]"""
+                            title = "Poisson Distribution",
+                            latex = """P(X=k) = \frac{\lambda^k e^{-\lambda}}{k!}\;(k \in \mathbb{N}_0), \quad \mathbb{E}[X] = \lambda, \quad \operatorname{Var}(X) = \lambda"""
                         ),
                         CheatsheetFormula(
-                            title = "Central Limit Theorem",
-                            latex = """\frac{\sqrt{n}(\bar{X}_n - \mu)}{\sigma} \xrightarrow{d} \mathcal{N}(0, 1) \quad (n \to \infty,\; \sigma^2 < \infty)"""
+                            title = "Binomial Distribution",
+                            latex = """P(X=k) = \binom{n}{k}p^k(1-p)^{n-k}, \quad \mathbb{E}[X]=np, \quad \operatorname{Var}(X)=np(1-p)"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Pareto / Power-Law Distribution",
+                            latex = """f(x) = \frac{\alpha x_m^\alpha}{x^{\alpha+1}}\;(x \ge x_m), \quad \mathbb{E}[X]=\frac{\alpha x_m}{\alpha-1}\;(\alpha>1), \quad \operatorname{Var}(X)=\frac{\alpha x_m^2}{(\alpha-1)^2(\alpha-2)}\;(\alpha>2)""",
+                            note = "Moments diverge in the tail: mean is ∞ for α ≤ 1; variance is ∞ for α ≤ 2."
+                        ),
+                        CheatsheetFormula(
+                            title = "Cauchy–Lorentz Distribution",
+                            latex = """f(x) = \frac{1}{\pi\gamma\left[1 + \left(\frac{x-x_0}{\gamma}\right)^2\right]}, \quad \mathbb{E}[X]\text{ undefined}, \quad \operatorname{Var}(X)=\infty""",
+                            note = "All moments of order ≥ 1 diverge; the sample mean has the exact same Cauchy distribution."
+                        ),
+                        CheatsheetFormula(
+                            title = "Student-t Distribution",
+                            latex = """f(t) = \frac{\Gamma\left(\frac{\nu+1}{2}\right)}{\sqrt{\nu\pi}\,\Gamma\left(\frac{\nu}{2}\right)}\left(1 + \frac{t^2}{\nu}\right)^{-\frac{\nu+1}{2}}, \quad \mathbb{E}[T]=0\;(\nu>1), \quad \operatorname{Var}(T)=\frac{\nu}{\nu-2}\;(\nu>2)""",
+                            note = "Moments diverge for k ≥ ν: mean diverges for ν ≤ 1 (Cauchy); variance diverges for ν ≤ 2."
                         )
                     )
                 ),
                 CheatsheetSubsection(
-                    title = "Distributions & Tail Analysis",
-                    shortTitle = "Distributions",
+                    title = "Inequalities & Bounds",
+                    shortTitle = "Inequalities",
                     formulas = listOf(
                         CheatsheetFormula(
-                            title = "Gaussian & Cauchy-Lorentz PDFs",
-                            latex = """f_{\mathcal{N}}(x) = \frac{1}{\sigma\sqrt{2\pi}}e^{-\frac{(x-\mu)^2}{2\sigma^2}}, \quad f_{\text{Cauchy}}(x) = \frac{1}{\pi\gamma\left[1 + \left(\frac{x-x_0}{\gamma}\right)^2\right]}"""
+                            title = "Markov's Inequality",
+                            latex = """P(X \ge a) \le \frac{\mathbb{E}[X]}{a} \quad (X \ge 0,\; a > 0)"""
                         ),
                         CheatsheetFormula(
-                            title = "Student-t Distribution PDF",
-                            latex = """f(t) = \frac{\Gamma\left(\frac{\nu+1}{2}\right)}{\sqrt{\nu\pi}\,\Gamma\left(\frac{\nu}{2}\right)}\left(1 + \frac{t^2}{\nu}\right)^{-\frac{\nu+1}{2}}"""
+                            title = "Chebyshev's Inequality",
+                            latex = """P(|X - \mu| \ge k\sigma) \le \frac{1}{k^2} \quad (\sigma^2 < \infty)"""
                         ),
                         CheatsheetFormula(
-                            title = "Pareto Power-Law Survival & Density",
-                            latex = """S(x) = P(X > x) = \left(\frac{x_m}{x}\right)^\alpha, \quad f(x) = \frac{\alpha x_m^\alpha}{x^{\alpha+1}} \quad (x \ge x_m)"""
+                            title = "Chernoff Bound",
+                            latex = """P(X \ge a) \le \inf_{t > 0} e^{-ta}\,\mathbb{E}[e^{tX}] = \inf_{t > 0} e^{-ta} M_X(t)"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Jensen's Inequality",
+                            latex = """\varphi(\mathbb{E}[X]) \le \mathbb{E}[\varphi(X)] \quad (\varphi\text{ convex; reverses if concave})""",
+                            note = "Core of convexity & risk: volatility boosts convex payoffs and penalizes concave utility."
+                        ),
+                        CheatsheetFormula(
+                            title = "Cauchy–Schwarz Inequality",
+                            latex = """\left(\mathbb{E}[XY]\right)^2 \le \mathbb{E}[X^2]\,\mathbb{E}[Y^2], \quad |\operatorname{Cov}(X,Y)| \le \sigma_X \sigma_Y"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Hoeffding's Inequality",
+                            latex = """P(\bar{X}_n - \mathbb{E}[\bar{X}_n] \ge t) \le \exp\!\left(-\frac{2n^2 t^2}{\sum_{i=1}^n (b_i - a_i)^2}\right) \quad (X_i \in [a_i, b_i])"""
+                        )
+                    )
+                ),
+                CheatsheetSubsection(
+                    title = "Extreme Value & Tail Behavior",
+                    shortTitle = "Tails & Limits",
+                    formulas = listOf(
+                        CheatsheetFormula(
+                            title = "Subexponential vs. Power-Law Tail Decay",
+                            latex = """\lim_{x\to\infty}\frac{P(X_1+X_2>x)}{P(X_1>x)} = 2\;\text{(subexp.)}, \quad P(X>x) \sim L(x)x^{-\alpha}\;\text{(power-law)}""",
+                            note = "In subexponential/heavy tails, a sum's extreme event is dominated by a single maximum jump."
+                        ),
+                        CheatsheetFormula(
+                            title = "Law of Large Numbers (WLLN & SLLN)",
+                            latex = """\bar{X}_n \xrightarrow{P} \mu\;\text{(Weak)}, \quad P\!\left(\lim_{n\to\infty}\bar{X}_n = \mu\right)=1\;\text{(Strong, }\mathbb{E}|X|<\infty\text{)}"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Classical Central Limit Theorem",
+                            latex = """\frac{\sqrt{n}(\bar{X}_n - \mu)}{\sigma} \xrightarrow{d} \mathcal{N}(0, 1) \quad (n \to \infty,\; \sigma^2 < \infty)"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Generalized CLT & Stable Distributions",
+                            latex = """\frac{\sum_{i=1}^n X_i - b_n}{a_n} \xrightarrow{d} S_\alpha(\beta, \gamma, \delta) \quad (\alpha \in (0, 2])""",
+                            note = "When variance is infinite (α < 2), normalized i.i.d. sums converge to α-stable laws instead of Gaussian."
                         ),
                         CheatsheetFormula(
                             title = "Hill Tail-Index Estimator",
@@ -390,9 +562,55 @@ object MathCheatsheets {
                             latex = """\operatorname{ES}_q(X) = \frac{1}{1-q}\int_q^1 \operatorname{VaR}_u(X)\,du = \mathbb{E}[X \mid X \ge \operatorname{VaR}_q(X)]"""
                         )
                     )
+                ),
+                CheatsheetSubsection(
+                    title = "Foundations & Transforms",
+                    shortTitle = "Transforms",
+                    formulas = listOf(
+                        CheatsheetFormula(
+                            title = "Bayes' Theorem",
+                            latex = """P(A\mid B) = \frac{P(B\mid A)P(A)}{P(B)} = \frac{P(B\mid A)P(A)}{\sum_i P(B\mid A_i)P(A_i)}"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Law of Total Expectation & Variance",
+                            latex = """\mathbb{E}[Y] = \mathbb{E}[\mathbb{E}[Y\mid X]], \quad \operatorname{Var}(Y) = \mathbb{E}[\operatorname{Var}(Y\mid X)] + \operatorname{Var}(\mathbb{E}[Y\mid X])"""
+                        ),
+                        CheatsheetFormula(
+                            title = "Moment Generating Function (MGF)",
+                            latex = """M_X(t) = \mathbb{E}[e^{tX}], \quad \mathbb{E}[X^n] = M_X^{(n)}(0), \quad M_{X+Y}(t) = M_X(t)M_Y(t)""",
+                            note = "Requires exponential tail decay; diverges for heavy-tailed laws like Pareto, Cauchy, and Student-t."
+                        ),
+                        CheatsheetFormula(
+                            title = "Characteristic Function",
+                            latex = """\varphi_X(t) = \mathbb{E}[e^{itX}], \quad \varphi_{aX+b}(t) = e^{itb}\varphi_X(at)""",
+                            note = "Always exists and uniquely determines the distribution, even when all moments and MGF diverge."
+                        ),
+                        CheatsheetFormula(
+                            title = "Cumulant Generating Function",
+                            latex = """K_X(t) = \ln M_X(t) = \sum_{n=1}^{\infty} \kappa_n \frac{t^n}{n!}, \quad \kappa_1 = \mu,\; \kappa_2 = \sigma^2"""
+                        )
+                    )
                 )
             )
         ),
+        GeometryFinanceCsBioData.GEOMETRY_TRIG_TOPIC,
+        DiscreteMathCheatsheetData.DISCRETE_MATH_TOPIC,
+        PhysicsCheatsheetData.PHYSICS_TOPIC,
+        CheatsheetTopic(
+            id = "periodic_table",
+            title = "Periodic Table of Elements",
+            shortTitle = "Periodic Table",
+            symbol = "Z",
+            description = "Interactive 18-column periodic table of all 118 elements with search and full atomic property cards.",
+            subsections = emptyList(),
+            domain = CheatsheetDomain.SCIENCES,
+            kind = CheatsheetKind.PERIODIC_TABLE,
+            countLabel = "118"
+        ),
+        GeometryFinanceCsBioData.BIOLOGY_PHYSIOLOGY_TOPIC,
+        EngineeringCheatsheetData.ENGINEERING_TOPIC,
+        GeometryFinanceCsBioData.FINANCE_RISK_TOPIC,
+        GeometryFinanceCsBioData.INFORMATION_THEORY_TOPIC,
         CheatsheetTopic(
             id = "latex",
             title = "LaTeX Syntax",
@@ -400,6 +618,7 @@ object MathCheatsheets {
             symbol = "LaTeX",
             description = "Fractions, roots, sums, Greek letters, relations, arrows, delimiters, matrices, and math fonts.",
             showLatexSource = true,
+            domain = CheatsheetDomain.ENGINEERING_QUANT,
             subsections = listOf(
                 CheatsheetSubsection(
                     title = "Core Constructs & Scripts",
@@ -614,5 +833,73 @@ object MathCheatsheets {
         )
     )
 
+    val TOPIC_ALIASES: Map<String, List<String>> = mapOf(
+        "calculus" to listOf("calc", "integrals", "integral", "derivatives", "odes", "ode", "series", "taylor", "fourier", "laplace", "vector calculus"),
+        "linear_algebra" to listOf("la", "linalg", "linear", "matrix", "matrices", "svd", "eigen", "eigenvalues", "subspaces"),
+        "probability_statistics" to listOf("stats", "stat", "prob", "probability", "distributions", "tails", "inequalities", "clt"),
+        "geometry_trig" to listOf("geo", "geom", "geometry", "trig", "trigonometry", "conics"),
+        "discrete_math" to listOf("discrete", "combinatorics", "graphs", "graph", "number theory", "logic", "sets"),
+        "physics" to listOf("phys", "mechanics", "em", "electromagnetism", "thermo", "thermodynamics", "quantum", "relativity", "constants"),
+        "periodic_table" to listOf("periodic", "elements", "chem", "chemistry", "ptable"),
+        "biology_physiology" to listOf("bio", "biology", "physiology", "anatomy"),
+        "engineering" to listOf("eng", "mech", "fluids", "beams", "materials", "circuits", "signals"),
+        "finance_economics" to listOf("fin", "finance", "econ", "economics", "risk", "kelly", "tvm"),
+        "information_theory" to listOf("info", "info theory", "information", "shannon", "entropy", "coding"),
+        "latex" to listOf("tex", "latex syntax", "symbols")
+    )
+
+    fun aliasesFor(topic: CheatsheetTopic): List<String> =
+        (topic.aliases + TOPIC_ALIASES[topic.id].orEmpty()).distinct()
+
     fun topicById(id: String): CheatsheetTopic? = TOPICS.firstOrNull { it.id == id }
+
+    private val searchIndex: List<IndexedCheatsheetFormula> by lazy {
+        buildList {
+            TOPICS.forEach { topic ->
+                val topicLower = topic.title.lowercase()
+                val shortLower = topic.shortTitle.lowercase()
+                topic.subsections.forEach { sub ->
+                    val subLower = sub.title.lowercase()
+                    sub.formulas.forEach { formula ->
+                        add(
+                            IndexedCheatsheetFormula(
+                                topic = topic,
+                                subsection = sub,
+                                formula = formula,
+                                topicLower = topicLower,
+                                shortTopicLower = shortLower,
+                                subLower = subLower,
+                                titleLower = formula.title.lowercase(),
+                                noteLower = formula.note.orEmpty().lowercase(),
+                                latexLower = formula.latex.lowercase()
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun searchFormulas(rawQuery: String): List<CheatsheetFormulaHit> {
+        val tokens = rawQuery.trim().lowercase().split("\\s+".toRegex()).filter { it.isNotEmpty() }
+        if (tokens.isEmpty()) return emptyList()
+
+        return searchIndex.mapNotNull { item ->
+            var totalScore = 0
+            for (tok in tokens) {
+                val tokScore = when {
+                    item.titleLower == tok -> 100
+                    item.titleLower.startsWith(tok) -> 75
+                    item.titleLower.contains(tok) -> 55
+                    item.noteLower.contains(tok) -> 40
+                    item.subLower.contains(tok) -> 25
+                    item.topicLower.contains(tok) || item.shortTopicLower.contains(tok) -> 15
+                    item.latexLower.contains(tok) -> 10
+                    else -> return@mapNotNull null
+                }
+                totalScore += tokScore
+            }
+            CheatsheetFormulaHit(item.topic, item.subsection, item.formula, totalScore)
+        }.sortedByDescending { it.score }
+    }
 }

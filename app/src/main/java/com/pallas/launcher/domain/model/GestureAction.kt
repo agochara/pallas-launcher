@@ -8,6 +8,11 @@ sealed interface GestureAction {
     data object OpenCamera : GestureAction
     data object OpenDialer : GestureAction
     data object LockScreen : GestureAction
+    data object OpenNotebook : GestureAction
+    data object OpenLatexStudio : GestureAction
+    data object OpenAtlas : GestureAction
+    data class ToggleFocusProfile(val profileId: String) : GestureAction
+    data class RunMacro(val macroId: String) : GestureAction
     data class LaunchApp(val uniqueKey: String) : GestureAction {
         val packageName: String
             get() = uniqueKey.substringBefore('/')
@@ -15,6 +20,8 @@ sealed interface GestureAction {
     data object None : GestureAction
 
     companion object {
+        const val DEFAULT_FOCUS_PROFILE_ID = "default"
+
         fun fromStringOrNull(value: String): GestureAction? {
             val clean = value.trim()
             return when {
@@ -25,7 +32,18 @@ sealed interface GestureAction {
                 clean == "camera" -> OpenCamera
                 clean == "dialer" -> OpenDialer
                 clean == "lock_screen" || clean == "lock" -> LockScreen
+                clean == "notebook" -> OpenNotebook
+                clean == "latex_studio" || clean == "latex" -> OpenLatexStudio
+                clean == "atlas" -> OpenAtlas
                 clean == "none" -> None
+                clean.startsWith("focus:") -> {
+                    val id = clean.removePrefix("focus:").trim()
+                    if (id.isEmpty()) null else ToggleFocusProfile(id)
+                }
+                clean.startsWith("macro:") -> {
+                    val id = clean.removePrefix("macro:").trim()
+                    if (id.isEmpty()) null else RunMacro(id)
+                }
                 clean.startsWith("app:") -> {
                     val key = clean.removePrefix("app:").trim()
                     if (key.isEmpty()) null else LaunchApp(key)
@@ -44,6 +62,11 @@ sealed interface GestureAction {
             is OpenCamera -> "camera"
             is OpenDialer -> "dialer"
             is LockScreen -> "lock_screen"
+            is OpenNotebook -> "notebook"
+            is OpenLatexStudio -> "latex_studio"
+            is OpenAtlas -> "atlas"
+            is ToggleFocusProfile -> "focus:${action.profileId}"
+            is RunMacro -> "macro:${action.macroId}"
             is LaunchApp -> "app:${action.uniqueKey}"
             is None -> "none"
         }

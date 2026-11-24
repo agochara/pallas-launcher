@@ -1129,12 +1129,18 @@ fun ChartPreviewDialog(
                         onClick = {
                             scope.launch {
                                 isExporting = true
+                                var bmp: android.graphics.Bitmap? = null
                                 try {
-                                    val bmp = graphicsLayer.toImageBitmap().asAndroidBitmap()
-                                    TexExportHelper.sharePng(context, bmp).onFailure {
-                                        Toast.makeText(context, "Could not share chart", Toast.LENGTH_SHORT).show()
+                                    bmp = runCatching { graphicsLayer.toImageBitmap().asAndroidBitmap() }.getOrNull()
+                                    if (bmp == null) {
+                                        Toast.makeText(context, "Chart preview is not ready", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        TexExportHelper.sharePng(context, bmp).onFailure {
+                                            Toast.makeText(context, "Could not share chart", Toast.LENGTH_SHORT).show()
+                                        }
                                     }
                                 } finally {
+                                    if (bmp != null && !bmp.isRecycled) bmp.recycle()
                                     isExporting = false
                                 }
                             }
@@ -1155,21 +1161,27 @@ fun ChartPreviewDialog(
                         onClick = {
                             scope.launch {
                                 isExporting = true
+                                var bmp: android.graphics.Bitmap? = null
                                 try {
-                                    val bmp = graphicsLayer.toImageBitmap().asAndroidBitmap()
-                                    TexExportHelper.savePngToGallery(
-                                        context,
-                                        bmp,
-                                        filePrefix = "pallas_chart",
-                                        folderName = "Pallas Charts"
-                                    )
-                                        .onSuccess {
-                                            Toast.makeText(context, "Saved to Pictures/Pallas Charts", Toast.LENGTH_SHORT).show()
-                                        }
-                                        .onFailure {
-                                            Toast.makeText(context, "Could not save PNG", Toast.LENGTH_SHORT).show()
-                                        }
+                                    bmp = runCatching { graphicsLayer.toImageBitmap().asAndroidBitmap() }.getOrNull()
+                                    if (bmp == null) {
+                                        Toast.makeText(context, "Chart preview is not ready", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        TexExportHelper.savePngToGallery(
+                                            context,
+                                            bmp,
+                                            filePrefix = "pallas_chart",
+                                            folderName = "Pallas Charts"
+                                        )
+                                            .onSuccess {
+                                                Toast.makeText(context, "Saved to Pictures/Pallas Charts", Toast.LENGTH_SHORT).show()
+                                            }
+                                            .onFailure {
+                                                Toast.makeText(context, "Could not save PNG", Toast.LENGTH_SHORT).show()
+                                            }
+                                    }
                                 } finally {
+                                    if (bmp != null && !bmp.isRecycled) bmp.recycle()
                                     isExporting = false
                                 }
                             }
@@ -1186,16 +1198,22 @@ fun ChartPreviewDialog(
                         onClick = {
                             scope.launch {
                                 isExporting = true
+                                var bmp: android.graphics.Bitmap? = null
                                 try {
-                                    val bmp = graphicsLayer.toImageBitmap().asAndroidBitmap()
-                                    TexExportHelper.copyPngToClipboard(context, bmp)
-                                        .onSuccess {
-                                            Toast.makeText(context, "Chart copied to clipboard", Toast.LENGTH_SHORT).show()
-                                        }
-                                        .onFailure {
-                                            Toast.makeText(context, "Could not copy chart", Toast.LENGTH_SHORT).show()
-                                        }
+                                    bmp = runCatching { graphicsLayer.toImageBitmap().asAndroidBitmap() }.getOrNull()
+                                    if (bmp == null) {
+                                        Toast.makeText(context, "Chart preview is not ready", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        TexExportHelper.copyPngToClipboard(context, bmp)
+                                            .onSuccess {
+                                                Toast.makeText(context, "Chart copied to clipboard", Toast.LENGTH_SHORT).show()
+                                            }
+                                            .onFailure {
+                                                Toast.makeText(context, "Could not copy chart", Toast.LENGTH_SHORT).show()
+                                            }
+                                    }
                                 } finally {
+                                    if (bmp != null && !bmp.isRecycled) bmp.recycle()
                                     isExporting = false
                                 }
                             }

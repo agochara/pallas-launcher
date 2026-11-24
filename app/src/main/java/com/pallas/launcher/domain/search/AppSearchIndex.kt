@@ -74,10 +74,16 @@ class AppSearchIndex(
         val normBuilder = StringBuilder(label.length)
         val normToRawList = ArrayList<Int>(label.length)
         for (rawIdx in label.indices) {
-            val normPart = SearchRanking.normalize(label[rawIdx].toString())
-            for (c in normPart) {
-                normBuilder.append(c)
+            val ch = label[rawIdx]
+            if (ch.code < 128) {
+                normBuilder.append(ch.lowercaseChar())
                 normToRawList.add(rawIdx)
+            } else {
+                val normPart = SearchRanking.normalize(ch.toString())
+                for (c in normPart) {
+                    normBuilder.append(c)
+                    normToRawList.add(rawIdx)
+                }
             }
         }
         val normLabel = normBuilder.toString()

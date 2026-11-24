@@ -176,8 +176,8 @@ class SearchTests {
         val results = index.search("cal")
         assertFalse(results.isEmpty())
         for (res in results) {
-            assertTrue(res is AppSearchResult)
-            assertTrue(res.app is AppItem)
+            assertTrue(res.id.isNotEmpty())
+            assertTrue(res.app.packageName.isNotEmpty())
         }
     }
 

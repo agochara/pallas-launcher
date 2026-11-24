@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="tex_exports" path="tex_exports/" />
+    <cache-path name="pallas_exports" path="pallas_exports/" />
 </paths>

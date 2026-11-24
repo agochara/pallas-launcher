@@ -36,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,11 +45,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -57,13 +65,14 @@ import androidx.compose.ui.unit.dp
 import com.pallas.launcher.domain.model.AppItem
 import com.pallas.launcher.domain.search.LauncherSearchResult
 import com.pallas.launcher.domain.search.MathChartData
+import com.pallas.launcher.domain.search.QrMatrix
 import com.pallas.launcher.domain.search.SmartCommandType
 import com.pallas.launcher.domain.search.isEnterEligible
 import com.pallas.launcher.ui.components.ChartPreviewDialog
+import com.pallas.launcher.ui.components.QrPreviewDialog
 import com.pallas.launcher.ui.components.TexPreviewDialog
 import com.pallas.launcher.ui.theme.LauncherTypography
 import com.pallas.launcher.ui.theme.launcherBackdropBrush
-import kotlinx.coroutines.delay
 
 @Composable
 fun LauncherSearchOverlay(
@@ -74,6 +83,8 @@ fun LauncherSearchOverlay(
     onSearchSubmit: () -> Boolean = { false },
     onDismiss: () -> Unit,
     onAppLongPress: ((AppItem) -> Unit)? = null,
+    onExpandToLatexStudio: ((String) -> Unit)? = null,
+    onExpandToNotebook: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val focusRequester = remember { FocusRequester() }
@@ -82,9 +93,26 @@ fun LauncherSearchOverlay(
     val latestDismiss by rememberUpdatedState(onDismiss)
     var previewLatex by remember { mutableStateOf<String?>(null) }
     var previewChart by remember { mutableStateOf<MathChartData?>(null) }
+    var previewQr by remember { mutableStateOf<Pair<String, QrMatrix>?>(null) }
 
     val activateResult: (LauncherSearchResult) -> Unit = { result ->
-        keyboardController?.hide()
+        val isDeferredApiCard = result is LauncherSearchResult.RichCard && (
+            result.id.startsWith("wa_pending_") ||
+                result.id.startsWith("wa_waiting_") ||
+                result.id.startsWith("wiki_pending_") ||
+                result.id.startsWith("wiki_waiting_") ||
+                result.id.startsWith("def_pending_") ||
+                result.id.startsWith("def_waiting_") ||
+                result.id.startsWith("fin_pending_") ||
+                result.id.startsWith("fin_waiting_") ||
+                result.id.startsWith("wx_pending_") ||
+                result.id.startsWith("wx_waiting_") ||
+                result.id.startsWith("solar_pending_") ||
+                result.id.startsWith("solar_waiting_")
+            )
+        if (!isDeferredApiCard) {
+            keyboardController?.hide()
+        }
         if (result is LauncherSearchResult.RichCard &&
             result.type == SmartCommandType.LATEX &&
             !result.latexSource.isNullOrBlank()
@@ -92,6 +120,8 @@ fun LauncherSearchOverlay(
             previewLatex = result.latexSource
         } else if (result is LauncherSearchResult.RichCard && result.chart != null) {
             previewChart = result.chart
+        } else if (result is LauncherSearchResult.RichCard && result.qrMatrix != null) {
+            previewQr = (result.rawInput ?: result.subtitle) to result.qrMatrix
         } else {
             onResultClick(result)
         }
@@ -99,8 +129,8 @@ fun LauncherSearchOverlay(
 
     LaunchedEffect(Unit) {
         var requested = false
-        for (attempt in 1..5) {
-            delay(if (attempt == 1) 50L else 80L)
+        for (attempt in 0 until 6) {
+            if (attempt > 0) withFrameNanos { }
             try {
                 focusRequester.requestFocus()
                 requested = true
@@ -109,6 +139,12 @@ fun LauncherSearchOverlay(
         }
         if (requested) {
             keyboardController?.show()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            keyboardController?.hide()
         }
     }
 
@@ -194,7 +230,19 @@ fun LauncherSearchOverlay(
                                     keyboardController?.hide()
                                     onAppLongPress(result.app)
                                 }
-                            } else null
+                            } else null,
+                            onExpandToLatexStudio = onExpandToLatexStudio?.let { cb ->
+                                { src ->
+                                    keyboardController?.hide()
+                                    cb(src)
+                                }
+                            },
+                            onExpandToNotebook = onExpandToNotebook?.let { cb ->
+                                { expr ->
+                                    keyboardController?.hide()
+                                    cb(expr)
+                                }
+                            }
                         )
                     }
                 }
@@ -252,36 +300,54 @@ fun LauncherSearchOverlay(
                                 color = colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                             )
                         }
+                        val handleSearchSubmit = {
+                            if (!onSearchSubmit()) {
+                                // Contact searches are explicit with `@`; Enter selects their top-ranked match.
+                                // The `call` command (or customized prefix) still requires exactly one nickname match.
+                                val trimmedQuery = query.trim()
+                                val explicitCall = trimmedQuery.contains(' ') &&
+                                    results.count { it is LauncherSearchResult.ContactCall } == 1
+                                val explicitContactLookup = trimmedQuery.startsWith("@") &&
+                                    trimmedQuery.drop(1).isNotBlank()
+                                val target = results.firstOrNull {
+                                    it.isEnterEligible && (it !is LauncherSearchResult.ContactCall || explicitCall || explicitContactLookup)
+                                }
+                                target?.let { activateResult(it) }
+                            }
+                        }
                         BasicTextField(
                             value = query,
-                            onValueChange = onQueryChange,
+                            onValueChange = { next ->
+                                if (!isCodeInput && next.length == query.length + 1 && next.contains('\n')) {
+                                    handleSearchSubmit()
+                                } else if (!isCodeInput && next.contains('\n')) {
+                                    onQueryChange(next.replace('\n', ' '))
+                                } else {
+                                    onQueryChange(next)
+                                }
+                            },
                             textStyle = inputTextStyle,
                             cursorBrush = SolidColor(colorScheme.primary),
                             singleLine = false,
-                            maxLines = 4,
+                            maxLines = if (isCodeInput) 4 else 1,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(
-                                onSearch = {
-                                    if (onSearchSubmit()) {
-                                        keyboardController?.hide()
-                                    } else {
-                                        // Contact searches are explicit with `@`; Enter selects their top-ranked match.
-                                        // The `call` command (or customized prefix) still requires exactly one nickname match.
-                                        val trimmedQuery = query.trim()
-                                        val explicitCall = trimmedQuery.contains(' ') &&
-                                            results.count { it is LauncherSearchResult.ContactCall } == 1
-                                        val explicitContactLookup = trimmedQuery.startsWith("@") &&
-                                            trimmedQuery.drop(1).isNotBlank()
-                                        val target = results.firstOrNull {
-                                            it.isEnterEligible && (it !is LauncherSearchResult.ContactCall || explicitCall || explicitContactLookup)
-                                        }
-                                        target?.let { activateResult(it) }
-                                    }
-                                }
+                                onSearch = { handleSearchSubmit() }
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .focusRequester(focusRequester)
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown &&
+                                        (event.key == Key.Enter || event.key == Key.NumPadEnter) &&
+                                        !event.isShiftPressed
+                                    ) {
+                                        handleSearchSubmit()
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
                         )
                     }
 
@@ -314,6 +380,14 @@ fun LauncherSearchOverlay(
             ChartPreviewDialog(
                 chart = chart,
                 onDismiss = { previewChart = null }
+            )
+        }
+
+        previewQr?.let { (payload, matrix) ->
+            QrPreviewDialog(
+                payload = payload,
+                matrix = matrix,
+                onDismiss = { previewQr = null }
             )
         }
     }

@@ -30,10 +30,23 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.Functions
+import androidx.compose.material.icons.filled.OpenInFull
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -82,6 +95,8 @@ import com.pallas.launcher.domain.search.SmartCommandType
 import com.pallas.launcher.ui.apps.AppIconImage
 import com.pallas.launcher.ui.components.LatexFormula
 import com.pallas.launcher.ui.components.MathChartCanvas
+import com.pallas.launcher.ui.components.QrCodeCanvas
+import com.pallas.launcher.ui.theme.LauncherFonts
 import com.pallas.launcher.ui.theme.LauncherTypography
 import com.pallas.launcher.ui.theme.LocalLauncherColors
 
@@ -92,10 +107,13 @@ fun SearchResultItemView(
     isFirst: Boolean,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    onExpandToLatexStudio: ((String) -> Unit)? = null,
+    onExpandToNotebook: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
 
     val titleStyle = if (isFirst) {
         LauncherTypography.searchResultTitle.copy(fontWeight = FontWeight.SemiBold)
@@ -203,7 +221,18 @@ fun SearchResultItemView(
             }
 
             is LauncherSearchResult.RichCard -> {
-                CommandLeadingIcon(result.type)
+                if (result.colorSwatchArgb != null) {
+                    val swatchColor = Color(result.colorSwatchArgb)
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(swatchColor)
+                            .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.6f), RoundedCornerShape(7.dp))
+                    )
+                } else {
+                    CommandLeadingIcon(result.type)
+                }
                 Spacer(modifier = Modifier.width(14.dp))
 
                 if (result.isLoading) {
@@ -234,54 +263,139 @@ fun SearchResultItemView(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             val isMathTitle = result.type == SmartCommandType.MATH_STATS
+                            val isEditorialTitle = result.type == SmartCommandType.WIKI || result.type == SmartCommandType.DEFINE
                             Text(
                                 text = result.title,
-                                style = if (isMathTitle) {
-                                    MaterialTheme.typography.labelLarge.copy(
+                                style = when {
+                                    isMathTitle -> MaterialTheme.typography.labelLarge.copy(
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Medium
                                     )
-                                } else {
-                                    MaterialTheme.typography.labelLarge
-                                },
-                                color = colorScheme.onSurfaceVariant,
-                                softWrap = true,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            result.badgeText?.let { badge ->
-                                val badgeColor = when (result.isBadgePositive) {
-                                    true -> colorScheme.primary.copy(alpha = 0.12f)
-                                    false -> colorScheme.errorContainer.copy(alpha = 0.65f)
-                                    null -> colorScheme.surfaceContainerHighest
-                                }
-                                val borderColor = when (result.isBadgePositive) {
-                                    true -> colorScheme.primary.copy(alpha = 0.28f)
-                                    false -> colorScheme.error.copy(alpha = 0.28f)
-                                    null -> colorScheme.outlineVariant.copy(alpha = 0.4f)
-                                }
-                                val textColor = when (result.isBadgePositive) {
-                                    true -> colorScheme.primary
-                                    false -> colorScheme.onErrorContainer
-                                    null -> colorScheme.onSurfaceVariant
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(5.dp),
-                                    color = badgeColor,
-                                    border = BorderStroke(1.dp, borderColor),
-                                    modifier = Modifier.padding(start = 8.dp)
-                                ) {
-                                    Text(
-                                        text = badge,
-                                        style = LauncherTypography.badge.copy(
-                                            fontSize = 10.sp,
-                                            letterSpacing = 0.3.sp
-                                        ),
-                                        color = textColor,
-                                        maxLines = 1,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    isEditorialTitle -> MaterialTheme.typography.titleMedium.copy(
+                                        fontFamily = LauncherFonts.serif,
+                                        fontWeight = FontWeight.SemiBold
                                     )
+                                    else -> MaterialTheme.typography.labelLarge
+                                },
+                                color = if (isEditorialTitle) colorScheme.onSurface else colorScheme.onSurfaceVariant,
+                                softWrap = true,
+                                modifier = Modifier.weight(1f, fill = true)
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                result.badgeText?.let { badge ->
+                                    val badgeColor = when (result.isBadgePositive) {
+                                        true -> colorScheme.primary.copy(alpha = 0.12f)
+                                        false -> colorScheme.errorContainer.copy(alpha = 0.65f)
+                                        null -> colorScheme.surfaceContainerHighest
+                                    }
+                                    val borderColor = when (result.isBadgePositive) {
+                                        true -> colorScheme.primary.copy(alpha = 0.28f)
+                                        false -> colorScheme.error.copy(alpha = 0.28f)
+                                        null -> colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                    }
+                                    val textColor = when (result.isBadgePositive) {
+                                        true -> colorScheme.primary
+                                        false -> colorScheme.onErrorContainer
+                                        null -> colorScheme.onSurfaceVariant
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(5.dp),
+                                        color = badgeColor,
+                                        border = BorderStroke(1.dp, borderColor),
+                                        modifier = Modifier.padding(start = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = badge,
+                                            style = LauncherTypography.badge.copy(
+                                                fontSize = 10.sp,
+                                                letterSpacing = 0.3.sp
+                                            ),
+                                            color = textColor,
+                                            maxLines = 1,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+
+                                if (!result.copyText.isNullOrBlank()) {
+                                    IconButton(
+                                        onClick = {
+                                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                            cm?.setPrimaryClip(ClipData.newPlainText(result.title, result.copyText))
+                                            Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                                        },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = "Copy",
+                                            tint = colorScheme.primary,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
+
+                                if (result.type == SmartCommandType.LATEX && !result.latexSource.isNullOrBlank() && onExpandToLatexStudio != null) {
+                                    IconButton(
+                                        onClick = { onExpandToLatexStudio(result.rawInput ?: result.latexSource) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.OpenInFull,
+                                            contentDescription = "Expand in LaTeX Studio",
+                                            tint = colorScheme.primary,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
+
+                                if (result.type == SmartCommandType.MATH_STATS && onExpandToNotebook != null) {
+                                    IconButton(
+                                        onClick = { onExpandToNotebook(result.rawInput ?: result.title) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.OpenInFull,
+                                            contentDescription = "Expand in Computational Notebook",
+                                            tint = colorScheme.primary,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
                                 }
                             }
+                        }
+
+                        if ((result.type == SmartCommandType.WIKI || result.type == SmartCommandType.DEFINE) && result.subtitle.isNotEmpty()) {
+                            Text(
+                                text = result.subtitle,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colorScheme.primary.copy(alpha = 0.85f),
+                                softWrap = true
+                            )
+                        }
+
+                        if (!result.bodyText.isNullOrBlank()) {
+                            Text(
+                                text = result.bodyText,
+                                style = if (result.type == SmartCommandType.EMI || result.type == SmartCommandType.CALENDAR) {
+                                    MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = 18.sp
+                                    )
+                                } else {
+                                    MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 13.5.sp,
+                                        lineHeight = 19.sp
+                                    )
+                                },
+                                color = colorScheme.onSurface.copy(alpha = 0.92f),
+                                maxLines = if (result.type == SmartCommandType.CALENDAR) 16 else 6,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
                         }
 
                         if (result.primaryValue.isNotEmpty()) {
@@ -431,6 +545,40 @@ fun SearchResultItemView(
                             }
                         }
 
+                        if (result.colorSwatchArgb != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(26.dp)
+                                    .padding(vertical = 3.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(result.colorSwatchArgb))
+                                    .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            )
+                        }
+
+                        if (result.qrMatrix != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(164.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.White)
+                                        .padding(6.dp)
+                                ) {
+                                    QrCodeCanvas(
+                                        matrix = result.qrMatrix,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+
                         if (result.chart != null) {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
@@ -451,7 +599,7 @@ fun SearchResultItemView(
                             }
                         }
 
-                        if (result.subtitle.isNotEmpty()) {
+                        if (result.subtitle.isNotEmpty() && result.type != SmartCommandType.WIKI && result.type != SmartCommandType.DEFINE) {
                             Text(
                                 text = result.subtitle,
                                 style = LauncherTypography.searchResultSubtitle.copy(lineHeight = 18.sp),
@@ -474,14 +622,19 @@ fun SearchResultItemView(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val details = listOf(result.contactName, result.phoneNumber).filter { it.isNotBlank() }.joinToString(" • ")
-                    Text(
-                        text = details,
-                        style = LauncherTypography.searchResultSubtitle,
-                        color = colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    val details = listOfNotNull(
+                        result.contactName.takeIf { it.isNotBlank() && !it.equals(result.nickname, ignoreCase = true) },
+                        result.phoneNumber.takeIf { it.isNotBlank() }
+                    ).joinToString(" • ")
+                    if (details.isNotEmpty()) {
+                        Text(
+                            text = details,
+                            style = LauncherTypography.searchResultSubtitle,
+                            color = colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -510,6 +663,24 @@ private fun CommandLeadingIcon(type: SmartCommandType) {
                 maxLines = 1,
                 color = colorScheme.primary
             )
+        } else if (type == SmartCommandType.WIKI) {
+            Text(
+                text = "W",
+                fontFamily = LauncherFonts.serif,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                maxLines = 1,
+                color = colorScheme.primary
+            )
+        } else if (type == SmartCommandType.DEFINE) {
+            Text(
+                text = "Aa",
+                fontFamily = LauncherFonts.serif,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                maxLines = 1,
+                color = colorScheme.primary
+            )
         } else {
             val icon = when (type) {
                 SmartCommandType.ALARM -> Icons.Default.Alarm
@@ -521,8 +692,20 @@ private fun CommandLeadingIcon(type: SmartCommandType) {
                 SmartCommandType.FINANCE -> Icons.AutoMirrored.Filled.ShowChart
                 SmartCommandType.WEATHER -> Icons.Default.Cloud
                 SmartCommandType.SOLAR -> Icons.Default.WbSunny
+                SmartCommandType.WORLD_TIME -> Icons.Default.Public
+                SmartCommandType.DATE_ARITHMETIC -> Icons.Default.DateRange
+                SmartCommandType.NOTE -> Icons.Default.EditNote
+                SmartCommandType.QR -> Icons.Default.QrCode2
+                SmartCommandType.COLOR_BASE -> Icons.Default.Palette
+                SmartCommandType.EMI -> Icons.Default.AccountBalance
+                SmartCommandType.FOCUS -> Icons.Default.CenterFocusStrong
+                SmartCommandType.FILE -> Icons.Default.Description
+                SmartCommandType.CALENDAR -> Icons.Default.Event
+                SmartCommandType.MACRO -> Icons.Default.Bolt
+                SmartCommandType.HARDWARE -> Icons.Default.FlashlightOn
+                SmartCommandType.APP_SEARCH -> Icons.Default.Search
                 SmartCommandType.SETTINGS -> Icons.Default.Settings
-                SmartCommandType.LATEX -> Icons.Default.Functions
+                SmartCommandType.LATEX, SmartCommandType.WIKI, SmartCommandType.DEFINE -> Icons.Default.Functions
             }
             Icon(
                 imageVector = icon,

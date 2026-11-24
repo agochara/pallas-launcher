@@ -24,6 +24,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -46,13 +48,16 @@ class AppRepository(
     val rawInstalledApps: StateFlow<List<AppItem>> = _rawInstalledApps.asStateFlow()
 
     val installedApps: StateFlow<List<AppItem>> = if (settingsRepository != null) {
-        combine(_rawInstalledApps, settingsRepository.settings) { apps, settings ->
-            if (settings.hiddenApps.isEmpty()) {
+        combine(
+            _rawInstalledApps,
+            settingsRepository.settings.map { it.hiddenApps }.distinctUntilChanged()
+        ) { apps, hiddenApps ->
+            if (hiddenApps.isEmpty()) {
                 apps
             } else {
                 apps.filterNot { app ->
-                    settings.hiddenApps.contains(app.uniqueKey) ||
-                            settings.hiddenApps.contains(app.packageName)
+                    hiddenApps.contains(app.uniqueKey) ||
+                        hiddenApps.contains(app.packageName)
                 }
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
@@ -119,6 +124,8 @@ class AppRepository(
     }
 
     fun unregister() {
+        reloadJob?.cancel()
+        reloadJob = null
         launcherAppsCallback?.let { launcherApps.unregisterCallback(it) }
         launcherAppsCallback = null
     }

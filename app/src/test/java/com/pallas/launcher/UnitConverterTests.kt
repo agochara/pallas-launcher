@@ -297,4 +297,89 @@ class UnitConverterTests {
         val pairCard = cmdPair.immediateResults.single() as LauncherSearchResult.RichCard
         assertEquals("EUR/USD", pairCard.badgeText)
     }
+
+    @Test
+    fun currencyAliasesAmountlessQueriesAndSupportedListWork() {
+        val thbInr = UnitConverterEngine.evaluate("thb to inr", false)
+        assertNotNull(thbInr)
+        assertTrue(thbInr!!.isCurrency)
+        assertTrue(thbInr.title.contains("THB/INR"))
+        assertTrue(thbInr.primaryValue.contains("1 THB"))
+        assertTrue(thbInr.primaryValue.contains("INR"))
+
+        val bahtRs = UnitConverterEngine.evaluate("baht to rs", false)
+        assertNotNull(bahtRs)
+        assertTrue(bahtRs!!.isCurrency)
+        assertTrue(bahtRs.primaryValue.contains("INR"))
+
+        val bhatRupee = UnitConverterEngine.evaluate("bhat to rupee", false)
+        assertNotNull(bhatRupee)
+        assertTrue(bhatRupee!!.isCurrency)
+        assertTrue(bhatRupee.primaryValue.contains("INR"))
+
+        val yenDollar = UnitConverterEngine.evaluate("yen to dollar", false)
+        assertNotNull(yenDollar)
+        assertTrue(yenDollar!!.isCurrency)
+        assertTrue(yenDollar.primaryValue.contains("USD"))
+
+        val poundInr = UnitConverterEngine.evaluate("pound to inr", false)
+        assertNotNull(poundInr)
+        assertTrue(poundInr!!.isCurrency)
+        assertTrue(poundInr.primaryValue.contains("INR"))
+
+        val euroDollar = UnitConverterEngine.evaluate("euro to dollar", false)
+        assertNotNull(euroDollar)
+        assertTrue(euroDollar!!.isCurrency)
+        assertTrue(euroDollar.primaryValue.contains("USD"))
+
+        val yuanInr = UnitConverterEngine.evaluate("yuan to inr", false)
+        assertNotNull(yuanInr)
+        assertTrue(yuanInr!!.isCurrency)
+        assertTrue(yuanInr.primaryValue.contains("INR"))
+
+        val rmbUsd = UnitConverterEngine.evaluate("rmb to usd", false)
+        assertNotNull(rmbUsd)
+        assertTrue(rmbUsd!!.isCurrency)
+        assertTrue(rmbUsd.primaryValue.contains("USD"))
+
+        val francEur = UnitConverterEngine.evaluate("franc to eur", false)
+        assertNotNull(francEur)
+        assertTrue(francEur!!.isCurrency)
+        assertTrue(francEur.primaryValue.contains("EUR"))
+
+        val wonUsd = UnitConverterEngine.evaluate("won to usd", false)
+        assertNotNull(wonUsd)
+        assertTrue(wonUsd!!.isCurrency)
+        assertTrue(wonUsd.primaryValue.contains("USD"))
+
+        val dirhamInr = UnitConverterEngine.evaluate("dirham to inr", false)
+        assertNotNull(dirhamInr)
+        assertTrue(dirhamInr!!.isCurrency)
+        assertTrue(dirhamInr.primaryValue.contains("INR"))
+
+        val leadingRs = UnitConverterEngine.evaluate("rs 500 to usd", false)
+        assertNotNull(leadingRs)
+        assertTrue(leadingRs!!.isCurrency)
+        assertTrue(leadingRs.primaryValue.contains("USD"))
+
+        val convNoTo = UnitConverterEngine.evaluate("thb inr", true)
+        assertNotNull(convNoTo)
+        assertTrue(convNoTo!!.isCurrency)
+        assertTrue(convNoTo.primaryValue.contains("INR"))
+
+        // Mass disambiguation: pounds/lb -> kg stays mass, NOT GBP currency
+        val massPounds = UnitConverterEngine.evaluate("100 pounds to kg", false)
+        assertNotNull(massPounds)
+        assertFalse(massPounds!!.isCurrency)
+        assertTrue(massPounds.primaryValue.endsWith("kg"))
+
+        val massLb = UnitConverterEngine.evaluate("10 lb to kg", false)
+        assertNotNull(massLb)
+        assertFalse(massLb!!.isCurrency)
+        assertTrue(massLb.primaryValue.endsWith("kg"))
+
+        // Supported currencies metadata list
+        val codes = UnitConverterEngine.allSupportedCurrencies().map { it.code }.toSet()
+        assertTrue(codes.containsAll(listOf("USD", "INR", "THB", "JPY", "GBP", "EUR", "CNY", "CHF", "KRW", "AED")))
+    }
 }

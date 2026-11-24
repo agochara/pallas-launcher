@@ -27,6 +27,7 @@ fun ClockHeader(
     timeString: String,
     dateString: String,
     alignment: ClockHorizontalAlignment,
+    showClock: Boolean = true,
     showDate: Boolean,
     onClockClick: () -> Unit,
     onDateClick: () -> Unit,
@@ -35,6 +36,7 @@ fun ClockHeader(
     paddingRightDp: Int = 24,
     paddingTopDp: Int = 24,
     paddingBottomDp: Int = 12,
+    clockDateSpacingDp: Int = 2,
     shadow: Shadow? = null,
     modifier: Modifier = Modifier
 ) {
@@ -78,22 +80,24 @@ fun ClockHeader(
                 bottom = paddingBottomDp.dp
             ),
         horizontalAlignment = horizontalAlignment,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+        verticalArrangement = Arrangement.spacedBy(clockDateSpacingDp.dp)
     ) {
-        Text(
-            text = timeString.ifBlank { "12:00" },
-            style = LauncherTypography.clock.scaled(fontScale).copy(
-                shadow = effectiveShadow
-            ),
-            color = effectiveTextPrimary,
-            textAlign = textAlign,
-            modifier = Modifier
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onClockClick
-                )
-        )
+        if (showClock) {
+            Text(
+                text = timeString.ifBlank { "12:00" },
+                style = LauncherTypography.clock.scaled(fontScale).copy(
+                    shadow = effectiveShadow
+                ),
+                color = effectiveTextPrimary,
+                textAlign = textAlign,
+                modifier = Modifier
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onClockClick
+                    )
+            )
+        }
 
         if (showDate && dateString.isNotBlank()) {
             Text(
@@ -104,6 +108,7 @@ fun ClockHeader(
                 color = effectiveTextSecondary,
                 textAlign = textAlign,
                 modifier = Modifier
+                    .padding(bottom = 4.dp)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,

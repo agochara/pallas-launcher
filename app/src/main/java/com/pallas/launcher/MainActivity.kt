@@ -22,6 +22,8 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
     private var contactsPermissionRequestedAt = 0L
+    private var calendarPermissionRequestedAt = 0L
+    private var filesPermissionRequestedAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,7 +37,14 @@ class MainActivity : ComponentActivity() {
                 ActivityResultContracts.RequestPermission()
             ) { granted ->
                 if (granted) {
-                    viewModel.refreshDeviceContacts()
+                    viewModel.refreshDeviceContacts(force = true)
+                    viewModel.onSearchQueryChanged(viewModel.searchQuery.value)
+                }
+            }
+            val calendarPermissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { granted ->
+                if (granted) {
                     viewModel.onSearchQueryChanged(viewModel.searchQuery.value)
                 }
             }
@@ -86,6 +95,14 @@ class MainActivity : ComponentActivity() {
                         onRequestContactsPermission = {
                             contactsPermissionRequestedAt = android.os.SystemClock.elapsedRealtime()
                             contactsPermissionLauncher.launch(android.Manifest.permission.READ_CONTACTS)
+                        },
+                        onRequestCalendarPermission = {
+                            calendarPermissionRequestedAt = android.os.SystemClock.elapsedRealtime()
+                            calendarPermissionLauncher.launch(android.Manifest.permission.READ_CALENDAR)
+                        },
+                        onRequestFileSearchPermission = {
+                            filesPermissionRequestedAt = android.os.SystemClock.elapsedRealtime()
+                            com.pallas.launcher.platform.LocalFileSearchService.openAllFilesAccessSettings(this)
                         }
                     )
                 }
@@ -95,10 +112,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        val preserveSearch = contactsPermissionRequestedAt != 0L &&
-            android.os.SystemClock.elapsedRealtime() - contactsPermissionRequestedAt < 10_000L
+        val now = android.os.SystemClock.elapsedRealtime()
+        val preserveSearch = (contactsPermissionRequestedAt != 0L && now - contactsPermissionRequestedAt < 10_000L) ||
+            (calendarPermissionRequestedAt != 0L && now - calendarPermissionRequestedAt < 10_000L) ||
+            (filesPermissionRequestedAt != 0L && now - filesPermissionRequestedAt < 60_000L)
         viewModel.onResume(preserveSearch = preserveSearch)
+        if (filesPermissionRequestedAt != 0L && com.pallas.launcher.platform.LocalFileSearchService.hasFileSearchAccess(this)) {
+            viewModel.onSearchQueryChanged(viewModel.searchQuery.value)
+        }
         contactsPermissionRequestedAt = 0L
+        calendarPermissionRequestedAt = 0L
+        filesPermissionRequestedAt = 0L
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -61,11 +63,126 @@ import androidx.compose.ui.semantics.Role
 import com.pallas.launcher.ui.theme.LauncherTypography
 
 /** Outer corners of a grouped card; the rows inside use a much smaller radius -> the M3E "segmented list" look. */
-private val GroupShape = RoundedCornerShape(28.dp)
+private val GroupShape = RoundedCornerShape(24.dp)
 private val InnerShape = RoundedCornerShape(6.dp)
 
 @Composable
 private fun rowContainerColor() = MaterialTheme.colorScheme.surfaceContainerHigh
+
+@Composable
+fun SettingsExpressiveTile(
+    title: String,
+    subtitle: String,
+    icon: ImageVector? = null,
+    symbol: String? = null,
+    containerColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val contentColor = MaterialTheme.colorScheme.contentColorFor(containerColor)
+    Surface(
+        color = containerColor,
+        contentColor = contentColor,
+        shape = RoundedCornerShape(26.dp),
+        modifier = modifier
+            .heightIn(min = 118.dp)
+            .clip(RoundedCornerShape(26.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = contentColor,
+                    modifier = Modifier.size(28.dp)
+                )
+            } else if (!symbol.isNullOrBlank()) {
+                Text(
+                    text = symbol,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = contentColor
+                )
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = contentColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor.copy(alpha = 0.78f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsCompactTile(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    containerColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val contentColor = MaterialTheme.colorScheme.contentColorFor(containerColor)
+    Surface(
+        color = containerColor,
+        contentColor = contentColor,
+        shape = RoundedCornerShape(22.dp),
+        modifier = modifier
+            .heightIn(min = 84.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(22.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = contentColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor.copy(alpha = 0.78f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
 
 // ------------------------------------------------------------------------------------------ top bars
 

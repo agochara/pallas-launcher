@@ -177,11 +177,16 @@ fun TexPreviewDialog(
                 transparentBackground = true
             )
         ) ?: return@withContext null
-        buildPaddedExportBitmap(
-            raw = result.imageBitmap.asAndroidBitmap(),
-            paddingPx = 48,
-            bgArgb = exportBgArgb
-        )
+        val raw = result.imageBitmap.asAndroidBitmap()
+        return@withContext try {
+            buildPaddedExportBitmap(
+                raw = raw,
+                paddingPx = 48,
+                bgArgb = exportBgArgb
+            )
+        } finally {
+            if (!raw.isRecycled) raw.recycle()
+        }
     }
 
     Dialog(
@@ -361,8 +366,9 @@ fun TexPreviewDialog(
                         onClick = {
                             scope.launch {
                                 isExporting = true
+                                var bmp: Bitmap? = null
                                 try {
-                                    val bmp = renderExportBitmap()
+                                    bmp = renderExportBitmap()
                                     if (bmp == null) {
                                         Toast.makeText(context, "Could not render LaTeX image", Toast.LENGTH_SHORT).show()
                                     } else {
@@ -371,6 +377,7 @@ fun TexPreviewDialog(
                                         }
                                     }
                                 } finally {
+                                    if (bmp != null && !bmp.isRecycled) bmp.recycle()
                                     isExporting = false
                                 }
                             }
@@ -391,8 +398,9 @@ fun TexPreviewDialog(
                         onClick = {
                             scope.launch {
                                 isExporting = true
+                                var bmp: Bitmap? = null
                                 try {
-                                    val bmp = renderExportBitmap()
+                                    bmp = renderExportBitmap()
                                     if (bmp == null) {
                                         Toast.makeText(context, "Could not render LaTeX image", Toast.LENGTH_SHORT).show()
                                     } else {
@@ -405,6 +413,7 @@ fun TexPreviewDialog(
                                             }
                                     }
                                 } finally {
+                                    if (bmp != null && !bmp.isRecycled) bmp.recycle()
                                     isExporting = false
                                 }
                             }
@@ -421,8 +430,9 @@ fun TexPreviewDialog(
                         onClick = {
                             scope.launch {
                                 isExporting = true
+                                var bmp: Bitmap? = null
                                 try {
-                                    val bmp = renderExportBitmap()
+                                    bmp = renderExportBitmap()
                                     if (bmp == null) {
                                         Toast.makeText(context, "Could not render LaTeX image", Toast.LENGTH_SHORT).show()
                                     } else {
@@ -435,6 +445,7 @@ fun TexPreviewDialog(
                                             }
                                     }
                                 } finally {
+                                    if (bmp != null && !bmp.isRecycled) bmp.recycle()
                                     isExporting = false
                                 }
                             }

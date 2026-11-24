@@ -14,26 +14,29 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Functions
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,10 +46,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.pallas.launcher.platform.SystemActionsManager
 import com.pallas.launcher.ui.settings.SettingsSubpage
+import com.pallas.launcher.ui.settings.SettingsViewModel
+import com.pallas.launcher.ui.settings.components.SettingsCompactTile
+import com.pallas.launcher.ui.settings.components.SettingsExpressiveTile
 import com.pallas.launcher.ui.settings.components.SettingsGroup
 import com.pallas.launcher.ui.settings.components.SettingsLargeTopBar
 import com.pallas.launcher.ui.settings.components.SettingsNavRow
@@ -55,6 +62,7 @@ import com.pallas.launcher.ui.settings.components.SettingsSectionHeader
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainSettingsPage(
+    viewModel: SettingsViewModel,
     onNavigate: (SettingsSubpage) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
@@ -62,6 +70,8 @@ fun MainSettingsPage(
     val context = LocalContext.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val colorScheme = MaterialTheme.colorScheme
+    val settings by viewModel.settings.collectAsState()
+    val focusState by viewModel.focusState.collectAsState()
 
     val versionName = remember(context) {
         try {
@@ -71,14 +81,13 @@ fun MainSettingsPage(
                 @Suppress("DEPRECATION")
                 context.packageManager.getPackageInfo(context.packageName, 0)
             }
-            pi.versionName ?: "1.0.0"
+            pi.versionName ?: "3.0.0"
         } catch (e: Exception) {
-            "1.0.0"
+            "3.0.0"
         }
     }
 
     var isDefault by remember { mutableStateOf(SystemActionsManager.isDefaultLauncher(context)) }
-
     LifecycleResumeEffect(Unit) {
         isDefault = SystemActionsManager.isDefaultLauncher(context)
         onPauseOrDispose { }
@@ -88,7 +97,7 @@ fun MainSettingsPage(
         modifier = modifier
             .fillMaxSize()
             .nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = colorScheme.surface,
         topBar = { SettingsLargeTopBar(title = "Settings", scrollBehavior = scrollBehavior, onClose = onDismiss) }
     ) { innerPadding ->
         LazyColumn(
@@ -97,165 +106,233 @@ fun MainSettingsPage(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // "Make Default" Action Banner
-            item {
-                Surface(
-                    color = if (isDefault) colorScheme.surfaceContainerHigh else colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(28.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Row(
+            if (!isDefault) {
+                item {
+                    Surface(
+                        color = colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(26.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
                         Row(
-                            modifier = Modifier.weight(1f).padding(end = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = if (isDefault) Icons.Default.CheckCircle else Icons.Default.Home,
-                                contentDescription = null,
-                                tint = if (isDefault) colorScheme.primary else colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(28.dp)
-                            )
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Column {
-                                Text(
-                                    text = "Default Launcher",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isDefault) colorScheme.onSurface else colorScheme.onPrimaryContainer
+                            Row(
+                                modifier = Modifier.weight(1f).padding(end = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Home,
+                                    contentDescription = null,
+                                    tint = colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(26.dp)
                                 )
-                                Text(
-                                    text = if (isDefault) "Pallas is your default launcher" else "Set Pallas as your default home app",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isDefault) colorScheme.onSurfaceVariant else colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                )
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Column {
+                                    Text(
+                                        text = "Set Default Home",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = colorScheme.onPrimaryContainer
+                                    )
+                                    Text(
+                                        text = "Use Pallas as your launcher",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                    )
+                                }
                             }
-                        }
-
-                        if (!isDefault) {
                             Button(
-                                onClick = {
-                                    SystemActionsManager.requestSetDefaultLauncher(context)
-                                },
+                                onClick = { SystemActionsManager.requestSetDefaultLauncher(context) },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = colorScheme.primary,
                                     contentColor = colorScheme.onPrimary
                                 ),
                                 shape = RoundedCornerShape(14.dp)
                             ) {
-                                Text("Make Default", fontWeight = FontWeight.Bold)
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = {
-                                    SystemActionsManager.requestSetDefaultLauncher(context)
-                                },
-                                shape = RoundedCornerShape(14.dp)
-                            ) {
-                                Text("Change", style = MaterialTheme.typography.labelLarge)
+                                Text("Enable", fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
                 }
             }
 
+            // Pallas Workspace — visually distinct 2x2 Expressive Square/Tile Grid
             item {
-                SettingsGroup(modifier = Modifier.padding(top = 8.dp)) {
+                SettingsSectionHeader("Workspace")
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        SettingsExpressiveTile(
+                            title = "Guide",
+                            subtitle = "Reference & syntax",
+                            symbol = "ƒ",
+                            containerColor = colorScheme.primaryContainer,
+                            onClick = { onNavigate(SettingsSubpage.MATH_MANUAL) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        SettingsExpressiveTile(
+                            title = "World Atlas",
+                            subtitle = "Offline map",
+                            icon = Icons.Default.Public,
+                            containerColor = colorScheme.secondaryContainer,
+                            onClick = { onNavigate(SettingsSubpage.WORLD_ATLAS) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        SettingsExpressiveTile(
+                            title = "LaTeX Studio",
+                            subtitle = "Typeset & export",
+                            icon = Icons.Default.Description,
+                            containerColor = colorScheme.tertiaryContainer,
+                            onClick = { onNavigate(SettingsSubpage.LATEX_STUDIO) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        SettingsExpressiveTile(
+                            title = "Notebook",
+                            subtitle = "Math cells & plots",
+                            icon = Icons.Default.Terminal,
+                            containerColor = colorScheme.surfaceContainerHighest,
+                            onClick = { onNavigate(SettingsSubpage.NOTEBOOK) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
+            // Modes & Automation — compact side-by-side M3E tiles
+            item {
+                SettingsSectionHeader("Modes & Automation")
+                val activeFocus = if (focusState.isActive) {
+                    settings.focusProfiles.firstOrNull { it.id == focusState.activeProfileId }
+                } else null
+                val focusSub = if (activeFocus != null) {
+                    "Active: ${activeFocus.name}"
+                } else {
+                    val count = settings.focusProfiles.size
+                    "$count profile${if (count == 1) "" else "s"}"
+                }
+                val scheduledCount = settings.macros.count { it.scheduleEnabled }
+                val macroSub = buildString {
+                    append("${settings.macros.size} routine${if (settings.macros.size == 1) "" else "s"}")
+                    if (scheduledCount > 0) append(" • $scheduledCount sched.")
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    SettingsCompactTile(
+                        title = "Focus Mode",
+                        subtitle = focusSub,
+                        icon = Icons.Default.CenterFocusStrong,
+                        containerColor = if (activeFocus != null) colorScheme.primaryContainer else colorScheme.surfaceContainerHigh,
+                        onClick = { onNavigate(SettingsSubpage.FOCUS_MODE) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    SettingsCompactTile(
+                        title = "Macros",
+                        subtitle = macroSub,
+                        icon = Icons.Default.Bolt,
+                        containerColor = colorScheme.surfaceContainerHigh,
+                        onClick = { onNavigate(SettingsSubpage.MACROS) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            // Clean Categorized Settings Groups
+            item {
+                SettingsSectionHeader("Home & Look")
+                SettingsGroup {
                     SettingsNavRow(
                         title = "Appearance",
-                        subtitle = "Theme, wallpaper scrim, status bar, text size",
+                        subtitle = "Theme, wallpaper scrim, status bar, type scale",
                         icon = Icons.Default.Palette,
                         containerColor = colorScheme.primaryContainer,
                         onClick = { onNavigate(SettingsSubpage.APPEARANCE) }
                     )
                     SettingsNavRow(
                         title = "Clock & Date",
-                        subtitle = "Position, alignment, 24-hour time, date, battery",
+                        subtitle = "Placement, alignment, format, battery",
                         icon = Icons.Default.Schedule,
                         containerColor = colorScheme.secondaryContainer,
                         onClick = { onNavigate(SettingsSubpage.CLOCK_DATE) }
                     )
                     SettingsNavRow(
                         title = "Screens & Apps",
-                        subtitle = "Manage screens, reorder apps, hidden apps",
+                        subtitle = "Home screens, order, hidden apps",
                         icon = Icons.Default.GridView,
                         containerColor = colorScheme.tertiaryContainer,
                         onClick = { onNavigate(SettingsSubpage.SCREENS_APPS) }
                     )
+                }
+
+                SettingsSectionHeader("Interaction")
+                SettingsGroup {
                     SettingsNavRow(
                         title = "Gestures",
-                        subtitle = "Swipe actions, app list rail",
+                        subtitle = "Swipes, double tap, alphabet edge rail",
                         icon = Icons.Default.TouchApp,
                         containerColor = colorScheme.secondaryContainer,
                         onClick = { onNavigate(SettingsSubpage.GESTURES) }
                     )
                     SettingsNavRow(
                         title = "Search",
-                        subtitle = "Web engine, smart commands, weather, aliases & contacts",
+                        subtitle = "Engine, commands, triggers, aliases, contacts",
                         icon = Icons.Default.Search,
                         containerColor = colorScheme.primaryContainer,
                         onClick = { onNavigate(SettingsSubpage.SEARCH) }
                     )
-                    SettingsNavRow(
-                        title = "Math & Computational Engine Guide",
-                        subtitle = "Functions, live commands, math & LaTeX cheatsheets",
-                        icon = Icons.Default.Functions,
-                        containerColor = colorScheme.secondaryContainer,
-                        onClick = { onNavigate(SettingsSubpage.MATH_MANUAL) }
-                    )
+                }
+
+                SettingsSectionHeader("System")
+                SettingsGroup {
                     SettingsNavRow(
                         title = "Backup & Restore",
-                        subtitle = "Export or import your launcher setup as a JSON file",
+                        subtitle = "Export or import setup JSON",
                         icon = Icons.Default.Save,
                         containerColor = colorScheme.tertiaryContainer,
                         onClick = { onNavigate(SettingsSubpage.BACKUP) }
                     )
-                }
-
-                SettingsSectionHeader("About")
-                SettingsGroup {
-                    Surface(
-                        color = colorScheme.surfaceContainerHigh,
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                                Text(
-                                    text = "Pallas Launcher",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "A minimalist, fast Android launcher",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Text(
-                                text = "v$versionName",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                    if (isDefault) {
+                        SettingsNavRow(
+                            title = "Default Launcher",
+                            subtitle = "Pallas",
+                            icon = Icons.Default.Home,
+                            containerColor = colorScheme.surfaceContainerHighest,
+                            onClick = { SystemActionsManager.requestSetDefaultLauncher(context) }
+                        )
                     }
                 }
-                Spacer(modifier = Modifier.height(32.dp))
+
+                Text(
+                    text = "Pallas Launcher · v$versionName",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 24.dp, bottom = 36.dp)
+                )
             }
         }
     }

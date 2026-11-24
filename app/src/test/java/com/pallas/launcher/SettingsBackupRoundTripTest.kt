@@ -6,11 +6,22 @@ import android.content.SharedPreferences
 import com.pallas.launcher.data.repository.ScreenRepository
 import com.pallas.launcher.data.repository.SettingsBackup
 import com.pallas.launcher.domain.model.CommandConfig
+import com.pallas.launcher.domain.model.EdgeScrubPosition
+import com.pallas.launcher.domain.model.FocusDndMode
+import com.pallas.launcher.domain.model.FocusProfile
 import com.pallas.launcher.domain.model.GestureAction
 import com.pallas.launcher.domain.model.HomeScreen
 import com.pallas.launcher.domain.model.LauncherSettings
+import com.pallas.launcher.domain.model.MacroAudioStream
+import com.pallas.launcher.domain.model.MacroMediaAction
+import com.pallas.launcher.domain.model.MacroRingerMode
+import com.pallas.launcher.domain.model.MacroRoutine
+import com.pallas.launcher.domain.model.MacroStep
+import com.pallas.launcher.domain.model.MacroSystemSetting
+import com.pallas.launcher.domain.model.MacroToggleMode
 import com.pallas.launcher.domain.model.ScreenApp
 import com.pallas.launcher.domain.model.SearchContact
+import com.pallas.launcher.domain.model.ThemeMode
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -57,8 +68,62 @@ class SettingsBackupRoundTripTest {
             }
             GestureAction::class.java.isAssignableFrom(type) -> GestureAction.LaunchApp("com.example.target")
             Set::class.java.isAssignableFrom(type) -> setOf("a.b.c", "d.e.f")
-            List::class.java.isAssignableFrom(type) ->
-                listOf(SearchContact(id = "id-1", nickname = "mom", name = "Mom", phoneNumber = "+911234567890"))
+            List::class.java.isAssignableFrom(type) -> {
+                val elemType = (field.genericType as ParameterizedType).actualTypeArguments[0]
+                when (elemType) {
+                    FocusProfile::class.java -> listOf(
+                        FocusProfile(
+                            id = "fp-1",
+                            name = "sleep",
+                            allowedScreenIds = setOf("scr_1"),
+                            allowedAppKeys = setOf("com.example.clock/Main#0"),
+                            syncDnd = true,
+                            dndMode = FocusDndMode.ALARMS_ONLY,
+                            muteRinger = true,
+                            disabledCommands = setOf("web", "stock")
+                        )
+                    )
+                    MacroRoutine::class.java -> listOf(
+                        MacroRoutine(
+                            id = "m-1",
+                            name = "Routine",
+                            triggerWord = "trig",
+                            steps = listOf(
+                                MacroStep.SetVolume(MacroAudioStream.MEDIA, 30),
+                                MacroStep.SetRingerMode(MacroRingerMode.SILENT),
+                                MacroStep.MediaControl(MacroMediaAction.PLAY_PAUSE),
+                                MacroStep.SetDnd(MacroToggleMode.ON, FocusDndMode.ALARMS_ONLY),
+                                MacroStep.SetFlashlight(MacroToggleMode.OFF),
+                                MacroStep.SetBrightness(40),
+                                MacroStep.OpenSystemSetting(MacroSystemSetting.WIFI),
+                                MacroStep.SetThemeMode(ThemeMode.LIGHT),
+                                MacroStep.SetHideStatusBar(true),
+                                MacroStep.SetShowClock(false),
+                                MacroStep.SetShowDate(false),
+                                MacroStep.SetShowBattery(false),
+                                MacroStep.SetWallpaperScrim(true),
+                                MacroStep.SetEdgeScrubPosition(EdgeScrubPosition.LEFT),
+                                MacroStep.SetAutoLaunchSingleMatch(true),
+                                MacroStep.SwitchHomeScreen("scr_1"),
+                                MacroStep.SetAutoBrightness(false),
+                                MacroStep.SetAutoRotate(true),
+                                MacroStep.SetScreenTimeout(120),
+                                MacroStep.OpenQuickPanel(com.pallas.launcher.domain.model.MacroQuickPanel.INTERNET),
+                                MacroStep.StartTimer(5400, "Session"),
+                                MacroStep.SetAlarm(7, 15),
+                                MacroStep.AppendQuickNote("Check"),
+                                MacroStep.WaitDelay(3),
+                                MacroStep.OpenNotebook
+                            ),
+                            scheduleEnabled = true,
+                            scheduleHour = 21,
+                            scheduleMinute = 45,
+                            scheduleDays = setOf(2, 4, 6)
+                        )
+                    )
+                    else -> listOf(SearchContact(id = "id-1", nickname = "mom", name = "Mom", phoneNumber = "+911234567890"))
+                }
+            }
             Map::class.java.isAssignableFrom(type) -> {
                 val args = (field.genericType as ParameterizedType).actualTypeArguments
                 if (args[1] == String::class.java) {
@@ -269,5 +334,22 @@ class SettingsBackupRoundTripTest {
             .put("screens", JSONObject())
             .toString()
         assertTrue(SettingsBackup.parse(badScreens) is SettingsBackup.ParseResult.Error)
+    }
+
+    @Test
+    fun apiIdleDelaysAreClampedBetweenOneAndFiveSeconds() {
+        val highObj = JSONObject()
+            .put("wolframIdleDelaySeconds", 25)
+            .put("wikiDefIdleDelaySeconds", 99)
+        val highRestored = SettingsBackup.settingsFromJson(highObj)
+        assertEquals(5, highRestored.wolframIdleDelaySeconds)
+        assertEquals(5, highRestored.wikiDefIdleDelaySeconds)
+
+        val lowObj = JSONObject()
+            .put("wolframIdleDelaySeconds", 0)
+            .put("wikiDefIdleDelaySeconds", -3)
+        val lowRestored = SettingsBackup.settingsFromJson(lowObj)
+        assertEquals(1, lowRestored.wolframIdleDelaySeconds)
+        assertEquals(1, lowRestored.wikiDefIdleDelaySeconds)
     }
 }

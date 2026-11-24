@@ -29,10 +29,16 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pallas.launcher.ui.atlas.WorldAtlasScreen
+import com.pallas.launcher.ui.latex.LatexStudioScreen
+import com.pallas.launcher.ui.notebook.NotebookScreen
+import com.pallas.launcher.ui.notes.QuickCaptureInboxScreen
 import com.pallas.launcher.ui.settings.pages.AppearanceSettingsPage
 import com.pallas.launcher.ui.settings.pages.BackupSettingsPage
 import com.pallas.launcher.ui.settings.pages.ClockDateSettingsPage
+import com.pallas.launcher.ui.settings.pages.FocusModeSettingsPage
 import com.pallas.launcher.ui.settings.pages.GesturesSettingsPage
+import com.pallas.launcher.ui.settings.pages.MacrosSettingsPage
 import com.pallas.launcher.ui.settings.pages.MainSettingsPage
 import com.pallas.launcher.ui.settings.pages.MathManualPage
 import com.pallas.launcher.ui.settings.pages.ScreensAppsSettingsPage
@@ -50,19 +56,41 @@ enum class SettingsSubpage {
     GESTURES,
     SEARCH,
     BACKUP,
-    MATH_MANUAL
+    FOCUS_MODE,
+    MACROS,
+    MATH_MANUAL,
+    LATEX_STUDIO,
+    NOTEBOOK,
+    WORLD_ATLAS,
+    QUICK_CAPTURE
 }
 
 @Composable
 fun SettingsScreen(
     onDismiss: () -> Unit,
+    initialSubpage: SettingsSubpage = SettingsSubpage.MAIN,
+    initialGuideTab: Int = 0,
+    initialGuideTopicId: String? = null,
+    initialGuideFormulaTitle: String? = null,
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = viewModel()
 ) {
     val screens by viewModel.screens.collectAsState()
     val currentScreenIndex by viewModel.currentScreenIndex.collectAsState()
 
-    var currentSubpage by rememberSaveable { mutableStateOf(SettingsSubpage.MAIN) }
+    var currentSubpage by rememberSaveable(initialSubpage) { mutableStateOf(initialSubpage) }
+    var guideTab by remember(initialGuideTab) { mutableIntStateOf(initialGuideTab) }
+    var guideTopicId by remember(initialGuideTopicId) { mutableStateOf(initialGuideTopicId) }
+    var guideFormulaTitle by remember(initialGuideFormulaTitle) { mutableStateOf(initialGuideFormulaTitle) }
+
+    fun exitSubpageToMain() {
+        if (currentSubpage == SettingsSubpage.MATH_MANUAL) {
+            guideTab = 0
+            guideTopicId = null
+            guideFormulaTitle = null
+        }
+        currentSubpage = SettingsSubpage.MAIN
+    }
 
     val animProgress = remember { Animatable(0f) }
     var backSwipeEdge by remember { mutableIntStateOf(BackEventCompat.EDGE_LEFT) }
@@ -74,8 +102,10 @@ fun SettingsScreen(
                 backSwipeEdge = backEvent.swipeEdge
                 animProgress.snapTo(backEvent.progress)
             }
-            if (currentSubpage != SettingsSubpage.MAIN) {
-                currentSubpage = SettingsSubpage.MAIN
+            if (currentSubpage == SettingsSubpage.QUICK_CAPTURE) {
+                currentSubpage = SettingsSubpage.SEARCH
+            } else if (currentSubpage != SettingsSubpage.MAIN) {
+                exitSubpageToMain()
             } else {
                 onDismiss()
             }
@@ -127,8 +157,24 @@ fun SettingsScreen(
             when (subpage) {
                 SettingsSubpage.MAIN -> {
                     MainSettingsPage(
+                        viewModel = viewModel,
                         onNavigate = { currentSubpage = it },
                         onDismiss = onDismiss
+                    )
+                }
+                SettingsSubpage.FOCUS_MODE -> {
+                    FocusModeSettingsPage(
+                        viewModel = viewModel,
+                        onBack = { currentSubpage = SettingsSubpage.MAIN }
+                    )
+                }
+                SettingsSubpage.MACROS -> {
+                    MacrosSettingsPage(
+                        viewModel = viewModel,
+                        onRunMacro = { macro ->
+                            viewModel.runMacro(macro) { sub -> currentSubpage = sub }
+                        },
+                        onBack = { currentSubpage = SettingsSubpage.MAIN }
                     )
                 }
                 SettingsSubpage.APPEARANCE -> {
@@ -166,13 +212,37 @@ fun SettingsScreen(
                 SettingsSubpage.SEARCH -> {
                     SearchSettingsPage(
                         viewModel = viewModel,
-                        onBack = { currentSubpage = SettingsSubpage.MAIN }
+                        onBack = { currentSubpage = SettingsSubpage.MAIN },
+                        onOpenQuickCapture = { currentSubpage = SettingsSubpage.QUICK_CAPTURE }
                     )
                 }
                 SettingsSubpage.MATH_MANUAL -> {
                     MathManualPage(
                         viewModel = viewModel,
+                        onBack = { exitSubpageToMain() },
+                        initialTabIndex = guideTab,
+                        initialTopicId = guideTopicId,
+                        initialFormulaTitle = guideFormulaTitle
+                    )
+                }
+                SettingsSubpage.LATEX_STUDIO -> {
+                    LatexStudioScreen(
+                        onClose = { currentSubpage = SettingsSubpage.MAIN }
+                    )
+                }
+                SettingsSubpage.NOTEBOOK -> {
+                    NotebookScreen(
+                        onClose = { currentSubpage = SettingsSubpage.MAIN }
+                    )
+                }
+                SettingsSubpage.WORLD_ATLAS -> {
+                    WorldAtlasScreen(
                         onBack = { currentSubpage = SettingsSubpage.MAIN }
+                    )
+                }
+                SettingsSubpage.QUICK_CAPTURE -> {
+                    QuickCaptureInboxScreen(
+                        onClose = { currentSubpage = SettingsSubpage.SEARCH }
                     )
                 }
             }

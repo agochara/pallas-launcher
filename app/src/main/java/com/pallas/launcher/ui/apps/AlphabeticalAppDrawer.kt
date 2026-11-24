@@ -202,19 +202,25 @@ fun AlphabeticalAppDrawer(
     val activeScores = if (useFrozen) frozenUsageScores else usageScores
 
     val buckets: Map<String, List<AppItem>> = remember(activeApps, activeScores) {
+        data class SortableApp(val app: AppItem, val normLabel: String, val tier: Int)
         activeApps
+            .map { app ->
+                val score = activeScores[app.uniqueKey] ?: activeScores[app.packageName] ?: 0.0
+                SortableApp(
+                    app = app,
+                    normLabel = SearchRanking.normalize(app.label),
+                    tier = (score / HYSTERESIS_MARGIN).toInt()
+                )
+            }
             .sortedWith { a, b ->
-                val scoreA = activeScores[a.uniqueKey] ?: activeScores[a.packageName] ?: 0.0
-                val scoreB = activeScores[b.uniqueKey] ?: activeScores[b.packageName] ?: 0.0
-                val tierA = (scoreA / HYSTERESIS_MARGIN).toInt()
-                val tierB = (scoreB / HYSTERESIS_MARGIN).toInt()
-                if (tierA != tierB) {
-                    tierB.compareTo(tierA)
+                if (a.tier != b.tier) {
+                    b.tier.compareTo(a.tier)
                 } else {
-                    val cmp = SearchRanking.normalize(a.label).compareTo(SearchRanking.normalize(b.label))
-                    if (cmp != 0) cmp else a.label.compareTo(b.label)
+                    val cmp = a.normLabel.compareTo(b.normLabel)
+                    if (cmp != 0) cmp else a.app.label.compareTo(b.app.label)
                 }
             }
+            .map { it.app }
             .groupBy { bucketOf(it) }
     }
 
@@ -337,6 +343,7 @@ fun AlphabeticalAppDrawer(
             nextOpenFromRail = false
         } else {
             pendingScrollTo = null
+            isScrubbing = false
         }
     }
 
@@ -406,13 +413,23 @@ fun AlphabeticalAppDrawer(
         val railHeightPx = slotPx * slotCount
         val containerWidthPx = constraints.maxWidth.toFloat()
         val containerHeightPx = constraints.maxHeight.toFloat()
-        val railBottomPx = containerHeightPx - navBarBottomPx - railBottomMarginPx
+        val baseBottomPx = containerHeightPx - navBarBottomPx - railBottomMarginPx
+        val targetSpanPx = with(density) {
+            (maxHeight * RAIL_HEIGHT_FRACTION).coerceAtMost(maxRailHeight).toPx()
+        }
+        val extraBottomOffsetPx = ((targetSpanPx - railHeightPx) * 0.5f).coerceAtLeast(0f)
+        val extraBottomOffsetDp = with(density) { extraBottomOffsetPx.toDp() }
+        val railBottomPx = baseBottomPx - extraBottomOffsetPx
         val railTopPx = (railBottomPx - railHeightPx).coerceAtLeast(0f)
+        val closedRailBottomPx = baseBottomPx
+        val closedRailTopPx = (baseBottomPx - maxOf(railHeightPx, targetSpanPx)).coerceAtLeast(0f)
 
         val latestSlotPx by rememberUpdatedState(slotPx)
         val latestRailHeightPx by rememberUpdatedState(railHeightPx)
         val latestRailTopPx by rememberUpdatedState(railTopPx)
+        val latestClosedRailTopPx by rememberUpdatedState(closedRailTopPx)
         val latestRailBottomPx by rememberUpdatedState(railBottomPx)
+        val latestClosedRailBottomPx by rememberUpdatedState(closedRailBottomPx)
         val latestContainerWidthPx by rememberUpdatedState(containerWidthPx)
         val latestRailStripWidthPx by rememberUpdatedState(railStripWidthPx)
 
@@ -436,7 +453,9 @@ fun AlphabeticalAppDrawer(
                         } else {
                             startX in (latestContainerWidthPx - latestRailStripWidthPx)..latestContainerWidthPx
                         }
-                        val inVert = startY in latestRailTopPx..latestRailBottomPx
+                        val vertTop = if (latestIsOpen) latestRailTopPx else latestClosedRailTopPx
+                        val vertBottom = if (latestIsOpen) latestRailBottomPx else latestClosedRailBottomPx
+                        val inVert = startY in vertTop..vertBottom
                         if (!inHoriz || !inVert) return@awaitEachGesture
 
                         fun slotFor(localY: Float): String {
@@ -613,13 +632,19 @@ fun AlphabeticalAppDrawer(
                 )
 
                 val idleInk = if (isOpen) colorScheme.onSurface else contrast.resolveSecondaryText(launcherColors.textSecondary)
+                val visualBoxHeightDp = maxOf(railHeightDp, BUBBLE_SIZE)
+                val visualBoxExtraHalfDp = ((visualBoxHeightDp - railHeightDp) * 0.5f).coerceAtLeast(0.dp)
+                val visualBoxBottomMargin = (navBarBottom + RAIL_BOTTOM_MARGIN + extraBottomOffsetDp - visualBoxExtraHalfDp)
+                    .coerceAtLeast(navBarBottom)
+                val visualBoxHeightPx = with(density) { visualBoxHeightDp.toPx() }
+                val railTopInVisualBoxPx = with(density) { visualBoxExtraHalfDp.toPx() }
 
                 Box(
                     modifier = Modifier
                         .align(if (isLeft) Alignment.BottomStart else Alignment.BottomEnd)
-                        .padding(bottom = navBarBottom + RAIL_BOTTOM_MARGIN)
+                        .padding(bottom = visualBoxBottomMargin)
                         .width(RAIL_ZONE_WIDTH)
-                        .height(railHeightDp),
+                        .height(visualBoxHeightDp),
                     contentAlignment = if (isLeft) Alignment.CenterStart else Alignment.CenterEnd
                 ) {
                     // Floating bubble (only shown when drawer is open and scrubbing)
@@ -633,8 +658,8 @@ fun AlphabeticalAppDrawer(
                                     end = if (!isLeft) BUBBLE_EDGE_PADDING else 0.dp
                                 )
                                 .offset {
-                                    val bubbleY = (animatedTouchY - bubbleRadiusPx)
-                                        .coerceIn(0f, (railHeightPx - bubbleRadiusPx * 2f).coerceAtLeast(0f))
+                                    val bubbleY = (railTopInVisualBoxPx + animatedTouchY - bubbleRadiusPx)
+                                        .coerceIn(0f, (visualBoxHeightPx - bubbleRadiusPx * 2f).coerceAtLeast(0f))
                                     val bulge = fisheyeShiftPx * animatedBulge
                                     IntOffset(
                                         x = if (isLeft) bulge.roundToInt() else -bulge.roundToInt(),
@@ -672,7 +697,7 @@ fun AlphabeticalAppDrawer(
                     Box(
                         modifier = Modifier
                             .width(RAIL_STRIP_WIDTH)
-                            .fillMaxHeight(),
+                            .height(railHeightDp),
                         contentAlignment = Alignment.Center
                     ) {
                         if (railVisibilityAlpha > 0.001f) {
